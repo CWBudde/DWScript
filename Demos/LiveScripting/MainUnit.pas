@@ -494,7 +494,7 @@ var
 begin
   SynEditorOptionsContainer := TSynEditorOptionsContainer.Create(nil);
   SynEditorOptionsContainer.Assign(SynEdit);
-  SynEditOptionsDialog.Execute(SynEditorOptionsContainer, nil);
+  SynEditOptionsDialog.Execute(SynEditorOptionsContainer);
   SynEdit.Assign(SynEditorOptionsContainer);
 end;
 
@@ -552,13 +552,8 @@ begin
   // ok, get the compiled "program" from DWS
   if Assigned(FCompiledProgram) then
   begin
-    SourceFile := TSourceFile.Create;
-    try
-      SourceFile.Code := SynEdit.Lines.Text;
-      ScriptPos := TScriptPos.Create(SourceFile, SynEdit.CaretX, SynEdit.CaretY);
-    finally
-      SourceFile.Free;
-    end;
+    SourceFile := FCompiledProgram.SourceList.MainScript.SourceFile;
+    ScriptPos := TScriptPos.Create(SourceFile, SynEdit.CaretY, SynEdit.CaretX);
     Suggestions := TDWSSuggestions.Create(FCompiledProgram, ScriptPos,
       [soNoReservedWords]);
 
