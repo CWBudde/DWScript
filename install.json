@@ -1,0 +1,27 @@
+{
+        "search_pathes": 
+    [
+        {
+            "pathes": "SourceUtils;..\\Libraries\\asmLib;..\\Libraries\\ClassesLib;..\\Libraries\\CryptoLib;..\\Libraries\\DatabaseLib;..\\Libraries\\DocBuilder;..\\Libraries\\GraphicsLib;..\\Libraries\\Indy;..\\Libraries\\Indy;..\\Libraries\\LinqLib;..\\Libraries\\LlvmCodeGen;..\\Libraries\\SimpleServer;..\\Libraries\\SymbolsLib;..\\Libraries\\SynapseLib",
+            "platforms": "Win32;Win64;OSX32"
+        }
+    ],
+    "browsing_pathes": 
+    [
+        {
+            "pathes": "SourceUtils;..\\Libraries\\asmLib;..\\Libraries\\ClassesLib;..\\Libraries\\CryptoLib;..\\Libraries\\DatabaseLib;..\\Libraries\\DocBuilder;..\\Libraries\\GraphicsLib;..\\Libraries\\Indy;..\\Libraries\\Indy;..\\Libraries\\LinqLib;..\\Libraries\\LlvmCodeGen;..\\Libraries\\SimpleServer;..\\Libraries\\SymbolsLib;..\\Libraries\\SynapseLib",
+            "platforms": "Win32;Win64;OSX32"
+        }
+    ],
+
+    "source_folders":
+    [
+        {
+            "folder": "Source",
+            "base": "Source",
+            "recursive": true,
+            "filter": "*;*.*"
+        }
+    ],
+
+}

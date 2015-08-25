@@ -40,3 +40,7 @@ DWS 2.1 is available from the [downloads](http://code.google.com/p/dwscript/down
 There is also now a growing unit test suite, which as of 2.1 ensures a [code coverage](http://code.google.com/p/delphi-code-coverage/) of 76%.
 
 It can be found in the SVN under "branches/stable-2.1".
+
+## Misc. ##
+
+Basic Delphinus-Support added.
