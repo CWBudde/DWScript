@@ -835,6 +835,8 @@ function WhichPowerOfTwo(const v : Int64) : Integer;
 function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
 function SimpleLowerCaseStringHash(const s : UnicodeString) : Cardinal;
 
+function SimpleIntegerHash(x : Cardinal) : Cardinal;
+
 function RawByteStringToScriptString(const s : RawByteString) : UnicodeString; overload; inline;
 procedure RawByteStringToScriptString(const s : RawByteString; var result : UnicodeString); inline; overload;
 procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
@@ -921,6 +923,16 @@ begin
          c:=c+(Ord('a')-Ord('A'));
       Result:=(Result xor c)*16777619;
    end;
+end;
+
+// SimpleIntegerHash
+//
+function SimpleIntegerHash(x : Cardinal) : Cardinal;
+begin
+   // cf. http://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+    x := ((x shr 16) xor x) * $45d9f3b;
+    x := ((x shr 16) xor x) * $45d9f3b;
+    Result := ((x shr 16) xor x);
 end;
 
 // ScriptStringToRawByteString
@@ -3956,7 +3968,9 @@ var
 begin
    if FCount=0 then Exit(-1);
 
-   h:=SimpleStringHash(aName);
+   if aName='' then
+      h:=1
+   else h:=SimpleStringHash(aName);
    i:=h and FHighIndex;
 
    repeat
@@ -4031,7 +4045,9 @@ var
 begin
    if FCount>=FGrowth then Grow;
 
-   h:=SimpleStringHash(aName);
+   if aName='' then
+      h:=1
+   else h:=SimpleStringHash(aName);
    i:=h and FHighIndex;
 
    repeat
