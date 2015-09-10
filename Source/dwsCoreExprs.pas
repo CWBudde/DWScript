@@ -51,7 +51,6 @@ type
          procedure AssignValueAsString(exec : TdwsExecution; const value : UnicodeString); override;
          procedure AssignValueAsScriptObj(exec : TdwsExecution; const value : IScriptObj); override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
 
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
@@ -151,7 +150,7 @@ type
    TExternalVarExpr = class(TVarExpr)
       public
          function IsExternal : Boolean; override;
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
    end;
 
    // Encapsulates a lazy parameter
@@ -163,7 +162,7 @@ type
 
       public
          constructor Create(Prog: TdwsProgram; dataSym : TLazyParamSymbol);
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
 
          function SameDataExpr(expr : TTypedExpr) : Boolean; override;
 
@@ -192,7 +191,7 @@ type
          procedure AssignValueAsString(exec : TdwsExecution; const value : UnicodeString); override;
          procedure AssignValueAsScriptObj(exec : TdwsExecution; const value : IScriptObj); override;
 
-         function  Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
    end;
 
@@ -216,7 +215,7 @@ type
 
          procedure AssignExpr(exec : TdwsExecution; Expr: TTypedExpr); override;
 
-         function  Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
    end;
 
@@ -241,7 +240,7 @@ type
 
          function ScriptPos : TScriptPos; override;
 
-         function  Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          procedure EvalAsString(exec : TdwsExecution; var Result : UnicodeString); override;
 
          property ResSymbol : TResourceStringSymbol read FResSymbol;
@@ -298,7 +297,6 @@ type
          procedure AssignValueAsFloat(exec : TdwsExecution; const value : Double); override;
          procedure AssignValueAsString(exec : TdwsExecution; const value: UnicodeString); override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function EvalAsFloat(exec : TdwsExecution) : Double; override;
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
@@ -332,7 +330,6 @@ type
       public
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
 
-         function  Eval(exec : TdwsExecution) : Variant; override;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
@@ -402,7 +399,6 @@ type
          procedure AssignValueAsString(exec : TdwsExecution; const value: UnicodeString); override;
          procedure AssignValueAsScriptObj(exec : TdwsExecution; const value : IScriptObj); override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function EvalAsFloat(exec : TdwsExecution) : Double; override;
@@ -496,7 +492,6 @@ type
          procedure AssignValueAsString(exec : TdwsExecution; const value: UnicodeString); override;
          procedure AssignValueAsScriptObj(exec : TdwsExecution; const value : IScriptObj); override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
          procedure EvalAsString(exec : TdwsExecution; var Result : UnicodeString); override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
@@ -572,7 +567,7 @@ type
    // returns a dynamic array
    TDynamicArrayDataExpr = class(TPosDataExpr)
       public
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
    end;
 
@@ -726,7 +721,7 @@ type
                             aBase : TTypedExpr; aMapFunc : TFuncPtrExpr);
          destructor Destroy; override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
 
          property MapFuncExpr : TFuncPtrExpr read FMapFuncExpr write FMapFuncExpr;
@@ -833,7 +828,7 @@ type
                             aBase, aIndex, aCount : TTypedExpr);
          destructor Destroy; override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
 
          property IndexExpr : TTypedExpr read FIndexExpr;
@@ -864,7 +859,7 @@ type
                             aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr);
          destructor Destroy; override;
 
-         function  Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
 
          property ItemExpr : TTypedExpr read FItemExpr;
@@ -1148,7 +1143,6 @@ type
       function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
    TVariantXorExpr = class(TVariantBinOpExpr)
-      function Eval(exec : TdwsExecution) : Variant; override;
       procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
    end;
 
@@ -1613,7 +1607,7 @@ type
                             condExpr, trueExpr, falseExpr : TTypedExpr);
          destructor Destroy; override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
 
          property CondExpr : TTypedExpr read FCondExpr write FCondExpr;
@@ -1760,7 +1754,7 @@ type
          constructor Create(Prog: TdwsProgram; Left : TTypedExpr);
          destructor Destroy; override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
          procedure AddCaseCondition(cond : TCaseCondition);
 
@@ -2233,13 +2227,6 @@ begin
    else Result:=TVarExpr.Create(prog, dataSym);
 end;
 
-// Eval
-//
-function TVarExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   EvalAsVariant(exec, Result);
-end;
-
 // EvalAsVariant
 //
 procedure TVarExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
@@ -2626,7 +2613,7 @@ end;
 //
 procedure TVarParentExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
-   Result:=exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr];
+   VarCopySafe(Result, exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr]);
 end;
 
 // EvalAsInteger
@@ -2743,11 +2730,11 @@ begin
    DataPtr[exec].WriteData(dataExpr.DataPtr[exec], Typ.Size);
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TByRefParamExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TByRefParamExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 begin
-   Result:=GetVarParamEval(exec)^;
+   VarCopySafe(Result, GetVarParamEval(exec)^);
 end;
 
 // EvalAsFloat
@@ -2794,11 +2781,11 @@ begin
    expr.EvalAsVariant(exec, DataPtr[exec].AsPVariant(0)^);
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TByRefParentParamExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TByRefParentParamExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 begin
-   Result:=DataPtr[exec].AsVariant[0];
+   VarCopySafe(Result, DataPtr[exec].AsVariant[0]);
 end;
 
 // EvalAsFloat
@@ -2851,9 +2838,9 @@ end;
 // ------------------ TDynamicArrayDataExpr ------------------
 // ------------------
 
-// Eval
+// EvalAsVariant
 //
-function TDynamicArrayDataExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TDynamicArrayDataExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 var
    dyn : IScriptDynArray;
 begin
@@ -2868,7 +2855,7 @@ var
    data : TData;
 begin
    SetLength(data, 1);
-   data[0]:=Eval(exec);
+   EvalAsVariant(exec, data[0]);
    result:=exec.Stack.CreateDataContext(data, 0);
 end;
 
@@ -3100,13 +3087,6 @@ begin
    FBaseExpr.DataPtr[exec].AsString[GetIndex(exec)]:=value;
 end;
 
-// Eval
-//
-function TStaticArrayExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   EvalAsVariant(exec, Result);
-end;
-
 // EvalAsInteger
 //
 function TStaticArrayExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
@@ -3240,15 +3220,6 @@ begin
    Result:=dynArray.AsPVariant(index*FElementSize);
 end;
 
-// Eval
-//
-function TDynamicArrayExpr.Eval(exec : TdwsExecution) : Variant;
-var
-   dyn : IScriptDynArray;
-begin
-   result:=EvalItem(exec, dyn)^;
-end;
-
 // EvalAsInteger
 //
 function TDynamicArrayExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
@@ -3281,7 +3252,7 @@ procedure TDynamicArrayExpr.EvalAsVariant(exec : TdwsExecution; var result : Var
 var
    dyn : IScriptDynArray;
 begin
-   result:=EvalItem(exec, dyn)^;
+   VarCopySafe(result, EvalItem(exec, dyn)^);
 end;
 
 // EvalAsString
@@ -3431,13 +3402,6 @@ end;
 function TRecordExpr.GetIsConstant : Boolean;
 begin
    Result:=BaseExpr.IsConstant;
-end;
-
-// Eval
-//
-function TRecordExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   EvalAsVariant(exec, Result);
 end;
 
 // EvalAsBoolean
@@ -3847,13 +3811,6 @@ begin
            and ObjectExpr.SameDataExpr(TFieldExpr(expr).ObjectExpr);
 end;
 
-// Eval
-//
-function TFieldExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   EvalAsVariant(exec, Result);
-end;
-
 // EvalAsString
 //
 procedure TFieldExpr.EvalAsString(exec : TdwsExecution; var Result : UnicodeString);
@@ -3972,9 +3929,9 @@ begin
    FStackAddr:=dataSym.StackAddr;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TLazyParamExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TLazyParamExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 var
    lazyExpr : TExprBase;
    oldBasePointer: Integer;
@@ -4142,11 +4099,11 @@ begin
    inherited;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TInOpExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TInOpExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
-   Result:=EvalAsBoolean(exec);
+   VarCopySafe(Result, EvalAsBoolean(exec));
 end;
 
 // EvalAsBoolean
@@ -4842,7 +4799,7 @@ var
 begin
    FLeft.EvalAsVariant(exec, lv);
    FRight.EvalAsVariant(exec, rv);
-   Result:=lv*rv;
+   VarCopySafe(Result, lv*rv);
 end;
 
 // ------------------
@@ -5124,7 +5081,14 @@ end;
 procedure TNotVariantExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    FExpr.EvalAsVariant(exec, Result);
-   Result:=not Result;
+   case VarType(Result) of
+      varBoolean :
+         TVarData(Result).VBoolean := not TVarData(Result).VBoolean;
+      varInt64 :
+         TVarData(Result).VInt64 := not TVarData(Result).VInt64;
+   else
+      Result := not Result;
+   end;
 end;
 
 { TIntAndExpr }
@@ -5249,11 +5213,6 @@ end;
 
 { TVariantXorExpr }
 
-function TVariantXorExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   Result := FLeft.Eval(exec) xor FRight.Eval(exec);
-end;
-
 // EvalAsVariant
 //
 procedure TVariantXorExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
@@ -5262,7 +5221,7 @@ var
 begin
    Left.EvalAsVariant(exec, leftVal);
    Right.EvalAsVariant(exec, rightVal);
-   Result:=leftVal xor rightVal;
+   VarCopySafe(Result, leftVal xor rightVal);
 end;
 
 // ------------------
@@ -6000,7 +5959,7 @@ constructor TAssignConstToVariantVarExpr.CreateVal(Prog: TdwsProgram;
       Left : TDataExpr; const rightValue : Variant);
 begin
    inherited Create(Prog, aScriptPos, exec, Left, nil);
-   FRight:=rightValue;
+   VarCopySafe(FRight, rightValue);
 end;
 
 // EvalNoResult
@@ -8247,8 +8206,8 @@ end;
 //
 function TArraySortComparer.CompareValue(index1, index2 : Integer) : Integer;
 begin
-   FExec.Stack.Data[FLeftAddr]:=FData[index1];
-   FExec.Stack.Data[FRightAddr]:=FData[index2];
+   VarCopySafe(FExec.Stack.Data[FLeftAddr], FData[index1]);
+   VarCopySafe(FExec.Stack.Data[FRightAddr], FData[index2]);
    Result:=FFuncPointer.EvalAsInteger(FExec, FFunc);
 end;
 
@@ -8422,14 +8381,14 @@ begin
    FMapFuncExpr.Free;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TArrayMapExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TArrayMapExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 var
    dyn : IScriptDynArray;
 begin
    EvalAsScriptDynArray(exec, dyn);
-   Result:=dyn;
+   VarCopySafe(Result, dyn);
 end;
 
 // EvalAsScriptDynArray
@@ -8804,14 +8763,14 @@ begin
    FCountExpr.Free;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TArrayCopyExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TArrayCopyExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 var
    dyn : IScriptDynArray;
 begin
    EvalAsScriptDynArray(exec, dyn);
-   Result:=dyn;
+   VarCopySafe(Result, dyn);
 end;
 
 // EvalAsScriptDynArray
@@ -8901,11 +8860,11 @@ begin
    FFromIndexExpr.Free;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TArrayIndexOfExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TArrayIndexOfExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
-   Result:=EvalAsInteger(exec);
+   VarCopySafe(Result, EvalAsInteger(exec));
 end;
 
 // EvalAsInteger
@@ -9155,14 +9114,14 @@ begin
    Result:=FScriptPos;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TResourceStringExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TResourceStringExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
    buf : UnicodeString;
 begin
    exec.LocalizeSymbol(FResSymbol, buf);
-   Result:=buf;
+   VarCopySafe(Result, buf);
 end;
 
 // EvalAsString
@@ -9198,18 +9157,22 @@ end;
 // EvalNoResult
 //
 procedure TSwapExpr.EvalNoResult(exec : TdwsExecution);
-var
-   buf : TData;
-   size : Integer;
-   dataPtr0, dataPtr1 : IDataContext;
-   tmp : Variant;
-begin
-   size:=Arg0.Typ.Size;
-   if size=1 then begin
+
+   procedure Swap1;
+   var
+      tmp, tmp2 : Variant;
+   begin
       Arg0.EvalAsVariant(exec, tmp);
-      Arg0.AssignValue(exec, Arg1.Eval(exec));
+      Arg1.EvalAsVariant(exec, tmp2);
+      Arg0.AssignValue(exec, tmp2);
       Arg1.AssignValue(exec, tmp);
-   end else begin
+   end;
+
+   procedure SwapN(size : Integer);
+   var
+      buf : TData;
+      dataPtr0, dataPtr1 : IDataContext;
+   begin
       SetLength(buf, size);
       dataPtr0:=Arg0.DataPtr[exec];
       dataPtr1:=Arg1.DataPtr[exec];
@@ -9217,6 +9180,14 @@ begin
       dataPtr0.WriteData(dataPtr1, size);
       dataPtr1.WriteData(buf, 0, size);
    end;
+
+var
+   size : Integer;
+begin
+   size:=Arg0.Typ.Size;
+   if size=1 then
+      Swap1
+   else SwapN(size);
 end;
 
 // GetSubExpr
@@ -9414,13 +9385,16 @@ begin
    inherited;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TIfThenElseValueExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TIfThenElseValueExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
+var
+   buf : Variant;
 begin
    if FCondExpr.EvalAsBoolean(exec) then
-      Result:=FTrueExpr.Eval(exec)
-   else Result:=FFalseExpr.Eval(exec);
+      FTrueExpr.EvalAsVariant(exec, buf)
+   else FFalseExpr.EvalAsVariant(exec, buf);
+   VarCopySafe(Result, buf);
 end;
 
 // GetIsConstant
@@ -9564,9 +9538,9 @@ begin
    Result:=True;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TExternalVarExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TExternalVarExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 var
    handled : Boolean;
 begin

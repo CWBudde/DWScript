@@ -187,7 +187,7 @@ begin
    src:=@sourceData[sourceAddr];
    dest:=@destData[destAddr];
    while size > 0 do begin
-      VarCopy(dest^, src^);
+      VarCopySafe(dest^, src^);
       Inc(src);
       Inc(dest);
       Dec(size);
@@ -360,7 +360,7 @@ end;
 //
 procedure TDataContext.SetAsVariant(addr : Integer; const value : Variant);
 begin
-   FData[FAddr+addr]:=value;
+   VarCopySafe(FData[FAddr+addr], value);
 end;
 
 // GetAsInteger
@@ -553,7 +553,7 @@ end;
 //
 procedure TDataContext.EvalAsVariant(addr : Integer; var result : Variant);
 begin
-   result:=FData[FAddr+addr];
+   VarCopySafe(result, FData[FAddr+addr]);
 end;
 
 // EvalAsString

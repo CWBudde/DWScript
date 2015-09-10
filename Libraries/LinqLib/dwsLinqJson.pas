@@ -38,7 +38,7 @@ type
    TJsonExpr = class(TTypedExpr)
    public
       function EvalAsJson(exec : TdwsExecution): TdwsJsonValue; virtual; abstract;
-      function Eval(exec : TdwsExecution) : Variant; override;
+      procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
    end;
 
    TJsonFromExpr = class(TJsonExpr)
@@ -111,7 +111,7 @@ type
    public
       constructor Create(base: TJsonExpr; targetFunc: TFuncPtrExpr; compiler: IdwsCompiler; aPos: TScriptPos);
       destructor Destroy; override;
-      function Eval(exec : TdwsExecution): variant; override;
+      procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
    end;
 
 implementation
@@ -192,7 +192,9 @@ end;
 
 { TJsonExpr }
 
-function TJsonExpr.Eval(exec: TdwsExecution): Variant;
+// EvalAsVariant
+//
+procedure TJsonExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    result := BoxedJsonValue(EvalAsJson(exec));
 end;
@@ -212,9 +214,11 @@ end;
 
 function TJsonFromExpr.EvalAsJson(exec: TdwsExecution): TdwsJsonValue;
 var
+   buf : Variant;
    value: IBoxedJsonValue;
 begin
-   value := IUnknown(FBase.Eval(exec)) as IBoxedJsonValue;
+   FBase.EvalAsVariant(exec, buf);
+   value := IUnknown(buf) as IBoxedJsonValue;
    result := value.Value.Clone;
 end;
 
@@ -240,7 +244,7 @@ function TJsonWhereFilter.HalfFilterValue(filter: TTypedExpr; value: TdwsJsonVal
 begin
    if filter is TSqlIdentifier then
       result := value.Items[TSqlIdentifier(filter).Value].Value.AsVariant
-   else result := filter.Eval(exec);
+   else filter.EvalAsVariant(exec, result);
 end;
 
 function TJsonWhereFilter.MatchFilter(filter: TTypedExpr; value: TdwsJsonValue; exec: TdwsExecution): boolean;
@@ -638,7 +642,9 @@ begin
    inherited Destroy;
 end;
 
-function TJsonIntoFilter.Eval(exec: TdwsExecution): variant;
+// EvalAsVariant
+//
+procedure TJsonIntoFilter.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    FAssign.EvalNoResult(exec);
    FInto.EvalAsVariant(exec, result);

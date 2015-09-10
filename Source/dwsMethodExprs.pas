@@ -69,7 +69,7 @@ type
                             BaseExpr: TTypedExpr);
          destructor Destroy; override;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
 
          function MethSym : TMethodSymbol; inline;
 
@@ -94,7 +94,7 @@ type
          function PreCall(exec : TdwsExecution) : TFuncSymbol; override;
 
       public
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    // Call of an interface methods
@@ -157,7 +157,7 @@ type
    // Call to default TObject.Create (which is empty)
    TConstructorStaticDefaultExpr = class(TConstructorStaticExpr)
       public
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    // Instantiates an anonymous class
@@ -299,9 +299,9 @@ begin
    inherited;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TMethodExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TMethodExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
    func : TFuncSymbol;
 begin
@@ -313,7 +313,7 @@ begin
 
          DoEvalCall(exec, func);
 
-         PostCall(exec, Result);
+         PostCall(exec, result);
       finally
          // Remove parameters from stack
          exec.Stack.Pop(ParamSize);
@@ -402,9 +402,9 @@ end;
 // ------------------ TMethodStaticExpr ------------------
 // ------------------
 
-// Eval
+// EvalAsVariant
 //
-function TMethodStaticExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TMethodStaticExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
    scriptObj : Pointer;
    oldSelf : PIScriptObj;
@@ -413,7 +413,7 @@ begin
    oldSelf:=exec.SelfScriptObject;
    try
       exec.SelfScriptObject:=@scriptObj;
-      Result:=inherited Eval(exec);
+      inherited EvalAsVariant(exec, Result);
    finally
       exec.SelfScriptObject:=oldSelf;
       IScriptObj(scriptObj):=nil;
@@ -639,9 +639,9 @@ end;
 // ------------------ TConstructorStaticDefaultExpr ------------------
 // ------------------
 
-// Eval
+// EvalAsVariant
 //
-function TConstructorStaticDefaultExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConstructorStaticDefaultExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
    scriptObj : Pointer;
    oldSelf : PIScriptObj;
@@ -651,7 +651,7 @@ begin
    try
       exec.SelfScriptObject:=@scriptObj;
       DoCreate(exec);
-      Result:=exec.SelfScriptObject^;
+      VarCopySafe(result, exec.SelfScriptObject^);
    finally
       exec.SelfScriptObject:=oldSelf;
       IScriptObj(scriptObj):=nil;

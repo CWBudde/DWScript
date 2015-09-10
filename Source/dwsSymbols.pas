@@ -168,7 +168,7 @@ type
       public
          function  IsConstant : Boolean; inline;
 
-         function  Eval(exec : TdwsExecution) : Variant; virtual; abstract;
+         function  Eval(exec : TdwsExecution) : Variant; deprecated;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; virtual; abstract;
          function  EvalAsBoolean(exec : TdwsExecution) : Boolean; virtual; abstract;
          function  EvalAsFloat(exec : TdwsExecution) : Double; virtual; abstract;
@@ -1690,7 +1690,7 @@ type
          FExternalObject : TObject;
          FUserObject : TObject;
 
-         FExceptionObjectStack : TSimpleStack<Variant>;
+         FExceptionObjectStack : TSimpleStack<IScriptObj>;
          FLastScriptError : TExprBase;
          FLastScriptCallStack : TdwsExprLocationArray;
 
@@ -1759,7 +1759,7 @@ type
 
          property LastScriptError : TExprBase read FLastScriptError;
          property LastScriptCallStack : TdwsExprLocationArray read FLastScriptCallStack;
-         property ExceptionObjectStack : TSimpleStack<Variant> read FExceptionObjectStack;
+         property ExceptionObjectStack : TSimpleStack<IScriptObj> read FExceptionObjectStack;
 
          procedure EnterExceptionBlock(var exceptObj : IScriptObj); virtual;
          procedure LeaveExceptionBlock;
@@ -1989,8 +1989,10 @@ begin
 end;
 
 procedure TExprBase.EvalNoResult(exec : TdwsExecution);
+var
+   buf : Variant;
 begin
-   Eval(exec);
+   EvalAsVariant(exec, buf);
 end;
 
 // GetIsConstant
@@ -2005,6 +2007,13 @@ end;
 function TExprBase.IsConstant : Boolean;
 begin
    Result:=(Self<>nil) and GetIsConstant;
+end;
+
+// Eval
+//
+function TExprBase.Eval(exec : TdwsExecution) : Variant;
+begin
+   EvalAsVariant(exec, Result);
 end;
 
 // RaiseScriptError
@@ -5072,7 +5081,7 @@ begin
    inherited Create(Name, Typ);
    Assert(Typ.Size=1);
    SetLength(FData, 1);
-   VarCopy(FData[0], Value);
+   VarCopySafe(FData[0], Value);
 end;
 
 // CreateData
@@ -6707,7 +6716,7 @@ begin
    inherited Create;
    FStack.Initialize(stackParams);
    FStack.Reset;
-   FExceptionObjectStack:=TSimpleStack<Variant>.Create;
+   FExceptionObjectStack:=TSimpleStack<IScriptObj>.Create;
    FRandSeed:=cDefaultRandSeed xor (UInt64(System.Random($7FFFFFFF)) shl 15);
 end;
 
@@ -6927,7 +6936,7 @@ end;
 //
 procedure TdwsExecution.LeaveExceptionBlock;
 begin
-   ExceptionObjectStack.Peek:=Unassigned;
+   ExceptionObjectStack.Peek:=nil;
    ExceptionObjectStack.Pop;
 end;
 

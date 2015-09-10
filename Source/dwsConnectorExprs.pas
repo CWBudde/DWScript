@@ -76,7 +76,7 @@ type
                             aBaseExpr: TTypedExpr; isWrite: Boolean = True; isIndex: Boolean = False);
 
          function AssignConnectorSym(prog : TdwsProgram; const connectorType : IConnectorType) : Boolean;
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function IsWritable : Boolean; override;
 
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
@@ -129,7 +129,7 @@ type
 
       public
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
 
          property ConnectorMember : IConnectorFastMember read FConnectorMember write FConnectorMember;
    end;
@@ -155,7 +155,7 @@ type
          destructor Destroy; override;
 
          function  ScriptPos : TScriptPos; override;
-         function  Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
 
          property Name : UnicodeString read FName write FName;
          property BaseExpr : TTypedExpr read FBaseExpr write FBaseExpr;
@@ -214,7 +214,7 @@ type
       public
          constructor CreateCast(prog : TdwsProgram; expr : TTypedExpr; const cast : IConnectorCast);
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
 
          property ConnectorCast : IConnectorCast read FConnectorCast write FConnectorCast;
    end;
@@ -370,9 +370,9 @@ begin
    end;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TConnectorCallExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConnectorCallExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    if FConnectorFastCall<>nil then
       FastEvalAsVariant(exec, Result)
@@ -499,7 +499,7 @@ var
    data : TData;
 begin
    SetLength(data, 1);
-   data[0]:=Eval(exec);
+   EvalAsVariant(exec, data[0]);
    result:=exec.Stack.CreateDataContext(data, 0);
 end;
 
@@ -625,13 +625,13 @@ var
    resultData : TData;
 begin
    SetLength(resultData, 1);
-   resultData[1]:=Eval(exec);
+   EvalAsVariant(exec, resultData[1]);
    exec.DataContext_Create(resultData, 0, result);
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TConnectorFastReadExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConnectorFastReadExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    try
       FConnectorMember.FastRead(exec, BaseExpr, Result);
@@ -718,9 +718,9 @@ begin
    Result:=FScriptPos;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TConnectorWriteMemberExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConnectorWriteMemberExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    EvalNoResult(exec);
 end;
@@ -888,11 +888,14 @@ begin
    FConnectorCast:=cast;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TConnectorCastExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConnectorCastExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+var
+   buf : Variant;
 begin
-   Result:=FConnectorCast.CastVariant(Expr.Eval(exec));
+   Expr.EvalAsVariant(exec, buf);
+   VarCopySafe(Result, FConnectorCast.CastVariant(buf));
 end;
 
 end.

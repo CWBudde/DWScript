@@ -46,7 +46,6 @@ type
          constructor CreateRef(aTyp: TTypeSymbol; const Data: TData);
          constructor CreateNull(aTyp: TTypeSymbol);
 
-         function Eval(exec : TdwsExecution) : Variant; override;
          procedure EvalAsString(exec : TdwsExecution; var Result : UnicodeString); override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); override;
@@ -95,7 +94,7 @@ type
    TConstNilExpr = class(TConstExpr)
       public
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); override;
          procedure EvalAsScriptObjInterface(exec : TdwsExecution; var result : IScriptObjInterface); override;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
@@ -218,7 +217,8 @@ type
 
          function Size : Integer; inline;
 
-         function Eval(exec : TdwsExecution) : Variant; override;
+         procedure EvalNoResult(exec : TdwsExecution); override;
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function EvalAsTData(exec : TdwsExecution) : TData; overload; inline;
          procedure EvalAsTData(exec : TdwsExecution; var result : TData); overload;
          procedure EvalToTData(exec : TdwsExecution; var result : TData; offset : Integer);
@@ -250,7 +250,7 @@ begin
    SetLength(FData, aTyp.Size);
    case aTyp.Size of
       0 : ;
-      1 : FData[0] := Value;
+      1 : VarCopySafe(FData[0], Value);
    else
       Assert(False);
    end;
@@ -292,13 +292,6 @@ begin
       FData[i]:=Null;
 end;
 
-// Eval
-//
-function TConstExpr.Eval(exec : TdwsExecution) : Variant;
-begin
-   EvalAsVariant(exec, Result);
-end;
-
 // EvalAsString
 //
 procedure TConstExpr.EvalAsString(exec : TdwsExecution; var Result : UnicodeString);
@@ -310,7 +303,7 @@ end;
 //
 procedure TConstExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
-   Result := FData[0];
+   VarCopySafe(Result, FData[0]);
 end;
 
 // EvalAsScriptObj
@@ -510,11 +503,11 @@ begin
    Result := 0;
 end;
 
-// Eval
+// EvalAsVariant
 //
-function TConstNilExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TConstNilExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
-   Result := FData[0];
+   VarCopySafe(Result, FData[0]);
 end;
 
 // EvalAsScriptObj
@@ -848,7 +841,7 @@ end;
 //
 procedure TArrayConstantExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
 begin
-   Eval(exec);
+   EvalNoResult(exec);
    exec.DataContext_Create(exec.Stack.Data, FArrayAddr, Result);
 end;
 
@@ -887,9 +880,9 @@ begin
    Result:=ElementCount*Typ.Typ.Size;
 end;
 
-// Eval
+// EvalNoResult
 //
-function TArrayConstantExpr.Eval(exec : TdwsExecution) : Variant;
+procedure TArrayConstantExpr.EvalNoResult(exec : TdwsExecution);
 
    procedure DoEval;
    var
@@ -897,6 +890,7 @@ function TArrayConstantExpr.Eval(exec : TdwsExecution) : Variant;
       elemSize : Integer;
       elemExpr : TTypedExpr;
       dataExpr : TDataExpr;
+      buf : Variant;
    begin
       exec.Stack.WriteValue(FArrayAddr, FElementExprs.Count);
 
@@ -905,7 +899,8 @@ function TArrayConstantExpr.Eval(exec : TdwsExecution) : Variant;
       for x:=0 to FElementExprs.Count-1 do begin
          elemExpr:=TTypedExpr(FElementExprs.List[x]);
          if elemSize=1 then begin
-            exec.Stack.WriteValue(addr, elemExpr.Eval(exec));
+            elemExpr.EvalAsVariant(exec, buf);
+            exec.Stack.WriteValue(addr, buf);
          end else begin
             dataExpr:=elemExpr as TDataExpr;
             dataExpr.DataPtr[exec].CopyData(exec.Stack.Data, addr, elemSize);
@@ -919,8 +914,15 @@ begin
       FArrayEvaled:=True;
       DoEval;
    end;
+end;
 
-   Result:=FArrayAddr;
+// EvalAsVariant
+//
+procedure TArrayConstantExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
+
+begin
+   EvalNoResult(exec);
+   VarCopySafe(Result, FArrayAddr);
 end;
 
 // EvalAsTData

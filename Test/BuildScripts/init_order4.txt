@@ -1,6 +1,6 @@
+Hello InitUnit2
 InitUnit1 Start
 Init'ing InitUnitUses12
-Hello InitUnit2
-Byebye InitUnit2
 Final'ing InitUnitUses12
 InitUnit1 End
+Byebye InitUnit2
