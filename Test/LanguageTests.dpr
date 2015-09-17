@@ -8,7 +8,6 @@ program LanguageTests;
 {$ENDIF}
 
 uses
-//   FastMM4,
   Classes,
   Forms,
   Windows,
@@ -57,6 +56,7 @@ uses
   UdwsWebUtilsTests in 'UdwsWebUtilsTests.pas',
   UdwsGraphicsTests in 'UdwsGraphicsTests.pas',
   dwsJSONPath in '..\Source\dwsJSONPath.pas',
+  // UDelegateTests in 'UDelegateTests.pas',  // memory leak
   dwsDateTime in '..\Source\dwsDateTime.pas';
 
 {$R *.res}
