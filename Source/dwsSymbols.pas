@@ -33,6 +33,7 @@ type
    IScriptObj = interface;
    IScriptObjInterface = interface;
    IScriptDynArray = interface;
+   IScriptAssociativeArray = interface;
 
    PIScriptObj = ^IScriptObj;
 
@@ -177,6 +178,7 @@ type
          procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); virtual; abstract;
          procedure EvalAsScriptObjInterface(exec : TdwsExecution; var result : IScriptObjInterface); virtual; abstract;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); virtual; abstract;
+         procedure EvalAsScriptAssociativeArray(exec : TdwsExecution; var result : IScriptAssociativeArray); virtual; abstract;
          procedure EvalNoResult(exec : TdwsExecution); virtual;
 
          procedure AssignValue(exec : TdwsExecution; const value : Variant); virtual; abstract;
@@ -577,7 +579,8 @@ type
          function GetIsDeprecated : Boolean; inline;
 
       public
-         procedure InitData(const data : TData; offset : Integer); virtual;
+         procedure InitData(const data : TData; offset : Integer); overload; virtual;
+         procedure InitData(const data : IDataContext); overload; inline;
 
          function IsType : Boolean; override;
          function BaseType : TTypeSymbol; override;
@@ -1023,13 +1026,13 @@ type
          constructor Create(const name : UnicodeString; elementType, indexType : TTypeSymbol);
          destructor Destroy; override;
 
-         function SortFunctionType(integerType : TTypeSymbol) : TFuncSymbol;
-         function MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol;
+         function SortFunctionType(integerType : TTypeSymbol) : TFuncSymbol; virtual;
+         function MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol; virtual;
 
          property IndexType : TTypeSymbol read FIndexType write FIndexType;
    end;
 
-   TInitDynamicArrayProc = procedure (typ : TTypeSymbol; var result : Variant);
+   TInitDataProc = procedure (typ : TTypeSymbol; var result : Variant);
 
    // array of FTyp
    TDynamicArraySymbol = class sealed (TArraySymbol)
@@ -1044,7 +1047,7 @@ type
          function IsPointerType : Boolean; override;
          function SameType(typSym : TTypeSymbol) : Boolean; override;
 
-         class procedure SetInitDynamicArrayProc(const aProc : TInitDynamicArrayProc);
+         class procedure SetInitDynamicArrayProc(const aProc : TInitDataProc);
    end;
 
    // array [FLowBound..FHighBound] of FTyp
@@ -1081,6 +1084,25 @@ type
       public
          constructor Create(const name : UnicodeString; elementType, indexType : TTypeSymbol);
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
+   end;
+
+   // associative array aka dictionary
+   TAssociativeArraySymbol = class sealed (TTypeSymbol)
+      private
+         FKeyType : TTypeSymbol;
+
+      public
+         constructor Create(const name : UnicodeString; elementType, keyType : TTypeSymbol);
+
+         procedure InitData(const Data: TData; Offset: Integer); override;
+
+         function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
+         function IsPointerType : Boolean; override;
+         function SameType(typSym : TTypeSymbol) : Boolean; override;
+
+         property KeyType : TTypeSymbol read FKeyType;
+
+         class procedure SetInitAssociativeArrayProc(const aProc : TInitDataProc);
    end;
 
    // TMembersSymbolTable
@@ -1748,6 +1770,8 @@ type
          function CallStackDepth : Integer; virtual; abstract;
 
          procedure DataContext_Create(const data : TData; addr : Integer; var Result : IDataContext); inline;
+         procedure DataContext_CreateEmpty(size : Integer; var Result : IDataContext); inline;
+         procedure DataContext_CreateValue(const value : Variant; var Result : IDataContext); inline;
          procedure DataContext_CreateBase(addr : Integer; var Result : IDataContext); inline;
          procedure DataContext_CreateLevel(level, addr : Integer; var Result : IDataContext); inline;
          function  DataContext_Nil : IDataContext; inline;
@@ -1827,6 +1851,13 @@ type
       function ToStringArray : TStringDynArray;
 
       procedure ReplaceData(const v : TData);
+   end;
+
+   // IScriptAssociativeArray
+   IScriptAssociativeArray = interface (IDataContext)
+      ['{1162D4BD-6033-4505-8D8C-0715588C768C}']
+      procedure Clear;
+      function Count : Integer;
    end;
 
    TPerfectMatchEnumerator = class
@@ -6153,7 +6184,7 @@ end;
 // ------------------
 
 var
-   vInitDynamicArray : TInitDynamicArrayProc;
+   vInitDynamicArray : TInitDataProc;
 
 // Create
 //
@@ -6190,7 +6221,6 @@ end;
 function TDynamicArraySymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
 begin
   Result :=    (    (typSym is TDynamicArraySymbol)
-//                and (typSym.Typ.IsCompatible(Typ) or (typSym.Typ is TNilSymbol))
                 and (Typ.IsCompatible(typSym.Typ) or (typSym.Typ is TNilSymbol))
             or (    (typSym is TStaticArraySymbol)
                 and TStaticArraySymbol(typSym).IsEmptyArray));
@@ -6214,7 +6244,7 @@ end;
 
 // SetInitDynamicArrayProc
 //
-class procedure TDynamicArraySymbol.SetInitDynamicArrayProc(const aProc : TInitDynamicArrayProc);
+class procedure TDynamicArraySymbol.SetInitDynamicArrayProc(const aProc : TInitDataProc);
 begin
    vInitDynamicArray:=aProc;
 end;
@@ -6250,7 +6280,7 @@ function TStaticArraySymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
 begin
   typSym := typSym.UnAliasedType;
   Result :=     (typSym is TStaticArraySymbol)
-            and (ElementCount = TStaticArraySymbol(typSym).ElementCount)
+            and (Size = TStaticArraySymbol(typSym).Size)
             and Typ.IsCompatible(typSym.Typ);
 end;
 
@@ -6330,6 +6360,59 @@ end;
 function TOpenArraySymbol.GetCaption : UnicodeString;
 begin
    Result:='array of const';
+end;
+
+// ------------------
+// ------------------ TAssociativeArraySymbol ------------------
+// ------------------
+
+var
+   vInitAssociativeArray : TInitDataProc;
+
+// Create
+//
+constructor TAssociativeArraySymbol.Create(const name : UnicodeString; elementType, keyType : TTypeSymbol);
+begin
+   inherited Create(name, elementType);
+   FKeyType:=keyType;
+end;
+
+// InitData
+//
+procedure TAssociativeArraySymbol.InitData(const Data: TData; Offset: Integer);
+begin
+   vInitAssociativeArray(Self, Data[Offset]);
+end;
+
+// SetInitAssociativeArrayProc
+//
+class procedure TAssociativeArraySymbol.SetInitAssociativeArrayProc(const aProc : TInitDataProc);
+begin
+   vInitAssociativeArray:=aProc;
+end;
+
+// IsCompatible
+//
+function TAssociativeArraySymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
+begin
+  Result :=     (typSym is TAssociativeArraySymbol)
+            and (Typ.IsCompatible(typSym.Typ) or (typSym.Typ is TNilSymbol));
+end;
+
+// IsPointerType
+//
+function TAssociativeArraySymbol.IsPointerType : Boolean;
+begin
+   Result := True;
+end;
+
+// SameType
+//
+function TAssociativeArraySymbol.SameType(typSym : TTypeSymbol) : Boolean;
+begin
+   Result:=    (typSym<>nil)
+           and (typSym.ClassType=ClassType)
+           and Typ.SameType(typSym.Typ);
 end;
 
 // ------------------
@@ -6657,6 +6740,13 @@ end;
 procedure TTypeSymbol.InitData(const data : TData; offset : Integer);
 begin
    Assert(False);
+end;
+
+// InitData
+//
+procedure TTypeSymbol.InitData(const data : IDataContext);
+begin
+   InitData(data.AsPData^, data.Addr);
 end;
 
 // ------------------
@@ -6988,6 +7078,27 @@ end;
 procedure TdwsExecution.DataContext_Create(const data : TData; addr : Integer; var result : IDataContext);
 begin
    Result:=FStack.CreateDataContext(data, addr);
+end;
+
+// DataContext_CreateEmpty
+//
+procedure TdwsExecution.DataContext_CreateEmpty(size : Integer; var Result : IDataContext);
+var
+   data : TData;
+begin
+   SetLength(data, size);
+   Result:=FStack.CreateDataContext(data, 0);
+end;
+
+// DataContext_CreateValue
+//
+procedure TdwsExecution.DataContext_CreateValue(const value : Variant; var Result : IDataContext);
+var
+   data : TData;
+begin
+   SetLength(data, 1);
+   data[0]:=value;
+   Result:=FStack.CreateDataContext(data, 0);
 end;
 
 // DataContext_CreateBase
@@ -7378,6 +7489,5 @@ begin
    end;
    Result:=False;
 end;
-
 
 end.
