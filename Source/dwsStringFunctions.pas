@@ -244,6 +244,10 @@ type
     function DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean; override;
   end;
 
+  TStrFindFunc = class(TInternalMagicIntFunction)
+    function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
+  end;
+
   TStrAfterFunc = class(TInternalMagicStringFunction)
     procedure DoEvalAsString(const args : TExprBaseListExec; var Result : UnicodeString); override;
   end;
@@ -468,8 +472,12 @@ end;
 { TCopyFunc }
 
 procedure TCopyFunc.DoEvalAsString(const args : TExprBaseListExec; var Result : UnicodeString);
+var
+   n : Int64;
 begin
-   Result:=Copy(args.AsString[0], args.AsInteger[1], args.AsInteger[2]);
+   n := args.AsInteger[2];
+   if n > MaxInt then n := MaxInt;
+   Result:=Copy(args.AsString[0], args.AsInteger[1], n);
 end;
 
 { TLeftStrFunc }
@@ -799,16 +807,16 @@ procedure TSetLengthFunc.DoEvalProc(const args : TExprBaseListExec);
 var
    i, n : Integer;
    s : UnicodeString;
+   p : PWideChar;
 begin
    s:=args.AsString[0];
 
-   i:=Length(s)+1;
+   i:=Length(s);
    n:=args.AsInteger[1];
    SetLength(s, n);
-   while i<=n do begin
-      s[i]:=' ';
-      Inc(i);
-   end;
+   p:=Pointer(s);
+   for i:=i to n-1 do
+      p[i]:=' ';
 
    args.AsString[0]:=s;
 end;
@@ -897,6 +905,13 @@ end;
 function TStrContainsFunc.DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean;
 begin
    Result:=StrContains(args.AsString[0], args.AsString[1]);
+end;
+
+{ TStrFindFunc }
+
+function TStrFindFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
+begin
+   Result:=PosEx(args.AsString[1], args.AsString[0], args.AsInteger[2]);
 end;
 
 { TStrAfterFunc }
@@ -1149,7 +1164,7 @@ initialization
 
    RegisterInternalStringFunction(TQuotedStrFunc, 'QuotedStr', ['str', SYS_STRING, 'quoteChar=', SYS_STRING], [iffStateLess], 'QuotedString');
 
-   RegisterInternalStringFunction(TCopyFunc, 'Copy', ['str', SYS_STRING, 'index', SYS_INTEGER, 'Len', SYS_INTEGER], [iffStateLess]);
+   RegisterInternalStringFunction(TCopyFunc, 'Copy', ['str', SYS_STRING, 'index', SYS_INTEGER, 'len=MaxInt', SYS_INTEGER], [iffStateLess], 'Copy');
 
    RegisterInternalStringFunction(TLeftStrFunc, 'LeftStr', ['str', SYS_STRING, 'count', SYS_INTEGER], [iffStateLess], 'Left');
    RegisterInternalStringFunction(TRightStrFunc, 'RightStr', ['str', SYS_STRING, 'count', SYS_INTEGER], [iffStateLess], 'Right');
@@ -1169,6 +1184,7 @@ initialization
    RegisterInternalBoolFunction(TStrEndsWithFunc, 'StrEndsWith', ['str', SYS_STRING, 'endStr', SYS_STRING], [iffStateLess], 'EndsWith');
 
    RegisterInternalBoolFunction(TStrContainsFunc, 'StrContains', ['str', SYS_STRING, 'subStr', SYS_STRING], [iffStateLess], 'Contains');
+   RegisterInternalIntFunction(TStrFindFunc, 'StrFind', ['str', SYS_STRING, 'subStr', SYS_STRING, 'fromIndex=1', SYS_INTEGER], [iffStateLess], 'IndexOf');
 
    RegisterInternalStringFunction(TStrAfterFunc, 'StrAfter', ['str', SYS_STRING, 'delimiter', SYS_STRING], [iffStateLess], 'After');
    RegisterInternalStringFunction(TStrBeforeFunc, 'StrBefore', ['str', SYS_STRING, 'delimiter', SYS_STRING], [iffStateLess], 'Before');

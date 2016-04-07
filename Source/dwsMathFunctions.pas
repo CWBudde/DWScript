@@ -868,7 +868,7 @@ initialization
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-   RegisterInternalBoolFunction(TOddFunc, 'Odd', ['i', SYS_INTEGER], [iffStateLess]);
+   RegisterInternalBoolFunction(TOddFunc, 'Odd', ['i', SYS_INTEGER], [iffStateLess, iffOverloaded], 'IsOdd');
 
    RegisterInternalFloatFunction(TSinFunc, 'Sin', ['a', SYS_FLOAT], [iffStateLess], 'Sin');
    RegisterInternalFloatFunction(TSinhFunc, 'Sinh', ['a', SYS_FLOAT], [iffStateLess], 'Sinh');
@@ -892,7 +892,7 @@ initialization
    RegisterInternalFloatFunction(TLog10Func, 'Log10', ['v', SYS_FLOAT], [iffStateLess], 'Log10');
    RegisterInternalFloatFunction(TLogNFunc, 'LogN', ['n', SYS_FLOAT, 'x', SYS_FLOAT], [iffStateLess], 'LogN');
    RegisterInternalFloatFunction(TPowerFunc, 'Power', ['base', SYS_FLOAT, 'exponent', SYS_FLOAT], [iffStateLess], 'Power');
-   RegisterInternalFloatFunction(TIntPowerFunc, 'IntPower', ['base', SYS_FLOAT, 'exponent', SYS_INTEGER], [iffStateLess], 'Power');
+   RegisterInternalFloatFunction(TIntPowerFunc, 'IntPower', ['base', SYS_FLOAT, 'exponent', SYS_INTEGER], [iffStateLess, iffOverloaded], 'Power');
    RegisterInternalIntFunction(TSqrIntFunc, 'Sqr', ['v', SYS_INTEGER], [iffStateLess, iffOverloaded], 'Sqr');
    RegisterInternalFloatFunction(TSqrFloatFunc, 'Sqr', ['v', SYS_FLOAT], [iffStateLess, iffOverloaded], 'Sqr');
    RegisterInternalFloatFunction(TSqrtFunc, 'Sqrt', ['v', SYS_FLOAT], [iffStateLess], 'Sqrt');
@@ -914,7 +914,7 @@ initialization
 
    RegisterInternalProcedure(TDivModFunc, 'DivMod',
                              ['dividend', SYS_INTEGER, 'divisor', SYS_INTEGER,
-                              '@result', SYS_INTEGER, '@remainder', SYS_INTEGER]);
+                              '@result', SYS_INTEGER, '@remainder', SYS_INTEGER], '', [iffOverloaded]);
 
    RegisterInternalFloatFunction(TMaxFunc, 'Max', ['v1', SYS_FLOAT, 'v2', SYS_FLOAT], [iffStateLess, iffOverloaded], 'Max');
    RegisterInternalIntFunction(TMaxIntFunc, 'Max', ['v1', SYS_INTEGER, 'v2', SYS_INTEGER], [iffStateLess, iffOverloaded], 'Max');
@@ -935,7 +935,7 @@ initialization
    RegisterInternalBoolFunction(TIsInfiniteFunc, 'IsInfinite', ['v', SYS_FLOAT], [iffStateLess], 'IsInfinite');
    RegisterInternalBoolFunction(TIsFiniteFunc, 'IsFinite', ['v', SYS_FLOAT], [iffStateLess], 'IsFinite');
 
-   RegisterInternalIntFunction(TGcdFunc, 'Gcd', ['a', SYS_INTEGER, 'b', SYS_INTEGER], [iffStateLess]);
+   RegisterInternalIntFunction(TGcdFunc, 'Gcd', ['a', SYS_INTEGER, 'b', SYS_INTEGER], [iffStateLess, iffOverloaded]);
    RegisterInternalIntFunction(TLcmFunc, 'Lcm', ['a', SYS_INTEGER, 'b', SYS_INTEGER], [iffStateLess]);
    RegisterInternalBoolFunction(TIsPrimeFunc, 'IsPrime', ['n', SYS_INTEGER], [iffStateLess], 'IsPrime');
    RegisterInternalIntFunction(TLeastFactorFunc, 'LeastFactor', ['n', SYS_INTEGER], [iffStateLess], 'LeastFactor');

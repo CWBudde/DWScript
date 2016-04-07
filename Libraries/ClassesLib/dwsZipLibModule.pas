@@ -46,11 +46,6 @@ type
 
   EdwsZIPException = class (Exception);
 
-implementation
-
-{$R *.dfm}
-
-type
    PZipEntry = ^TZipEntry;
    PFileHeader = ^TFileHeader;
 
@@ -63,6 +58,10 @@ type
       procedure AddData(data : Pointer; size : Int64; compression : Integer; const name : TFileName);
       procedure AddFile(const aFileName : TFileName; compression : Integer; const nameInZip : TFileName);
    end;
+
+implementation
+
+{$R *.dfm}
 
 function DateTimeToDosDateTime(dt : TDateTime) : Integer;
 var
@@ -254,20 +253,12 @@ var
    i : Integer;
    z : TScriptZipRead;
    fileName : String;
-   buf : RawByteString;
-   h : Cardinal;
 begin
    z:=TScriptZipRead(ExtObject);
    i:=z.CheckedIndex(Info);
    fileName:=Info.ParamAsFileName[1];
    if ForceDirectories(ExtractFilePath(fileName)) then begin
-      h:=OpenFileForSequentialWriteOnly(fileName);
-      try
-         buf:=z.UnZip(i);
-         FileWrite(h, Pointer(buf), Length(buf));
-      finally
-         CloseFileHandle(h);
-      end;
+      z.UnZip(i, fileName, True);
       Info.ResultAsBoolean:=True;
    end else Info.ResultAsBoolean:=False;
 end;

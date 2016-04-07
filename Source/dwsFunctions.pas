@@ -233,7 +233,8 @@ procedure RegisterInternalFunction(InternalFunctionClass: TInternalFunctionClass
       const FuncType: UnicodeString; const flags : TInternalFunctionFlags = [];
       const helperName : UnicodeString = '');
 procedure RegisterInternalProcedure(InternalFunctionClass: TInternalFunctionClass;
-      const FuncName: UnicodeString; const FuncParams: array of UnicodeString);
+      const FuncName: UnicodeString; const FuncParams: array of UnicodeString;
+      const helperName : UnicodeString = ''; const flags : TInternalFunctionFlags = []);
 
 procedure RegisterInternalSymbolsProc(proc : TSymbolsRegistrationProc);
 procedure RegisterInternalOperatorsProc(proc : TOperatorsRegistrationProc);
@@ -288,9 +289,16 @@ function ConvertFuncParams(const funcParams : array of UnicodeString) : TParamAr
    end;
 
    procedure ParamDefaultValue(p : Integer; paramRec : PParamRec);
+   var
+      v : String;
    begin
       SetLength(paramRec.DefaultValue, 1);
-      paramRec.DefaultValue[0]:=Trim(Copy(paramRec.ParamName, p+1, MaxInt));
+      v:=Trim(Copy(paramRec.ParamName, p+1, MaxInt));
+      if v='Unassigned' then
+         VarClearSafe(paramRec.DefaultValue[0])
+      else if v='MaxInt' then
+         paramRec.DefaultValue[0]:=High(Int64)
+      else paramRec.DefaultValue[0]:=v;
       paramRec.HasDefaultValue:=True;
       paramRec.ParamName:=Trim(Copy(paramRec.ParamName, 1, p-1));
    end;
@@ -363,9 +371,10 @@ end;
 // RegisterInternalProcedure
 //
 procedure RegisterInternalProcedure(InternalFunctionClass: TInternalFunctionClass;
-      const FuncName: UnicodeString; const FuncParams: array of UnicodeString);
+      const FuncName: UnicodeString; const FuncParams: array of UnicodeString;
+      const helperName : UnicodeString = ''; const flags : TInternalFunctionFlags = []);
 begin
-   RegisterInternalFunction(InternalFunctionClass, FuncName, FuncParams, '');
+   RegisterInternalFunction(InternalFunctionClass, FuncName, FuncParams, '', flags, helperName);
 end;
 
 { TEmptyFunc }

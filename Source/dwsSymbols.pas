@@ -2762,6 +2762,7 @@ end;
 //
 function TRecordSymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
 begin
+   if typSym=nil then Exit(False);
    typSym:=typSym.UnAliasedType.BaseType;
    if not (typSym is TRecordSymbol) then
       Exit(False);
@@ -5255,6 +5256,8 @@ begin
          Result := Result + ' = ''' + VarToStr(FDefaultValue[0]) + ''''  // put quotes around value
       else if VarType(FDefaultValue[0])=varUnknown then
          Result := Result + ' = nil'
+      else if (Typ is TArraySymbol) then
+         Result := Result + ' = []'
       else Result := Result + ' = ' + VarToStr(FDefaultValue[0]);
    end;
 end;

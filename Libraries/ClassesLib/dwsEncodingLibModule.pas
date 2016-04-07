@@ -60,6 +60,14 @@ type
       Info: TProgramInfo; ExtObject: TObject);
     procedure dwsEncodingClassesBase32EncoderMethodsDecodeEval(
       Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsEncodingClassesUTF16BigEndianEncoderMethodsEncodeEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsEncodingClassesUTF16BigEndianEncoderMethodsDecodeEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsEncodingClassesUTF16LittleEndianEncoderMethodsEncodeEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsEncodingClassesUTF16LittleEndianEncoderMethodsDecodeEval(
+      Info: TProgramInfo; ExtObject: TObject);
   private
     { Private declarations }
   public
@@ -70,10 +78,17 @@ function Base58Encode(const data : RawByteString) : String;
 function Base58Decode(const data : String) : RawByteString;
 
 // RFC 4648 without padding
-function Base32Encode(const data : RawByteString) : String;
+function Base32Encode(data : Pointer; len : Integer) : String; overload;
+function Base32Encode(const data : RawByteString) : String; overload;
 function Base32Decode(const data : String) : RawByteString;
 
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
 implementation
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
 
 {$R *.dfm}
 
@@ -198,18 +213,18 @@ const
       'Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7'
    );
 
-function Base32Encode(const data : RawByteString) : String;
+function Base32Encode(data : Pointer; len : Integer) : String;
 var
    i, n, c, b : Integer;
    pIn : PByteArray;
    pOut : PChar;
 begin
-   if data = '' then Exit('');
-   n := Length(data);
+   if (len = 0) or (data = nil) then Exit('');
+   n := len;
    SetLength(Result, ((n div 5)+1)*8);
    c := 0;
    b := 0;
-   pIn := Pointer(data);
+   pIn := data;
    pOut := Pointer(Result);
    for i := 0 to n-1 do begin
       c := (c shl 8) or pIn[i];
@@ -226,6 +241,13 @@ begin
    end;
    n := (NativeUInt(pOut)-NativeUInt(Pointer(Result))) div SizeOf(Char);
    SetLength(Result, n);
+end;
+
+// Base32Encode
+//
+function Base32Encode(const data : RawByteString) : String;
+begin
+   Result:=Base32Encode(Pointer(data), Length(data));
 end;
 
 // Base32Decode
@@ -368,6 +390,46 @@ procedure TdwsEncodingLib.dwsEncodingClassesURLEncodedEncoderMethodsEncodeEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
    Info.ResultAsString := WebUtils.EncodeURLEncoded(Info.ParamAsString[0]);
+end;
+
+procedure TdwsEncodingLib.dwsEncodingClassesUTF16BigEndianEncoderMethodsDecodeEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   buf : String;
+begin
+   buf := Info.ParamAsString[0];
+   StringWordsToBytes(buf, True);
+   Info.ResultAsString := buf;
+end;
+
+procedure TdwsEncodingLib.dwsEncodingClassesUTF16BigEndianEncoderMethodsEncodeEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   buf : String;
+begin
+   buf := Info.ParamAsString[0];
+   StringBytesToWords(buf, True);
+   Info.ResultAsString := buf;
+end;
+
+procedure TdwsEncodingLib.dwsEncodingClassesUTF16LittleEndianEncoderMethodsDecodeEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   buf : String;
+begin
+   buf := Info.ParamAsString[0];
+   StringWordsToBytes(buf, False);
+   Info.ResultAsString := buf;
+end;
+
+procedure TdwsEncodingLib.dwsEncodingClassesUTF16LittleEndianEncoderMethodsEncodeEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   buf : String;
+begin
+   buf := Info.ParamAsString[0];
+   StringBytesToWords(buf, False);
+   Info.ResultAsString := buf;
 end;
 
 procedure TdwsEncodingLib.dwsEncodingClassesUTF8EncoderMethodsDecodeEval(

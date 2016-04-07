@@ -168,6 +168,7 @@ type
          FIndent : Integer;
          FIndentString : String;
          FNeedIndent : Boolean;
+         FIndentChar : Char;
          FIndentSize : Integer;
          FOptions : TdwsCodeGenOptions;
          FVerbosity : TdwsCodeGenOutputVerbosity;
@@ -307,6 +308,8 @@ type
 
          procedure CreateDataContext(const data : TData; addr : Integer; var result : IDataContext);
 
+         function Localizer : IdwsLocalizer;
+
          property Context : TdwsProgram read FContext;
          property ContextSymbolDictionary : TdwsSymbolDictionary read FContextSymbolDictionary;
 
@@ -315,6 +318,7 @@ type
          property OutputLineOffset : Integer read FOutputLineOffset write FOutputLineOffset;
          property OutputLine : Integer read FOutputLine;
 
+         property IndentChar : Char read FIndentChar write FIndentChar;
          property IndentSize : Integer read FIndentSize write FIndentSize;
          property Options : TdwsCodeGenOptions read FOptions write FOptions;
          property Verbosity : TdwsCodeGenOutputVerbosity read FVerbosity write FVerbosity;
@@ -389,7 +393,7 @@ end;
 //
 constructor TdwsCodeGen.Create;
 begin
-   inherited;
+   inherited Create;
    FCodeGenList:=TdwsRegisteredCodeGenList.Create;
    FOutput:=TWriteOnlyBlockStream.Create;
    FOutputLine:=1;
@@ -399,6 +403,7 @@ begin
    FFlushedDependencies.Duplicates:=dupIgnore;
    FTempReg:=TdwsRegisteredCodeGen.Create;
 //   FSymbolMaps:=TdwsCodeGenSymbolMaps.Create;
+   FIndentChar:=' ';
    FIndentSize:=3;
    FDataContextPool:=TDataContextPool.Create;
 end;
@@ -499,7 +504,7 @@ var
 begin
    funcSym:=sym.AsFuncSymbol;
    if funcSym<>nil then begin
-      if funcSym.IsExternal or funcSym.HasExternalName then
+      if funcSym.IsExternal or (funcSym.HasExternalName and not funcSym.IsExport) then
          Exit(funcSym.ExternalName);
       if funcSym is TMethodSymbol then begin
          meth:=TMethodSymbol(funcSym);
@@ -593,6 +598,15 @@ end;
 procedure TdwsCodeGen.CreateDataContext(const data : TData; addr : Integer; var result : IDataContext);
 begin
    result:=FDataContextPool.Create(data, addr);
+end;
+
+// Localizer
+//
+function TdwsCodeGen.Localizer : IdwsLocalizer;
+begin
+   if FContext<>nil then
+      Result:=FContext.Root.DefaultLocalizer
+   else Result:=nil;
 end;
 
 // Compile
@@ -1214,7 +1228,7 @@ end;
 procedure TdwsCodeGen.Indent(needIndent : Boolean = True);
 begin
    Inc(FIndent);
-   FIndentString:=StringOfChar(' ', FIndent*FIndentSize);
+   FIndentString:=StringOfChar(FIndentChar, FIndent*FIndentSize);
    FNeedIndent:=needIndent;
 end;
 
@@ -1223,7 +1237,7 @@ end;
 procedure TdwsCodeGen.UnIndent(needIndent : Boolean = True);
 begin
    Dec(FIndent);
-   FIndentString:=StringOfChar(' ', FIndent*FIndentSize);
+   FIndentString:=StringOfChar(FIndentChar, FIndent*FIndentSize);
    FNeedIndent:=needIndent;
 end;
 

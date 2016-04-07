@@ -159,6 +159,7 @@ type
 // 64bit system clock reference in milliseconds since boot
 function GetSystemMilliseconds : Int64;
 function UTCDateTime : TDateTime;
+function UnixTime : Int64;
 // UTC = LocalTime + Bias
 function LocalTimeBias : TDateTime;
 procedure SystemSleep(msec : Integer);
@@ -231,6 +232,7 @@ function FileDelete(const fileName : String) : Boolean;
 function FileRename(const oldName, newName : String) : Boolean;
 function FileSize(const name : String) : Int64;
 function FileDateTime(const name : String) : TDateTime;
+procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
 function DeleteDirectory(const path : String) : Boolean;
 
 function DirectSet8087CW(newValue : Word) : Word; register;
@@ -240,10 +242,12 @@ function SwapBytes(v : Cardinal) : Cardinal;
 
 function GetCurrentUserName : String;
 
+{$ifndef FPC}
 // Generics helper functions to handle Delphi 2009 issues - HV
 function TtoObject(const T): TObject; inline;
 function TtoPointer(const T): Pointer; inline;
 procedure GetMemForT(var T; Size: integer); inline;
+{$endif}
 
 procedure InitializeWithDefaultFormatSettings(var fmt : TFormatSettings);
 
@@ -350,6 +354,13 @@ begin
 {$ELSE}
    Not yet implemented!
 {$ENDIF}
+end;
+
+// UnixTime
+//
+function UnixTime : Int64;
+begin
+   Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
 end;
 
 // LocalTimeBias
@@ -537,7 +548,7 @@ function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Point
 {$ifndef WIN32_ASM}
 begin
    {$ifdef FPC}
-   Result:=InterlockedExchangePointer(target, val);
+   Result:=System.InterLockedExchange(target, val);
    {$else}
    Result:=Windows.InterlockedExchangePointer(target, val);
    {$endif}
@@ -552,7 +563,11 @@ end;
 //
 function InterlockedCompareExchangePointer(var destination : Pointer; exchange, comparand : Pointer) : Pointer; {$IFDEF PUREPASCAL} inline; {$endif}
 begin
+   {$ifdef FPC}
+   Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
+   {$else}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
+   {$endif}
 end;
 
 // SetThreadName
@@ -1064,16 +1079,27 @@ begin
    end else Result:=0;
 end;
 
+// FileSetDateTime
+//
+procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
+begin
+   FileSetDate(hFile, DateTimeToFileDate(aDateTime));
+end;
+
 // DeleteDirectory
 //
 function DeleteDirectory(const path : String) : Boolean;
 begin
+   {$ifdef FPC}
+   Result := RemoveDir(path);
+   {$else}
    try
       TDirectory.Delete(path, True);
    except
       Exit(False);
    end;
    Result := not TDirectory.Exists(path);
+   {$endif}
 end;
 
 // DirectSet8087CW
@@ -1121,7 +1147,6 @@ asm
 {$else}
 type
    TCardinalBytes = array [0..3] of Byte;
-   PCardinalBytes = ^TCardinalBytes;
 begin
    TCardinalBytes(Result)[0]:=TCardinalBytes(v)[3];
    TCardinalBytes(Result)[1]:=TCardinalBytes(v)[2];
@@ -1142,6 +1167,7 @@ begin
 	SetLength(Result, len-1);
 end;
 
+{$ifndef FPC}
 // Delphi 2009 is not able to cast a generic T instance to TObject or Pointer
 function TtoObject(const T): TObject;
 begin
@@ -1167,6 +1193,7 @@ procedure GetMemForT(var T; Size: integer); inline;
 begin
   GetMem(Pointer(T), Size);
 end;
+{$endif}
 
 // InitializeWithDefaultFormatSettings
 //
@@ -1395,7 +1422,20 @@ end;
 // ------------------ TTimerTimeout ------------------
 // ------------------
 
-procedure TTimerTimeoutCallBack(Context: Pointer; Success: Boolean); stdcall
+{$ifdef FPC}
+type TWaitOrTimerCallback = procedure (Context: Pointer; Success: Boolean); stdcall;
+function CreateTimerQueueTimer(out phNewTimer: THandle;
+   TimerQueue: THandle; CallBack: TWaitOrTimerCallback;
+   Parameter: Pointer; DueTime: DWORD; Period: DWORD; Flags: ULONG): BOOL; stdcall; external 'kernel32.dll';
+function DeleteTimerQueueTimer(TimerQueue: THandle;
+   Timer: THandle; CompletionEvent: THandle): BOOL; stdcall; external 'kernel32.dll';
+const
+   WT_EXECUTEDEFAULT       = ULONG($00000000);
+   WT_EXECUTEONLYONCE      = ULONG($00000008);
+   WT_EXECUTELONGFUNCTION  = ULONG($00000010);
+{$endif}
+
+procedure TTimerTimeoutCallBack(Context: Pointer; Success: Boolean); stdcall;
 var
    tt : TTimerTimeout;
    event : TTimerEvent;

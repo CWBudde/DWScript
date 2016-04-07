@@ -708,6 +708,7 @@ type
 
          function GetGlobalAddr(DataSize: Integer): Integer;
          function GetTempAddr(DataSize: Integer = -1): Integer;
+         function FindLocal(const name : String) : TSymbol; virtual;
 
          procedure ResetExprs;
 
@@ -790,6 +791,8 @@ type
          FExecutionsClass : TdwsProgramExecutionClass;
 
          FProgramType : TdwsProgramType;
+
+         FTagInterface : IGetSelf;
 
       protected
          function GetConditionalDefines : IAutoStrings;
@@ -875,6 +878,7 @@ type
          property OnExecutionEnded : TdwsExecutionEvent read FOnExecutionEnded write FOnExecutionEnded;
 
          property ProgramType : TdwsProgramType read FProgramType write FProgramType;
+         property TagInterface : IGetSelf read FTagInterface write FTagInterface;
    end;
 
    // Functions callable from a script program implement this interfaces
@@ -907,6 +911,7 @@ type
          procedure CompileTimeCheck(prog : TdwsProgram; expr : TFuncExprBase);
          procedure InitSymbol(Symbol: TSymbol; const msgs : TdwsCompileMessageList);
          procedure InitExpression(Expr: TExprBase);
+         function FindLocal(const name : String) : TSymbol; override;
 
          procedure OptimizeConstAssignments(blockExpr : TBlockExprBase);
 
@@ -1419,6 +1424,23 @@ type
       public
          procedure EvalNoResult(exec : TdwsExecution); override;
    end;
+
+   TUnaryOpDataExpr = class (TPosDataExpr)
+      protected
+         FExpr : TTypedExpr;
+
+         function GetSubExpr(i : Integer) : TExprBase; override;
+         function GetSubExprCount : Integer; override;
+
+         function GetIsConstant : Boolean; override;
+
+      public
+         constructor Create(prog : TdwsProgram; expr : TTypedExpr); virtual;
+         destructor Destroy; override;
+
+         property Expr : TTypedExpr read FExpr write FExpr;
+   end;
+   TUnaryOpDataExprClass = class of TUnaryOpDataExpr;
 
    TUnaryOpExpr = class(TTypedExpr)
       protected
@@ -2867,6 +2889,13 @@ begin
    Result:=2;
 end;
 
+// FindLocal
+//
+function TdwsProgram.FindLocal(const name : String) : TSymbol;
+begin
+   Result:=Table.FindLocal(name);
+end;
+
 function TdwsProgram.GetGlobalAddr(DataSize: Integer): Integer;
 begin
   Result := FRoot.FGlobalAddrGenerator.GetStackAddr(DataSize);
@@ -3435,6 +3464,18 @@ end;
 procedure TdwsProcedure.SetBeginPos(const scriptPos : TScriptPos);
 begin
    FInitExpr.FScriptPos:=scriptPos;
+end;
+
+// FindLocal
+//
+function TdwsProcedure.FindLocal(const name : String) : TSymbol;
+begin
+   Result := inherited FindLocal(name);
+   if Result = nil then begin
+      Result := FFunc.Params.FindLocal(name);
+      if Result = nil then
+         Result := FFunc.InternalParams.FindLocal(name);
+   end;
 end;
 
 // ------------------
@@ -5709,6 +5750,46 @@ begin
       Result:=TConstBooleanExpr.CreateUnified(Prog, nil, EvalAsBoolean(exec));
       Free;
    end else Result:=Self;
+end;
+
+// ------------------
+// ------------------ TUnaryOpDataExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TUnaryOpDataExpr.Create(prog : TdwsProgram; expr : TTypedExpr);
+begin
+   FExpr:=Expr;
+end;
+
+// Destroy
+//
+destructor TUnaryOpDataExpr.Destroy;
+begin
+   FExpr.Free;
+   inherited;
+end;
+
+// GetIsConstant
+//
+function TUnaryOpDataExpr.GetIsConstant : Boolean;
+begin
+   Result:=FExpr.IsConstant;
+end;
+
+// GetSubExpr
+//
+function TUnaryOpDataExpr.GetSubExpr(i : Integer) : TExprBase;
+begin
+   Result:=FExpr;
+end;
+
+// GetSubExprCount
+//
+function TUnaryOpDataExpr.GetSubExprCount : Integer;
+begin
+   Result:=1;
 end;
 
 // ------------------
