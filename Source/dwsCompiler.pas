@@ -2908,9 +2908,8 @@ begin
 
       RecordSymbolUse(sym, scriptPos, [suDeclaration]);
 
-      if sym.Typ is TArraySymbol then begin
+      if sym.Typ.DynamicInitialization then begin
 
-         // TODO: if Sym.DynamicInit?
          FProg.InitExpr.AddStatement(
             TInitDataExpr.Create(FProg, scriptPos, varExpr));
 
