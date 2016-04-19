@@ -19,7 +19,7 @@ uses
   dwsMathComplexFunctions in '..\Source\dwsMathComplexFunctions.pas',
   dwsMath3DFunctions in '..\Source\dwsMath3DFunctions.pas',
   dwsDebugFunctions in '..\Source\dwsDebugFunctions.pas',
-  dwsLinq,
+  dwsLinq in '..\Libraries\LinqLib\dwsLinq.pas',
   dwsLinqSql in '..\Libraries\LinqLib\dwsLinqSql.pas',
   dwsLinqJson in '..\Libraries\LinqLib\dwsLinqJson.pas',
   dwsDocBuilder in '..\Libraries\DocBuilder\dwsDocBuilder.pas',
