@@ -5,8 +5,8 @@ interface
 uses
    Windows, Classes, SysUtils,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsErrors,
-   dwsBigIntegerFunctions, dwsXPlatform, dwsSymbols, dwsUtils,
-   Velthuis.BigIntegers;
+   dwsBigIntegerFunctions.GMP, dwsXPlatform, dwsSymbols, dwsUtils,
+   dwsMPIR.Bundle;
 
 type
 
@@ -23,9 +23,6 @@ type
          procedure Compilation;
 
       published
-         procedure BasicTest32;
-         procedure BasicTest64;
-
          procedure CompilationNormal;
          procedure CompilationWithMapAndSymbols;
          procedure ExecutionNonOptimized;
@@ -52,7 +49,7 @@ procedure TBigIntegerTests.SetUp;
 begin
    FTests:=TStringList.Create;
 
-   CollectFiles(ExtractFilePath(ParamStr(0))+'BigInteger'+PathDelim, 'rabin*.pas', FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'BigInteger'+PathDelim, '*.pas', FTests);
 
    FCompiler:=TDelphiWebScript.Create(nil);
 end;
@@ -177,64 +174,6 @@ end;
 procedure TBigIntegerTests.Execution;
 begin
    RunTests(FTests, FCompiler, CheckEquals, 1);
-end;
-
-// BasicTest32
-//
-procedure TBigIntegerTests.BasicTest32;
-var
-   a, b, c : BigInteger;
-begin
-   a := 1;
-   CheckEquals('1', a.ToHexString, '1');
-   b := -1;
-   CheckEquals('-1', b.ToHexString, '-1');
-
-   CheckTrue(a=a, '1 = 1');
-   CheckFalse(a<>a, '1 <> 1');
-   CheckTrue(a<>b, '1 <> -1');
-   CheckTrue(b=b, '-1 = -1');
-   CheckFalse(b<>b, '-1 <> -1');
-   CheckTrue(b<>a, '-1 <> 1');
-
-   c:=a+b;
-   CheckEquals('0', c.ToHexString, '1+(-1)');
-   c:=a-b;
-   CheckEquals('2', c.ToHexString, '1-(-1)');
-
-   c:=b+a;
-   CheckEquals('0', c.ToHexString, '(-1)+1');
-   c:=b-a;
-   CheckEquals('-2', c.ToHexString, '(-1)-1');
-end;
-
-// BasicTest64
-//
-procedure TBigIntegerTests.BasicTest64;
-var
-   a, b, c : BigInteger;
-begin
-   a := High(Int64);
-   CheckEquals('7FFFFFFFFFFFFFFF', a.ToHexString, 'hi');
-   b := Low(Int64);
-   CheckEquals('-8000000000000000', b.ToHexString, 'lo');
-
-   CheckTrue(a=a, 'hi = hi');
-   CheckFalse(a<>a, 'hi <> hi');
-   CheckTrue(a<>b, 'hi <> lo');
-   CheckTrue(b=b, 'lo = lo');
-   CheckFalse(b<>b, 'lo <> lo');
-   CheckTrue(b<>a, 'lo <> hi');
-
-   c:=a+b;
-   CheckEquals('-1', c.ToHexString, '1+(-1)');
-   c:=a-b;
-   CheckEquals('FFFFFFFFFFFFFFFF', c.ToHexString, '1-(-1)');
-
-   c:=b+a;
-   CheckEquals('-1', c.ToHexString, '(-1)+1');
-   c:=b-a;
-   CheckEquals('-FFFFFFFFFFFFFFFF', c.ToHexString, '(-1)-1');
 end;
 
 type

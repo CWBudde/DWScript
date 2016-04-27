@@ -1016,9 +1016,10 @@ end;
 //
 procedure StatusCodeToReason(code : integer; var result : RawByteString);
 const
-   cCodes200 : array [200..206] of RawByteString = (
+   cCodes200 : array [200..207] of RawByteString = (
       'OK', 'Created', 'Accepted', 'Non-Authoritative Information',  // 200-203
-      'No Content', 'Reset Content', 'Partial Content' );            // 204-206
+      'No Content', 'Reset Content', 'Partial Content',              // 204-206
+      'Multi-Status' );                                              // 207
    cCodes300 : array [300..307] of RawByteString = (
       'Multiple Choices', 'Moved Permanently', 'Found', 'See Other', // 300-303
       'Not Modified', 'Use Proxy', 'Unused', 'Temporary Redirect' ); // 304-307
@@ -1086,16 +1087,18 @@ end;
 procedure HTTP_RESPONSE_V2.SetContent(var dataChunk : HTTP_DATA_CHUNK_INMEMORY;
    const Content, ContentType : RawByteString);
 begin
-   fillchar(dataChunk, sizeof(dataChunk), 0);
+   FillChar(dataChunk, SizeOf(dataChunk), 0);
    if Content <> '' then begin
       dataChunk.DataChunkType := hctFromMemory;
       dataChunk.pBuffer := pointer(Content);
       dataChunk.BufferLength := length(Content);
       EntityChunkCount := 1;
       pEntityChunks := @dataChunk;
-      Headers.KnownHeaders[reqContentType].RawValueLength := length(ContentType);
    end;
-   Headers.KnownHeaders[reqContentType].pRawValue := pointer(ContentType);
+   if ContentType<>'' then begin
+      Headers.KnownHeaders[reqContentType].RawValueLength := Length(ContentType);
+      Headers.KnownHeaders[reqContentType].pRawValue := Pointer(ContentType);
+   end;
 end;
 
 procedure HTTP_RESPONSE_V2.SetHeaders(P : PAnsiChar;
