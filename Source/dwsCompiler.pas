@@ -540,7 +540,7 @@ type
                                     baseExpr : TTypedExpr) : TProgramExpr;
 
          function ReadCase : TCaseExpr;
-         function ReadCaseConditions(condList : TCaseConditions; valueExpr : TTypedExpr) : Integer;
+         function ReadCaseConditions(var condList : TTightList; valueExpr : TTypedExpr) : Integer;
          function ReadAliasedNameSymbol(var namePos : TScriptPos) : TSymbol;
          function ReadNameSymbol(var namePos : TScriptPos) : TSymbol;
          function ReadClassName : TClassSymbol;
@@ -6573,12 +6573,12 @@ end;
 function TdwsCompiler.ReadCase : TCaseExpr;
 var
    expr : TProgramExpr;
-   condList : TCaseConditions;
+   condList : TTightList;
    condition : TCaseCondition;
    tt : TTokenType;
    x : Integer;
 begin
-   condList := TCaseConditions.Create;
+   condList.Initialize;
    try
       Result := TCaseExpr.Create(FTok.HotPos);
       try
@@ -6603,13 +6603,13 @@ begin
 
                // Add case conditions to TCaseExpr
                for x:=0 to condList.Count-1 do begin
-                  condition:=condList[x];
+                  condition:=(condList.List[x] as TCaseCondition);
                   condition.TrueExpr:=Expr;
                   if x=0 then
                      condition.OwnsTrueExpr:=True;
                   Result.AddCaseCondition(condition);
                end;
-               condList.ExtractAll;
+               condList.Clear;
 
                if not (FTok.Test(ttELSE) or FTok.Test(ttEND) or FTok.TestDelete(ttSEMI)) then
                   FMsgs.AddCompilerStop(FTok.HotPos, CPE_SemiExpected);
@@ -6620,13 +6620,13 @@ begin
          raise;
       end;
    finally
-      condList.Free;
+      condList.Clean;
    end;
 end;
 
 // ReadCaseConditions
 //
-function TdwsCompiler.ReadCaseConditions(condList : TCaseConditions; valueExpr : TTypedExpr) : Integer;
+function TdwsCompiler.ReadCaseConditions(var condList : TTightList; valueExpr : TTypedExpr) : Integer;
 var
    hotPos : TScriptPos;
    exprFrom, exprTo : TTypedExpr;
@@ -10371,16 +10371,18 @@ begin
                              or (Result.Typ is TClassOfSymbol)
                              or (Result.Typ=FProg.TypNil)
                              ) then begin
-                        if not ((rightTyp.ClassType=Result.Typ.ClassType) or (rightTyp=FProg.TypNil)) then
+                        if not ((rightTyp.ClassType=Result.Typ.ClassType) or (rightTyp=FProg.TypNil)) then begin
                            if Result.Typ is TClassSymbol then
                               FMsgs.AddCompilerError(hotPos, CPE_ObjectExpected)
+                           else if Result.Typ is TClassOfSymbol then
+                              FMsgs.AddCompilerError(hotPos, CPE_ClassRefExpected)
                            else FMsgs.AddCompilerError(hotPos, CPE_InterfaceExpected);
+                        end;
                         if Result.Typ is TClassSymbol then
                            if tt=ttNOTEQ then
                               Result:=TObjCmpNotEqualExpr.Create(FProg, hotPos, Result, right)
                            else Result:=TObjCmpEqualExpr.Create(FProg, hotPos, Result, right)
                         else if Result.Typ is TClassOfSymbol then begin
-                           Assert(rightTyp=FProg.TypNil);
                            Result:=TAssignedMetaClassExpr.Create(FProg, Result);
                            if tt=ttEQ then
                               Result:=TNotBoolExpr.Create(FProg, Result);
@@ -10708,12 +10710,12 @@ end;
 function TdwsCompiler.ReadExprInConditions(var left : TTypedExpr) : TInOpExpr;
 var
    i : Integer;
-   condList : TCaseConditions;
+   condList : TTightList;
    hotPos : TScriptPos;
 begin
    hotPos:=FTok.HotPos;
 
-   condList:=TCaseConditions.Create;
+   condList.Initialize;
    try
       if not FTok.TestDelete(ttARIGHT) then begin
          ReadCaseConditions(condList, left);
@@ -10721,15 +10723,35 @@ begin
             FMsgs.AddCompilerStop(FTok.HotPos, CPE_ArrayBracketRightExpected);
       end;
 
-      Result:=TInOpExpr.Create(FProg, left);
+      if left.IsOfType(FProg.TypString) then begin
+
+         if     TCaseConditionsHelper.CanOptimizeToTyped(condList, TConstStringExpr)
+            and condList.ItemsAllOfClass(TCompareCaseCondition) then begin
+
+            Result:=TStringInOpStaticSetExpr.Create(FProg, left)
+
+         end else begin
+
+            Result:=TStringInOpExpr.Create(FProg, left);
+
+         end;
+      end else begin
+
+         Result:=TInOpExpr.Create(FProg, left);
+
+      end;
+
       left:=nil;
 
       // Add case conditions to TCaseExpr
       for i:=0 to condList.Count-1 do
-         Result.AddCaseCondition(condList[i]);
-      condList.ExtractAll;
+         Result.AddCaseCondition(condList.List[i] as TCaseCondition);
+
+      Result.Prepare;
+
+      condList.Clear;
    finally
-      condList.Free;
+      condList.Clean;
    end;
 end;
 
@@ -11050,6 +11072,7 @@ end;
 //
 function TdwsCompiler.ReadNegation : TTypedExpr;
 var
+   opSymbol : TOperatorSymbol;
    negExprClass : TUnaryOpExprClass;
    negTerm : TTypedExpr;
    hotPos : TScriptPos;
@@ -11057,14 +11080,21 @@ begin
    FTok.TestName; // make sure hotpos is on next token
    hotPos:=FTok.HotPos;
    negTerm:=ReadTerm;
-   if negTerm.IsOfType(FProg.TypInteger) then
+
+   // shortcut for common negations
+   if negTerm.Typ = FProg.TypInteger then
       negExprClass:=TNegIntExpr
-   else if negTerm.IsOfType(FProg.TypFloat) then
+   else if negTerm.Typ = FProg.TypFloat then
       negExprClass:=TNegFloatExpr
    else begin
-      if not negTerm.IsOfType(FProg.TypVariant) then
+      opSymbol := ResolveOperatorFor(ttMINUS, nil, negTerm.Typ);
+      if opSymbol = nil then begin
          FMsgs.AddCompilerError(hotPos, CPE_NumericalExpected);
-      negExprClass:=TNegVariantExpr;
+         negExprClass := TNegVariantExpr; // keep compiling
+      end else begin
+         Assert(opSymbol.OperatorExprClass.InheritsFrom(TUnaryOpExpr));
+         negExprClass := TUnaryOpExprClass(opSymbol.OperatorExprClass);
+      end;
    end;
    Result:=negExprClass.Create(FProg, negTerm);
    if Optimize or (negTerm is TConstExpr) then
@@ -11083,7 +11113,7 @@ var
 begin
    hotPos:=FTok.HotPos;
    boolExpr:=ReadExpr;
-   if not boolExpr.IsOfType(FProg.TypBoolean) then
+   if not (boolExpr.IsOfType(FProg.TypBoolean) or boolExpr.IsOfType(FProg.TypVariant)) then
       FMsgs.AddCompilerError(hotPos, CPE_BooleanExpected);
    trueExpr:=nil;
    falseExpr:=nil;
@@ -13071,10 +13101,17 @@ begin
    FOperatorResolver.Resolved:=nil;
    FOperatorResolver.LeftType:=aLeftType;
    FOperatorResolver.RightType:=aRightType;
-   if FProg.Table.HasOperators then
-      if FProg.Table.EnumerateOperatorsFor(token, aLeftType, aRightType, FOperatorResolver.Callback) then
-         Exit(FOperatorResolver.Resolved);
-   FOperators.EnumerateOperatorsFor(token, aLeftType, aRightType, FOperatorResolver.Callback);
+   if aLeftType=nil then begin
+      if FProg.Table.HasOperators then
+         if FProg.Table.EnumerateOperatorsFor(token, nil, aRightType, FOperatorResolver.Callback) then
+            Exit(FOperatorResolver.Resolved);
+      FOperators.EnumerateUnaryOperatorsFor(token, aRightType, FOperatorResolver.Callback);
+   end else begin
+      if FProg.Table.HasOperators then
+         if FProg.Table.EnumerateOperatorsFor(token, aLeftType, aRightType, FOperatorResolver.Callback) then
+            Exit(FOperatorResolver.Resolved);
+      FOperators.EnumerateOperatorsFor(token, aLeftType, aRightType, FOperatorResolver.Callback);
+   end;
    Result:=FOperatorResolver.Resolved;
 end;
 
@@ -13091,8 +13128,8 @@ begin
    opSym:=ResolveOperatorFor(token, aLeft.Typ, aRight.Typ);
    if opSym=nil then Exit;
 
-   if opSym.BinExprClass<>nil then begin
-      Result:=TBinaryOpExprClass(opSym.BinExprClass).Create(FProg, scriptPos, aLeft, aRight);
+   if opSym.OperatorExprClass<>nil then begin
+      Result:=TBinaryOpExprClass(opSym.OperatorExprClass).Create(FProg, scriptPos, aLeft, aRight);
    end else if opSym.UsesSym<>nil then begin
       if opSym.UsesSym is TMethodSymbol then
          funcExpr:=CreateMethodExpr(FProg, TMethodSymbol(opSym.UsesSym), aLeft, rkObjRef, scriptPos)
