@@ -1841,12 +1841,15 @@ type
       ['{29767B6E-05C0-40E1-A41A-94DF54142312}']
       function GetElementSize : Integer;
       property ElementSize : Integer read GetElementSize;
+      function GetElementType : TTypeSymbol;
+      property ElementType : TTypeSymbol read GetElementType;
 
       function GetArrayLength : Integer;
       procedure SetArrayLength(n : Integer);
       property ArrayLength : Integer read GetArrayLength write SetArrayLength;
 
       function ToStringArray : TStringDynArray;
+      function ToInt64Array : TInt64DynArray;
 
       procedure ReplaceData(const v : TData);
    end;
@@ -3166,6 +3169,13 @@ begin
       paramRec:=@FuncParams[i];
       if (typSym=nil) or not UnicodeSameText(typSym.Name, paramRec.ParamType) then
          typSym:=Table.FindTypeSymbol(paramRec.ParamType, cvMagic);
+      if (typSym = nil) and (paramRec.ParamType = 'array of Any Type') then begin
+         typSym := TAnyTypeSymbol.Create('Any Type', nil);
+         table.AddSymbol(typSym);
+         typSym := TDynamicArraySymbol.Create('', typSym, Table.FindTypeSymbol(SYS_INTEGER, cvPublic));
+         table.AddSymbol(typSym);
+      end;
+
       if not Assigned(typSym) then
          raise Exception.CreateFmt(CPE_TypeForParamNotFound,
                                    [paramRec.ParamType, paramRec.ParamName]);

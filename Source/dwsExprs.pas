@@ -546,11 +546,15 @@ type
          function GetState(const index : TGUID) : Variant;
          procedure SetState(const index : TGUID; const v : Variant);
 
+         function AddClonedState(const item : TdwsCustomState) : TSimpleHashAction;
+
       public
          property States[const index : TGUID] : Variant read GetState write SetState; default;
 
          function IntegerStateDef(const index : TGUID; const default : Integer) : Integer;
          function StringStateDef(const index : TGUID; const default : String) : String;
+
+         function Clone : TdwsCustomStates;
    end;
 
    // holds execution context for a script
@@ -780,7 +784,7 @@ type
          FTimeStamp : TDateTime;
          FCompileDuration : TDateTime;
          FCompiler : TObject;
-         FOrphanedObjects : TObjectList<TRefCountedObject>;
+         FOrphanedObjects : TSimpleStack<TRefCountedObject>;
 
          FTypDefaultConstructor : TMethodSymbol;
          FTypDefaultDestructor : TMethodSymbol;
@@ -946,6 +950,7 @@ type
 
       public
          function  Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; virtual;
+         procedure Orphan(prog : TdwsProgram); virtual;
 
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function  EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
@@ -1039,7 +1044,7 @@ type
    end;
 
    // invalid expression
-   TErrorExpr = class (TNullExpr)
+   TErrorExpr = class sealed (TNullExpr)
    end;
 
    // statement; statement; statement;
@@ -1068,11 +1073,11 @@ type
    end;
 
    // var initialization + finalization block
-   TBlockInitExpr = class(TBlockRawExpr)
+   TBlockInitExpr = class sealed (TBlockRawExpr)
    end;
 
    // finalization block
-   TBlockFinalExpr = class(TBlockRawExpr)
+   TBlockFinalExpr = class sealed (TBlockRawExpr)
    end;
 
    // Encapsulates data
@@ -1146,6 +1151,7 @@ type
       public
          constructor Create(const aScriptPos : TScriptPos; aFunc : TFuncSymbol);
          destructor Destroy; override;
+         procedure Orphan(prog : TdwsProgram); override;
 
          procedure AddArg(arg : TTypedExpr);
          procedure ClearArgs;
@@ -1474,6 +1480,7 @@ type
    TUnaryOpIntExpr = class(TUnaryOpExpr)
       public
          constructor Create(prog : TdwsProgram; expr : TTypedExpr); override;
+         procedure Orphan(prog : TdwsProgram); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
    end;
@@ -1482,6 +1489,7 @@ type
    TUnaryOpFloatExpr = class(TUnaryOpExpr)
       public
          constructor Create(prog : TdwsProgram; expr : TTypedExpr); override;
+         procedure Orphan(prog : TdwsProgram); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
    end;
@@ -1531,6 +1539,8 @@ type
 
          function GetIsConstant : Boolean; override;
 
+         procedure OrphanSubExprs(prog : TdwsProgram);
+
       public
          constructor Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr); virtual;
          destructor Destroy; override;
@@ -1554,17 +1564,20 @@ type
    end;
    TIntegerBinOpExpr = class(TBinaryOpExpr)
      constructor Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr); override;
+     procedure Orphan(prog : TdwsProgram); override;
      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
      function EvalAsFloat(exec : TdwsExecution) : Double; override;
      function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
    end;
    TStringBinOpExpr = class(TBinaryOpExpr)
      constructor Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr); override;
+     procedure Orphan(prog : TdwsProgram); override;
      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
      function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
    end;
    TFloatBinOpExpr = class(TBinaryOpExpr)
      constructor Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr); override;
+     procedure Orphan(prog : TdwsProgram); override;
      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
      function Optimize(prog : TdwsProgram; exec : TdwsExecution) : TProgramExpr; override;
    end;
@@ -1587,6 +1600,8 @@ type
 
       public
          destructor Destroy; override;
+         procedure Orphan(prog : TdwsProgram);
+         procedure OrphanItems(prog : TdwsProgram);
 
          procedure AddExpr(expr : TTypedExpr);
          function  ExpectedArg : TParamSymbol;
@@ -1665,7 +1680,6 @@ type
          function GetFuncBySym(funcSym : TFuncSymbol): IInfo;
          procedure SetFuncSym(const Value: TFuncSymbol);
          function GetValueAsVariant(const s: UnicodeString): Variant;
-         procedure GetSymbolInfo(sym : TSymbol; var info : IInfo);
          function GetVars(const str: UnicodeString): IInfo;
          function GetParams(const Index: Integer): IInfo;
          procedure SetData(const s: UnicodeString; const Value: TData);
@@ -1729,6 +1743,7 @@ type
          function FindSymbolInUnits(const aName : UnicodeString) : TSymbol; overload;
          function GetTemp(const DataType: UnicodeString): IInfo;
          function RootInfo(const aName : UnicodeString) : IInfo; overload;
+         procedure GetSymbolInfo(sym : TSymbol; var info : IInfo);
 
          procedure RaiseExceptObj(const msg : UnicodeString; const obj : IScriptObj);
 
@@ -1832,6 +1847,7 @@ type
 
       protected
          function GetElementSize : Integer;
+         function GetElementType : TTypeSymbol;
          procedure SetArrayLength(n : Integer);
          function GetArrayLength : Integer;
 
@@ -1854,6 +1870,7 @@ type
 
          function ToString : String; override;
          function ToStringArray : TStringDynArray;
+         function ToInt64Array : TInt64DynArray;
 
          procedure ReplaceData(const newData : TData); override;
 
@@ -3012,6 +3029,8 @@ begin
    FAttributes:=TdwsSymbolAttributes.Create;
 
    FConditionalDefines:=TAutoStrings.Create;
+   FConditionalDefines.Value.Duplicates := dupIgnore;
+   FConditionalDefines.Value.Sorted := True;
 
    FSourceList:=TScriptSourceList.Create;
 
@@ -3032,12 +3051,16 @@ begin
    FTypDefaultConstructor:=TypTObject.Members.FindSymbol(SYS_TOBJECT_CREATE, cvPublic) as TMethodSymbol;
    FTypDefaultDestructor:=TypTObject.Members.FindSymbol(SYS_TOBJECT_DESTROY, cvPublic) as TMethodSymbol;
 
+   FOrphanedObjects := TSimpleStack<TRefCountedObject>.Create;
+
    FRoot:=Self;
 end;
 
 // Destroy
 //
 destructor TdwsMainProgram.Destroy;
+var
+   obj : TRefCountedObject;
 begin
    FExecutionsLock.Enter;
    try
@@ -3050,7 +3073,14 @@ begin
 
    inherited;
 
+   // stack behavior is required to allow objects to orphan others while being cleaned up
+   while FOrphanedObjects.Count > 0 do begin
+      obj := FOrphanedObjects.Peek;
+      obj.DecRefCount;
+      FOrphanedObjects.Pop;
+   end;
    FOrphanedObjects.Free;
+
    FFinalExpr.Free;
    FSourceContextMap.Free;
    FSymbolDictionary.Free;
@@ -3278,9 +3308,7 @@ end;
 //
 procedure TdwsMainProgram.OrphanObject(obj : TRefCountedObject);
 begin
-   if FOrphanedObjects=nil then
-      FOrphanedObjects:=TObjectList<TRefCountedObject>.Create;
-   FOrphanedObjects.Add(obj);
+   FOrphanedObjects.Push(obj);
 end;
 
 // AddFinalExpr
@@ -3849,6 +3877,13 @@ begin
    Result:=Self;
 end;
 
+// Orphan
+//
+procedure TProgramExpr.Orphan(prog : TdwsProgram);
+begin
+   prog.Root.OrphanObject(Self);
+end;
+
 // GetType
 //
 function TProgramExpr.GetType : TTypeSymbol;
@@ -4093,7 +4128,7 @@ begin
    if IsConstant then begin
       if Typ.IsOfType(prog.TypInteger) or Typ.IsOfType(prog.TypFloat) then begin
          Result:=TConstFloatExpr.CreateUnified(prog, nil, EvalAsFloat(exec));
-         Free;
+         Orphan(prog);
       end else Result:=OptimizeToTypedExpr(prog, exec, ScriptPos);
    end else Result:=Self;
 end;
@@ -4441,6 +4476,18 @@ begin
    inherited;
 end;
 
+// Orphan
+//
+procedure TFuncExprBase.Orphan(prog : TdwsProgram);
+var
+   i : Integer;
+begin
+   for i := 0 to FArgs.Count-1 do
+      TTypedExpr(FArgs.ExprBase[i]).Orphan(prog);
+   FArgs.Clear;
+   DecRefCount;
+end;
+
 // AddArg
 //
 procedure TFuncExprBase.AddArg(arg : TTypedExpr);
@@ -4490,7 +4537,7 @@ begin
          end;
       end;
       if Result<>Self then
-         Free;
+         Orphan(prog);
    end;
 end;
 
@@ -5493,6 +5540,29 @@ begin
    inherited;
 end;
 
+// Orphan
+//
+procedure TTypedExprList.Orphan(prog : TdwsProgram);
+begin
+   OrphanItems(prog);
+   if DefaultExpected <> nil then begin
+      prog.Root.OrphanObject(DefaultExpected);
+      FDefaultExpected := nil;
+   end;
+   Free;
+end;
+
+// OrphanItems
+//
+procedure TTypedExprList.OrphanItems(prog : TdwsProgram);
+var
+   i : Integer;
+begin
+   for i := 0 to Count-1 do
+      Expr[i].Orphan(prog);
+   FList.Clear;
+end;
+
 procedure TTypedExprList.AddExpr(expr : TTypedExpr);
 begin
    FList.Add(expr);
@@ -5576,6 +5646,21 @@ begin
    Result:=FLeft.IsConstant and FRight.IsConstant;
 end;
 
+// OrphanSubExprs
+//
+procedure TBinaryOpExpr.OrphanSubExprs(prog : TdwsProgram);
+begin
+   if FLeft <> nil then begin
+      FLeft.Orphan(prog);
+      FLeft := nil;
+   end;
+   if FRight <> nil then begin
+      FRight.Orphan(prog);
+      FRight := nil;
+   end;
+   DecRefCount;
+end;
+
 // OptimizeConstantOperandsToFloats
 //
 procedure TBinaryOpExpr.OptimizeConstantOperandsToFloats(prog : TdwsProgram; exec : TdwsExecution);
@@ -5632,7 +5717,7 @@ begin
    if IsConstant then begin
       EvalAsVariant(exec, v);
       Result:=TUnifiedConstExpr.CreateUnified(Prog, Prog.TypVariant, v);
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -5648,6 +5733,15 @@ begin
    if aLeft.Typ=aRight.Typ then
       FTyp:=aLeft.Typ
    else FTyp:=Prog.TypInteger;
+end;
+
+// Orphan
+//
+procedure TIntegerBinOpExpr.Orphan(prog : TdwsProgram);
+begin
+   if Typ=prog.TypInteger then
+      OrphanSubExprs(prog)
+   else inherited;
 end;
 
 // EvalAsVariant
@@ -5670,7 +5764,7 @@ function TIntegerBinOpExpr.Optimize(prog : TdwsProgram; exec : TdwsExecution) : 
 begin
    if IsConstant then begin
       Result:=TConstIntExpr.CreateUnified(Prog, Typ, EvalAsInteger(exec));
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -5684,6 +5778,15 @@ constructor TStringBinOpExpr.Create(Prog: TdwsProgram; const aScriptPos : TScrip
 begin
    inherited;
    FTyp:=Prog.TypString;
+end;
+
+// Orphan
+//
+procedure TStringBinOpExpr.Orphan(prog : TdwsProgram);
+begin
+   if Typ=prog.TypString then
+      OrphanSubExprs(prog)
+   else inherited;
 end;
 
 // EvalAsVariant
@@ -5705,7 +5808,7 @@ begin
    if IsConstant then begin
       EvalAsString(exec, buf);
       Result:=TConstStringExpr.CreateUnified(Prog, nil, buf);
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -5721,6 +5824,15 @@ begin
    FTyp:=Prog.TypFloat;
 end;
 
+// Orphan
+//
+procedure TFloatBinOpExpr.Orphan(prog : TdwsProgram);
+begin
+   if Typ=prog.TypFloat then
+      OrphanSubExprs(prog)
+   else inherited;
+end;
+
 // EvalAsVariant
 //
 procedure TFloatBinOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
@@ -5734,7 +5846,7 @@ function TFloatBinOpExpr.Optimize(prog : TdwsProgram; exec : TdwsExecution) : TP
 begin
    if IsConstant then begin
       Result:=TConstFloatExpr.CreateUnified(Prog, nil, EvalAsFloat(exec));
-      Free;
+      Orphan(prog);
    end else begin
       OptimizeConstantOperandsToFloats(prog, exec);
       Result:=Self;
@@ -5766,7 +5878,7 @@ function TBooleanBinOpExpr.Optimize(prog : TdwsProgram; exec : TdwsExecution) : 
 begin
    if IsConstant then begin
       Result:=TConstBooleanExpr.CreateUnified(Prog, nil, EvalAsBoolean(exec));
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -5878,7 +5990,20 @@ end;
 constructor TUnaryOpIntExpr.Create(prog : TdwsProgram; expr : TTypedExpr);
 begin
    inherited;
-   Typ:=Prog.TypInteger;
+   Typ := prog.TypInteger;
+end;
+
+// Orphan
+//
+procedure TUnaryOpIntExpr.Orphan(prog : TdwsProgram);
+begin
+   if Typ = prog.TypInteger then begin
+      if Expr <> nil then begin
+         Expr.Orphan(prog);
+         FExpr := nil;
+      end;
+      DecRefCount;
+   end else inherited;
 end;
 
 // EvalAsVariant
@@ -5894,7 +6019,7 @@ function TUnaryOpIntExpr.Optimize(prog : TdwsProgram; exec : TdwsExecution) : TP
 begin
    if IsConstant then begin
       Result:=TConstIntExpr.CreateUnified(Prog, Typ, EvalAsInteger(exec));
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -5910,6 +6035,19 @@ begin
    Typ:=Prog.TypFloat;
 end;
 
+// Orphan
+//
+procedure TUnaryOpFloatExpr.Orphan(prog : TdwsProgram);
+begin
+   if Typ = prog.TypFloat then begin
+      if Expr <> nil then begin
+         Expr.Orphan(prog);
+         FExpr := nil;
+      end;
+      DecRefCount;
+   end else inherited;
+end;
+
 // EvalAsVariant
 //
 procedure TUnaryOpFloatExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
@@ -5923,7 +6061,7 @@ function TUnaryOpFloatExpr.Optimize(prog : TdwsProgram; exec : TdwsExecution) : 
 begin
    if IsConstant then begin
       Result:=TConstFloatExpr.CreateUnified(Prog, nil, EvalAsFloat(exec));
-      Free;
+      Orphan(prog);
    end else Result:=Self;
 end;
 
@@ -7141,11 +7279,31 @@ begin
       EvalAsString(i, Result[i]);
 end;
 
+// ToInt64Array
+//
+function TScriptDynamicArray.ToInt64Array : TInt64DynArray;
+var
+   i : Integer;
+begin
+   Assert(FElementTyp.BaseType.ClassType=TBaseStringSymbol);
+
+   System.SetLength(Result, ArrayLength);
+   for i:=0 to ArrayLength-1 do
+      Result[i]:=AsInteger[i];
+end;
+
 // GetElementSize
 //
 function TScriptDynamicArray.GetElementSize : Integer;
 begin
    Result:=FElementSize;
+end;
+
+// GetElementType
+//
+function TScriptDynamicArray.GetElementType : TTypeSymbol;
+begin
+   Result := FElementTyp;
 end;
 
 // ------------------
@@ -8901,6 +9059,14 @@ begin
    Replace(s);
 end;
 
+// AddClonedState
+//
+function TdwsCustomStates.AddClonedState(const item : TdwsCustomState) : TSimpleHashAction;
+begin
+   SetState(item.Key, item.Value);
+   Result := shaNone;
+end;
+
 // IntegerStateDef
 //
 function TdwsCustomStates.IntegerStateDef(const index : TGUID; const default : Integer) : Integer;
@@ -8923,6 +9089,14 @@ begin
    if Match(s) and VarIsStr(s.Value) then
       Result:=s.Value
    else Result:=default;
+end;
+
+// Clone
+//
+function TdwsCustomStates.Clone : TdwsCustomStates;
+begin
+   Result := TdwsCustomStates.Create;
+   Result.Enumerate(Result.AddClonedState);
 end;
 
 // ------------------------------------------------------------------

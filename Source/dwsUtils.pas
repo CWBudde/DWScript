@@ -28,6 +28,7 @@ uses
 type
 
    TStringDynArray = array of UnicodeString;
+   TInt64DynArray = array of Int64;
 
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
@@ -49,6 +50,7 @@ type
          property  RefCount : Integer read GetRefCount write SetRefCount;
          procedure Free;
    end;
+   PRefCountedObject = ^TRefCountedObject;
 
    // IGetSelf
    //
@@ -943,6 +945,7 @@ procedure FastStringReplace(var str : UnicodeString; const sub, newSub : Unicode
 procedure VariantToString(const v : Variant; var s : UnicodeString);
 procedure VariantToInt64(const v : Variant; var r : Int64);
 function VariantToBool(const v : Variant) : Boolean;
+function VariantToFloat(const v : Variant) : Double;
 
 procedure VarClearSafe(var v : Variant);
 procedure VarCopySafe(var dest : Variant; const src : Variant); overload;
@@ -1705,6 +1708,24 @@ begin
          Result := TVarData(v).VDouble <> 0;
       varNull, varEmpty :
          Result := False;
+   else
+      Result := v;
+   end;
+end;
+
+// VariantToFloat
+//
+function VariantToFloat(const v : Variant) : Double;
+begin
+   case TVarData(v).VType of
+      varDouble :
+         Result := TVarData(v).VDouble;
+      varInt64 :
+         Result := TVarData(v).VInt64;
+      varBoolean :
+         Result := Ord(TVarData(v).VBoolean);
+      varNull :
+         Result := 0;
    else
       Result := v;
    end;
@@ -4824,7 +4845,7 @@ end;
 //
 procedure TRefCountedObject.Free;
 begin
-   if Self<>nil then
+   if Self <> nil then
       DecRefCount;
 end;
 
