@@ -1008,8 +1008,12 @@ end;
 
 class procedure THttpAPI.Check(error : HRESULT; api : THttpAPIs);
 begin
-   if error<>NO_ERROR then
+   case error of
+      NO_ERROR : ;
+      ERROR_NETNAME_DELETED : ; // ignored
+   else
       raise EHttpApiServer.Create(api, error);
+   end;
 end;
 
 // StatusCodeToReason
@@ -1046,8 +1050,10 @@ begin
          result := cCodes300[code];
       400..High(cCodes400) :
          result := cCodes400[code];
+      423: result:='Locked';
       500..High(cCodes500) :
          result := cCodes500[code];
+      507: result := 'Insufficient Storage';
    else
       result := 'Unknown';
    end;

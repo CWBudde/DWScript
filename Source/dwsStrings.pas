@@ -266,6 +266,7 @@ const
   CPE_MethodExpected = 'Declaration should be "method"';
   CPE_ConstructorExpected = 'Declaration should be "constructor"';
   CPE_DestructorExpected = 'Declaration should be "destructor"';
+  CPE_LambdaExpected = 'Declaration should be "lambda"';
   CPE_BadResultType = 'Result type should be "%s"';
   CPE_BadNumberOfParameters = 'Expected %d parameters (instead of %d)';
   CPE_BadParameterName = 'Parameter %d - Name "%s" expected';
@@ -410,6 +411,7 @@ const
   CPE_IntegerExpressionExpected = 'Integer expression expected';
   CPE_OrdinalExpressionExpected = 'Ordinal expression expected';
   CPE_InvalidConstType = 'Invalid const type "%s"';
+  CPE_InvalidConstTypeVsExpected = 'Invalid const type "%s" expected "%s"';
   CPE_ConstantCannotBeWrittenTo = 'Constant "%s" cannot be written to';
 
   CPE_CompilerSwitchUnknown = 'Compiler switch "%s" unknown';

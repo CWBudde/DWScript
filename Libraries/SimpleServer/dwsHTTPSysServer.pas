@@ -43,7 +43,8 @@ uses
    Classes,
    SynWinSock, Registry,
    dwsHTTPSysAPI, dwsUtils, dwsXPlatform,
-   dwsWebEnvironment, dwsHttpSysWebEnv, dwsWebServerHelpers;
+   dwsWebEnvironment, dwsHttpSysWebEnv, dwsWebServerHelpers,
+   dwsHTTPSysServerEvents;
 
 type
    /// FPC 64 compatibility Integer type
@@ -88,6 +89,15 @@ type
 
    /// event prototype used e.g. by THttpServerGeneric.OnHttpThreadStart
    TNotifyThreadEvent = procedure(Sender : TThread) of object;
+
+   THttpSys2URLInfo = record
+      Port : Integer;
+      DomainName : String;
+      RelativeURI : String;
+      HTTPS : Boolean;
+      function ToString : String;
+   end;
+   THttpSys2URLInfos = array of THttpSys2URLInfo;
 
    /// generic HTTP server
    THttpServerGeneric = class (TThread)
@@ -169,8 +179,7 @@ type
          property Prefix : String read FPrefix write FPrefix;
    end;
 
-  {/ HTTP server using fast http.sys 2.0 kernel-mode server
-
+  {  HTTP server using fast http.sys 2.0 kernel-mode server
      Requires Win2008 or Vista. }
    THttpApi2Server = class (THttpServerGeneric)
       protected
@@ -204,6 +213,8 @@ type
          FMaxConnections : Cardinal;
          FAuthentication : Cardinal;
          FMimeInfos : TMIMETypeCache;
+
+         FServerEvents : IdwsHTTPServerEvents;
 
          /// server main loop - don't change directly
          // - will call the Request public virtual method with the appropriate
@@ -277,14 +288,12 @@ type
          // - if this method is not used within an overriden constructor, default
          // Create must have be called with CreateSuspended = TRUE and then call the
          // Resume method after all Url have been added
-         function AddUrl(const aRoot : String; aPort : Integer; isHttps : boolean;
-                         const aDomainName : String = '*') : Integer;
+         function AddUrl(const info : THttpSys2URLInfo) : Integer;
          /// un-register the URLs to Listen On
          // - this method expect the same parameters as specified to AddUrl()
          // - return 0 (NO_ERROR) on success, an error code if failed (e.g.
          // -1 if the corresponding parameters do not match any previous AddUrl)
-         function RemoveUrl(const aRoot : String; aPort : Integer; isHttps : boolean;
-                            const aDomainName : String = '*') : Integer;
+         function RemoveUrl(const info : THttpSys2URLInfo) : Integer;
 
          /// will authorize a specified URL prefix
          // - will allow to call AddUrl() later for any user on the computer
@@ -297,8 +306,7 @@ type
          // - will first delete any matching rule for this URL prefix
          // - if OnlyDelete is true, will delete but won't add the new authorization;
          // in this case, any error message at deletion will be returned
-         class function AddUrlAuthorize(const aRoot : String; aPort : Integer; isHttps : boolean;
-                            const aDomainName : String = '*'; OnlyDelete : boolean = false) : string;
+         class function AddUrlAuthorize(const info : THttpSys2URLInfo; OnlyDelete : boolean = false) : string;
          /// will register a compression algorithm
          // - overriden method which will handle any cloned instances
          procedure RegisterCompress(aFunction : THttpSocketCompress); override;
@@ -319,6 +327,7 @@ type
          property MaxConnections : Cardinal read FMaxConnections write SetMaxConnections;
          property Authentication : Cardinal read FAuthentication;
 
+         property ServerEvents : IdwsHTTPServerEvents read FServerEvents write FServerEvents;
    end;
 
 const
@@ -510,6 +519,18 @@ begin
    result := Prefix[isHttps]+aDomainName+':'+IntToStr(aPort)+aRoot;
 end;
 
+// ToString
+//
+function THttpSys2URLInfo.ToString : String;
+begin
+   if HTTPS then
+      Result := 'https://'
+   else Result := 'http://';
+   Result := Result + DomainName + ':' + IntToStr(Port) + '/' + RelativeURI;
+end;
+
+// Create
+//
 constructor THttpApi2Server.Create(CreateSuspended : Boolean);
 var
    bindInfo : HTTP_BINDING_INFO;
@@ -602,6 +623,7 @@ begin
       FLogDataPtr:=@FLogFieldsData;
       ServiceName:=From.ServiceName;
    end;
+   FServerEvents := From.FServerEvents;
 end;
 
 // SendStaticFile
@@ -637,8 +659,6 @@ begin
             rangeStart := GetNextItemUInt64(R);
             if R^ = '-' then begin
                inc(R);
-               // EG: suspicious flags, was incorrect and doing a disconnect
-               // and the ranges flags is not encouraged in the doc
                flags := HTTP_SEND_RESPONSE_FLAG_PROCESS_RANGES;
                dataChunkFile.ByteRange.StartingOffset := ULARGE_INTEGER(rangeStart);
                if R^ in ['0'..'9'] then begin
@@ -684,8 +704,7 @@ begin
    HttpAPI.SendHttpResponse(FReqQueue, request^.RequestId, 0, response^, nil, bytesSent, nil, 0, nil, FLogDataPtr);
 end;
 
-function THttpApi2Server.AddUrl(const aRoot : String; aPort : Integer; isHttps : boolean;
-   const aDomainName : String) : Integer;
+function THttpApi2Server.AddUrl(const info : THttpSys2URLInfo) : Integer;
 var
    s : String;
    n : Integer;
@@ -693,7 +712,7 @@ begin
    result := -1;
    if (Self = nil) or (FReqQueue = 0) or (HttpAPI.Module = 0) then
       exit;
-   s := RegURL(aRoot, aPort, isHttps, aDomainName);
+   s := RegURL(info.RelativeURI, info.Port, info.HTTPS, info.DomainName);
    if s = '' then
       exit; // invalid parameters
 
@@ -706,8 +725,7 @@ begin
    FRegisteredUrl[n] := s;
 end;
 
-function THttpApi2Server.RemoveUrl(const aRoot : String; aPort : Integer; isHttps : boolean;
-                                   const aDomainName : String) : Integer;
+function THttpApi2Server.RemoveUrl(const info : THttpSys2URLInfo) : Integer;
 var
    s : String;
    i, j, n : Integer;
@@ -715,7 +733,7 @@ begin
    result := -1;
    if (Self = nil) or (FReqQueue = 0) or (HttpAPI.Module = 0) then
       exit;
-   s := RegURL(aRoot, aPort, isHttps, aDomainName);
+   s := RegURL(info.RelativeURI, info.Port, info.HTTPS, info.DomainName);
    if s = '' then
       exit; // invalid parameters
    n := High(FRegisteredUrl);
@@ -738,8 +756,7 @@ const
    // - 'S-1-1-0'   defines a group that includes all users
    HTTPADDURLSECDESC : PWideChar = 'D:(A;;GA;;;S-1-1-0)';
 
-class function THttpApi2Server.AddUrlAuthorize(const aRoot : String; aPort : Integer; isHttps : boolean;
-                            const aDomainName : String = '*'; OnlyDelete : boolean = false) : string;
+class function THttpApi2Server.AddUrlAuthorize(const info : THttpSys2URLInfo; OnlyDelete : boolean = false) : string;
 var
    prefix : String;
    Error : HRESULT;
@@ -747,7 +764,7 @@ var
 begin
    try
       HttpApi.InitializeAPI;
-      prefix := RegURL(aRoot, aPort, isHttps, aDomainName);
+      prefix := RegURL(info.RelativeURI, info.Port, info.HTTPS, info.DomainName);
       if prefix = '' then
          result := 'Invalid parameters'
       else begin
@@ -959,6 +976,14 @@ begin
 end;
 
 procedure THttpApi2Server.Execute;
+
+   procedure SetKnownHeader(var h : HTTP_KNOWN_HEADER; const value : RawByteString);
+   begin
+      h.RawValueLength := Length(value);
+      h.pRawValue := Pointer(value);
+   end;
+
+
 var
    request : PHTTP_REQUEST_V2;
    requestID : HTTP_REQUEST_ID;
@@ -969,6 +994,7 @@ var
    outContentData, outContentEncoding : RawByteString;
    outCustomHeader : RawByteString;
    inContent, inContentType : RawByteString;
+   sourceName : String;
    response : PHTTP_RESPONSE_V2;
    headers : HTTP_UNKNOWN_HEADER_ARRAY;
    dataChunkInMemory : HTTP_DATA_CHUNK_INMEMORY;
@@ -1055,27 +1081,48 @@ begin
                response^.Version := request^.Version;
                response^.SetHeaders(Pointer(outCustomHeader), headers);
                if FWebResponse.ContentType = HTTP_RESP_STATICFILE then begin
+
                   // response is file -> let http.sys serve it (OutContent is UTF-8)
                   SendStaticFile(request, response);
+
                end else begin
-                  // response is in OutContent -> sent it from memory
-                  if (FCompress<>nil) and FWebResponse.Compression then begin
-                     pContentEncoding := @response^.Headers.KnownHeaders[reqContentEncoding];
-                     if pContentEncoding^.RawValueLength = 0 then begin
-                        // no previous encoding -> try if any compression
-                        outContentData := FWebResponse.ContentData;
-                        outContentEncoding := CompressDataAndGetHeaders(inCompressAccept,
-                           FCompress, FWebResponse.ContentType, outContentData);
-                        FWebResponse.ContentData := outContentData;
-                        pContentEncoding^.pRawValue := Pointer(outContentEncoding);
-                        pContentEncoding^.RawValueLength := Length(outContentEncoding);
+
+                  if Assigned(FServerEvents) and StrBeginsWithA(FWebResponse.ContentType, 'text/event-stream') then begin
+
+                     sourceName := StrAfterChar(UTF8ToString(FWebResponse.ContentType), ',');
+                     FWebResponse.ContentType := 'text/event-stream';
+                     SetKnownHeader(response^.Headers.KnownHeaders[reqCacheControl], 'no-cache');
+                     SetKnownHeader(response^.Headers.KnownHeaders[reqConnection], 'keep-alive');
+                     response^.SetContent(dataChunkInMemory, FWebResponse.ContentData, FWebResponse.ContentType);
+
+                     FServerEvents.AddRequest(sourceName,
+                                              FReqQueue, request^.RequestId,
+                                              FWebRequest.RemoteIP,
+                                              response);
+
+                  end else begin
+
+                     // response is in OutContent -> sent it from memory
+                     if (FCompress<>nil) and FWebResponse.Compression then begin
+                        pContentEncoding := @response^.Headers.KnownHeaders[reqContentEncoding];
+                        if pContentEncoding^.RawValueLength = 0 then begin
+                           // no previous encoding -> try if any compression
+                           outContentData := FWebResponse.ContentData;
+                           outContentEncoding := CompressDataAndGetHeaders(inCompressAccept,
+                              FCompress, FWebResponse.ContentType, outContentData);
+                           FWebResponse.ContentData := outContentData;
+                           pContentEncoding^.pRawValue := Pointer(outContentEncoding);
+                           pContentEncoding^.RawValueLength := Length(outContentEncoding);
+                        end;
                      end;
+
+                     response^.SetContent(dataChunkInMemory, FWebResponse.ContentData, FWebResponse.ContentType);
+                     HttpAPI.Check(
+                        HttpAPI.SendHttpResponse(FReqQueue, request^.RequestId, GetHttpResponseFlags,
+                                                 response^, nil, bytesSent, nil, 0, nil, FLogDataPtr),
+                        hSendHttpResponse);
+
                   end;
-                  response^.SetContent(dataChunkInMemory, FWebResponse.ContentData, FWebResponse.ContentType);
-                  HttpAPI.Check(
-                     HttpAPI.SendHttpResponse(FReqQueue, request^.RequestId, GetHttpResponseFlags,
-                                              response^, nil, bytesSent, nil, 0, nil, FLogDataPtr),
-                     hSendHttpResponse);
                end;
             except
                // handle any exception raised during process: show must go on!

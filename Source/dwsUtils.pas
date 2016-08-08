@@ -448,6 +448,8 @@ type
 
          property Count : Integer read FCount;
          property HighIndex : Integer read FHighIndex;
+
+         function Names : TStringDynArray;
    end;
 
    TSimpleRefCountedObjectHash = class (TSimpleObjectHash<TRefCountedObject>);
@@ -1102,16 +1104,16 @@ type
   TByteArray = array[0..maxInt shr 1] of Byte;
 var
    i, n : Integer;
-   pSrc : PWideChar;
+   pSrc : PWordArray;
    pDest : PByteArray;
 begin
    n:=Length(s);
    SetLength(Result, n);
    if n=0 then Exit;
-   pSrc:=PWideChar(Pointer(s));
-   pDest:=PByteArray(NativeUInt(Result));
+   pSrc:=PWordArray(Pointer(s));
+   pDest:=PByteArray(Pointer(Result));
    for i:=0 to n-1 do
-      pDest[i]:=PByte(@pSrc[i])^;
+      pDest[i]:=pSrc[i];
 end;
 
 // StringBytesToWords
@@ -4536,6 +4538,23 @@ begin
          i:=i shr 1;
       Resize(i);
    end;
+end;
+
+// Names
+//
+function TNameObjectHash.Names : TStringDynArray;
+var
+   i, k : Integer;
+begin
+   k := 0;
+   SetLength(Result, FHighIndex);
+   for i := 0 to FHighIndex do begin
+      if FBuckets[i].HashCode <> 0 then begin
+         Result[k] := FBuckets[i].Name;
+         Inc(k);
+      end;
+   end;
+   SetLength(Result, k);
 end;
 
 // Resize

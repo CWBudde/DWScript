@@ -100,19 +100,22 @@ begin
 
    scriptPos.Col:=2;
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
-   CheckTrue(sugg.Count>2, 'column 2');
+   CheckTrue(sugg.Count>3, 'column 2');
    CheckEquals('printit', sugg.Code[0], 'sugg 2, 0');
-   CheckEquals('Param', sugg.Code[1], 'sugg 2, 1');
+   CheckEquals('PadLeft', sugg.Code[1], 'sugg 2, 1');
+   CheckEquals('PadRight', sugg.Code[2], 'sugg 2, 2');
+   CheckEquals('Param', sugg.Code[3], 'sugg 2, 3');
 
    scriptPos.Col:=3;
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
-   CheckEquals(6, sugg.Count, 'column 6');
-   CheckEquals('printit', sugg.Code[0], 'sugg 6, 0');
-   CheckEquals('Print', sugg.Code[1], 'sugg 6, 1');
-   CheckEquals('PrintLn', sugg.Code[2], 'sugg 6, 2');
-   CheckEquals('procedure', sugg.Code[3], 'sugg 6, 3');
-   CheckEquals('property', sugg.Code[4], 'sugg 6, 4');
-   CheckEquals('Pred', sugg.Code[5], 'sugg 6, 5');
+   CheckEquals(7, sugg.Count, 'column 7');
+   CheckEquals('printit', sugg.Code[0], 'sugg 7, 0');
+   CheckEquals('Print', sugg.Code[1], 'sugg 7, 1');
+   CheckEquals('PrintLn', sugg.Code[2], 'sugg 7, 2');
+   CheckEquals('PrivateVarsNames', sugg.Code[3], 'sugg 7, 3');
+   CheckEquals('procedure', sugg.Code[4], 'sugg 7, 4');
+   CheckEquals('property', sugg.Code[5], 'sugg 7, 5');
+   CheckEquals('Pred', sugg.Code[6], 'sugg 7, 6');
 
    scriptPos.Col:=7;
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
@@ -216,14 +219,17 @@ begin
 
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 1, 11);
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
-   CheckTrue(sugg.Count>3, 'column 11');
-   CheckEquals('ParseDateTime', sugg.Code[0], 'sugg 11, 0');
-   CheckEquals('Pi', sugg.Code[1], 'sugg 11, 1');
-   CheckEquals('PixmapToJPEGData', sugg.Code[2], 'sugg 11, 2');
+   CheckTrue(sugg.Count>5, 'column 11');
+   CheckEquals('PadLeft', sugg.Code[0], 'sugg 11, 0');
+   CheckEquals('PadRight', sugg.Code[1], 'sugg 11, 1');
+   CheckEquals('ParseDateTime', sugg.Code[2], 'sugg 11, 2');
+   CheckEquals('Pi', sugg.Code[3], 'sugg 11, 3');
+   CheckEquals('PixmapToJPEGData', sugg.Code[4], 'sugg 11, 4');
 
    scriptPos.Col:=12;
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
-   CheckEquals(0, sugg.Count, 'column 12');
+   CheckEquals(1, sugg.Count, 'column 12');
+   CheckEquals('PrivateVarsNames', sugg.Code[0], 'sugg 12, 0');
 
    prog:=FCompiler.Compile('System.TObject');
 

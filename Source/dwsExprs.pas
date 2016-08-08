@@ -507,6 +507,7 @@ type
       function GetUnitMains : TUnitMainSymbols;
       function GetProgramObject : TdwsMainProgram;
       procedure SetExecutionsClass(aClass : TdwsProgramExecutionClass);
+      function IsEmpty : Boolean;
 
       function CreateNewExecution : IdwsProgramExecution;
       function BeginNewExecution : IdwsProgramExecution;
@@ -1153,6 +1154,9 @@ type
 
    EdwsExternalFuncHandler = class (Exception);
 
+   TCreateFunctionOption = (cfoForceStatic, cfoInheritedCall);
+   TCreateFunctionOptions = set of TCreateFunctionOption;
+
    // TFuncExprBase
    //
    TFuncExprBase = class(TPosDataExpr)
@@ -1188,7 +1192,8 @@ type
          procedure SetResultAddr(prog : TdwsProgram; exec : TdwsExecution; ResultAddr: Integer = -1);
          property ResultAddr : Integer read FResultAddr;
 
-         function ChangeFuncSymbol(aProg: TdwsProgram; newFuncSym : TFuncSymbol) : TFuncExprBase; virtual;
+         function ChangeFuncSymbol(aProg: TdwsProgram; newFuncSym : TFuncSymbol;
+                                   options : TCreateFunctionOptions) : TFuncExprBase; virtual;
 
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
 
@@ -1854,6 +1859,8 @@ type
          function ToString : String; override;
 
          procedure ClearData; override;
+
+         function FieldAddress(const fieldName : String) : Integer;
 
          property ClassSym : TClassSymbol read FClassSym;
          property ExecutionContext : TdwsProgramExecution read FExecutionContext write FExecutionContext;
@@ -4655,7 +4662,8 @@ end;
 
 // ChangeFuncSymbol
 //
-function TFuncExprBase.ChangeFuncSymbol(aProg: TdwsProgram; newFuncSym : TFuncSymbol) : TFuncExprBase;
+function TFuncExprBase.ChangeFuncSymbol(aProg: TdwsProgram; newFuncSym : TFuncSymbol;
+                                        options : TCreateFunctionOptions) : TFuncExprBase;
 begin
    if (FuncSym is TMagicFuncSymbol) or (newFuncSym is TMagicFuncSymbol) then begin
       Result:=TMagicFuncExpr.CreateMagicFuncExpr(aProg, ScriptPos, TMagicFuncSymbol(newFuncSym));
@@ -5286,14 +5294,14 @@ begin
       baseTyp:=baseExpr.Typ.UnAliasedType;
       if baseTyp is TClassOfSymbol then begin
          classSym:=TClassSymbol(baseExpr.EvalAsInteger(exec));
-         FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, nil, classSym);
+         FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, nil, classSym, []);
       end else begin
          if baseTyp is TInterfaceSymbol then begin
             baseExpr.EvalAsScriptObjInterface(exec, scriptObjIntf);
             FFuncExpr:=CreateIntfExpr(prog, funcExpr.FuncSym, scriptObjIntf);
          end else begin
             baseExpr.EvalAsScriptObj(exec, scriptObj);
-            FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, scriptObj, scriptObj.ClassSym);
+            FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, scriptObj, scriptObj.ClassSym, []);
          end;
       end;
 
@@ -5304,7 +5312,7 @@ begin
 
    end else begin
 
-      FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, nil, nil);
+      FFuncExpr:=CreateFuncExpr(prog, funcExpr.FuncSym, nil, nil, []);
 
    end;
 
@@ -7044,6 +7052,18 @@ procedure TScriptObjInstance.ClearData;
 begin
    inherited;
    FClassSym:=nil;
+end;
+
+// FieldAddress
+//
+function TScriptObjInstance.FieldAddress(const fieldName : String) : Integer;
+var
+   field : TFieldSymbol;
+begin
+   field := TFieldSymbol(FClassSym.Members.FindLocal(fieldName, TFieldSymbol));
+   if field = nil then
+      raise Exception.CreateFmt(RTE_FieldNotFoundInClass, [fieldName, FClassSym.Name]);
+   Result := field.Offset;
 end;
 
 // GetClassSym
@@ -9155,7 +9175,7 @@ end;
 function TdwsCustomStates.Clone : TdwsCustomStates;
 begin
    Result := TdwsCustomStates.Create;
-   Result.Enumerate(Result.AddClonedState);
+   Self.Enumerate(Result.AddClonedState);
 end;
 
 // ------------------

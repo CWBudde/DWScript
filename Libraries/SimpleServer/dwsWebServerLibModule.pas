@@ -3,9 +3,9 @@ unit dwsWebServerLibModule;
 interface
 
 uses
-   SysUtils, Classes,
-   dwsComp, dwsExprs,
-   dwsWebServerInfo;
+   SysUtils, Classes, SynCommons,
+   dwsComp, dwsExprs, dwsSymbols, dwsUtils,
+   dwsWebServerInfo, dwsWebEnvironment;
 
 type
   TdwsWebServerLib = class(TDataModule)

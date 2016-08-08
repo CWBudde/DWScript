@@ -18,17 +18,14 @@ unit DSimpleDWScript;
 
 interface
 
-{.$define EnablePas2Js}
+{$define LogCompiles}
 
 uses
-   Windows, SysUtils, Classes, StrUtils,
+   Windows, SysUtils, Classes, StrUtils, Masks,
    dwsFileSystem, dwsGlobalVarsFunctions, dwsExprList,
    dwsCompiler, dwsHtmlFilter, dwsComp, dwsExprs, dwsUtils, dwsXPlatform,
    dwsJSONConnector, dwsJSON, dwsErrors, dwsFunctions, dwsSymbols,
-   dwsJIT, dwsJITx86,
-{$ifdef EnablePas2Js}
-   dwsJSFilter, dwsJSLibModule, dwsCodeGen,
-{$endif}
+   dwsJIT, dwsJITx86, dwsJSFilter, dwsJSLibModule, dwsCodeGen,
    dwsWebEnvironment, dwsSystemInfoLibModule, dwsCPUUsage, dwsWebLibModule,
    dwsWebServerHelpers, dwsZipLibModule,
    dwsDataBase, dwsDataBaseLibModule, dwsWebServerInfo, dwsWebServerLibModule,
@@ -38,17 +35,10 @@ uses
 
 type
 
-   TProgramList = TSimpleList<IdwsProgram>;
-
    TCompiledProgram = record
       Name : String;
       Prog : IdwsProgram;
-   end;
-
-   TDependenciesHash = class (TSimpleNameObjectHash<TProgramList>)
-      procedure RegisterProg(const cp : TCompiledProgram);
-      procedure DeregisterProg(const prog : IdwsProgram);
-      procedure AddName(const name : String; const prog : IdwsProgram);
+      Files : IAutoStrings;
    end;
 
    TCompiledProgramHash = class (TSimpleHash<TCompiledProgram>)
@@ -69,15 +59,13 @@ type
       Prev, Next : PExecutingScript;
    end;
 
-   TLoadSourceCodeEvent = function (const fileName : String) : String of object;
-
    TSimpleDWScript = class(TDataModule)
       DelphiWebScript: TDelphiWebScript;
       dwsHtmlFilter: TdwsHtmlFilter;
       dwsGlobalVarsFunctions: TdwsGlobalVarsFunctions;
       dwsCompileSystem: TdwsRestrictedFileSystem;
       dwsRuntimeFileSystem: TdwsRestrictedFileSystem;
-    dwsComConnector: TdwsComConnector;
+      dwsComConnector: TdwsComConnector;
       procedure DataModuleCreate(Sender: TObject);
       procedure DataModuleDestroy(Sender: TObject);
 
@@ -94,7 +82,7 @@ type
 
       FSystemInfo : TdwsSystemInfoLibModule;
       FHotPath : String;
-      FWebEnv : TdwsWebLib;
+      FWebLib : TdwsWebLib;
       FDataBase : TdwsDatabaseLib;
       FJSON : TdwsJSONLibModule;
       FSynapse : TdwsSynapseLib;
@@ -103,9 +91,10 @@ type
 
       FCompiledPrograms : TCompiledProgramHash;
       FCompiledProgramsLock : TFixedCriticalSection;
-      FDependenciesHash : TDependenciesHash;
 
       FCompilerLock : TFixedCriticalSection;
+      FCompilerFiles : IAutoStrings;
+
       FCodeGenLock : TFixedCriticalSection;
       FEnableJIT : Boolean;
 
@@ -113,41 +102,42 @@ type
       FExecutingScripts : PExecutingScript;
       FExecutingScriptsLock : TMultiReadSingleWrite;
 
-      FFlushProgList : TProgramList;
-
-      FOnLoadSourceCode : TLoadSourceCodeEvent;
-
       FStartupScriptName : String;
       FShutdownScriptName : String;
       FBackgroundFileSystem : IdwsFileSystem;
 
       FErrorLogDirectory : String;
 
+      FFlushMask : TMask;
+      FCheckDirectoryChanges : ITimer;
+      FLastCheckTime : TFileTime;
+
    protected
-      {$ifdef EnablePas2Js}
       FJSCompiler : TDelphiWebScript;
       FJSFilter : TdwsJSFilter;
-      {$endif}
 
       procedure TryAcquireDWS(const fileName : String; var prog : IdwsProgram);
       procedure CompileDWS(const fileName : String; var prog : IdwsProgram;
                            typ : TFileAccessType);
 
       procedure LogCompileErrors(const fileName : String; const msgs : TdwsMessageList);
+      procedure LogCompilation(const fmt : String; const params : array of const);
 
-      function AddNotMatching(const cp : TCompiledProgram) : TSimpleHashAction;
+      function FlushMatchingMask(const cp : TCompiledProgram) : TSimpleHashAction;
 
       procedure SetCPUUsageLimit(const val : Integer);
       procedure SetCPUAffinity(const val : Cardinal);
 
       function WaitForCPULimit : Boolean;
 
-      function DoLoadSourceCode(const fileName : String) : String;
+      procedure DoSourceFileStreamOpened(Sender : TObject; const fileName : String; const mode : TdwsFileOpenMode);
 
       procedure DoBackgroundWork(const request : TWebRequest);
 
       class procedure Handle500(response : TWebResponse; msgs : TdwsMessageList); static;
       class procedure Handle503(response : TWebResponse); static;
+
+      procedure CheckDirectoryChanges;
 
    public
       procedure Initialize(const serverInfo : IWebServerInfo);
@@ -158,9 +148,7 @@ type
                           const options : TDWSHandlingOptions);
       procedure StopDWS;
 
-      {$ifdef EnablePas2Js}
       procedure HandleP2JS(const fileName : String; request : TWebRequest; response : TWebResponse);
-      {$endif}
 
       procedure FlushDWSCache(const fileName : String = '');
 
@@ -183,8 +171,6 @@ type
       property CPUUsageLimit : Integer read FCPUUsageLimit write SetCPUUsageLimit;
       property CPUAffinity : Cardinal read FCPUAffinity write SetCPUAffinity;
       property PathVariables : TStrings read FPathVariables;
-
-      property OnLoadSourceCode : TLoadSourceCodeEvent read FOnLoadSourceCode write FOnLoadSourceCode;
 
       property StartupScriptName : String read FStartupScriptName write FStartupScriptName;
       property ShutdownScriptName : String read FShutdownScriptName write FShutdownScriptName;
@@ -246,6 +232,9 @@ implementation
 
 {$R *.dfm}
 
+const
+   cCheckDirectoryChangesInterval = 1000;
+
 procedure TSimpleDWScript.DataModuleCreate(Sender: TObject);
 var
    cryptoLib : TdwsCryptoLib;
@@ -262,8 +251,8 @@ begin
    FDataBase.dwsDatabase.Script:=DelphiWebScript;
    TdwsDataBase.OnApplyPathVariables:=ApplyPathVariables;
 
-   FWebEnv:=TdwsWebLib.Create(Self);
-   FWebEnv.dwsWeb.Script:=DelphiWebScript;
+   FWebLib:=TdwsWebLib.Create(Self);
+   FWebLib.dwsWeb.Script:=DelphiWebScript;
 
    FJSON:=TdwsJSONLibModule.Create(Self);
    FJSON.Script:=DelphiWebScript;
@@ -283,14 +272,12 @@ begin
    FCompiledProgramsLock:=TFixedCriticalSection.Create;
    FCompilerLock:=TFixedCriticalSection.Create;
    FCodeGenLock:=TFixedCriticalSection.Create;
-   FDependenciesHash:=TDependenciesHash.Create;
 
    FExecutingScriptsLock:=TMultiReadSingleWrite.Create;
 
    FScriptTimeoutMilliseconds:=3000;
    FWorkerTimeoutMilliseconds:=30000;
 
-{$ifdef EnablePas2Js}
    FJSFilter:=TdwsJSFilter.Create(Self);
    dwsHtmlFilter.SubFilter:=FJSFilter;
    FJSCompiler:=TDelphiWebScript.Create(Self);
@@ -313,7 +300,8 @@ begin
       // cgoObfuscate, cgoOptimizeForSize,
       cgoSmartLink, cgoDeVirtualize, cgoNoRTTI
    ];
-{$endif}
+
+   dwsCompileSystem.OnFileStreamOpened := DoSourceFileStreamOpened;
 end;
 
 procedure TSimpleDWScript.DataModuleDestroy(Sender: TObject);
@@ -324,7 +312,6 @@ begin
    FCompilerLock.Free;
    FCompiledProgramsLock.Free;
    FCompiledPrograms.Free;
-   FDependenciesHash.Free;
    FPathVariables.Free;
 
    FExecutingScriptsLock.Free;
@@ -413,7 +400,7 @@ begin
    else if (response<>nil) and (response.ContentData='') then begin
       HandleScriptResult(response, executing.Exec.Result);
       if shStatic in response.Hints then
-         prog.ProgramObject.TagInterface:=TWebStaticCacheEntry.Create(response);
+         prog.ProgramObject.TagInterface := TWebStaticCacheEntry.Create(response);
    end;
 end;
 
@@ -434,7 +421,6 @@ end;
 
 // HandleP2JS
 //
-{$ifdef EnablePas2Js}
 procedure TSimpleDWScript.HandleP2JS(const fileName : String; request : TWebRequest; response : TWebResponse);
 var
    code, js : String;
@@ -446,16 +432,24 @@ begin
    end;
 
    TryAcquireDWS(fileName, prog);
-   FCodeGenLock.Enter;
+   FCompilerLock.Enter;
    try
-      if prog=nil then begin
-         code:=DoLoadSourceCode(fileName);
-         js:=FJSFilter.CompileToJS(prog, code);
-      end else begin
-         js:=FJSFilter.CompileToJS(prog, '');
+      FCompilerFiles := TAutoStrings.Create;
+      FCodeGenLock.Enter;
+      try
+         if prog=nil then begin
+            code:=dwsCompileSystem.AllocateFileSystem.LoadTextFile(fileName);
+            FHotPath:=ExtractFilePath(fileName);
+            js:=FJSFilter.CompileToJS(prog, code);
+         end else begin
+            js:=FJSFilter.CompileToJS(prog, '');
+         end;
+      finally
+         FCodeGenLock.Leave;
       end;
    finally
-      FCodeGenLock.Leave;
+      FCompilerFiles := nil;
+      FCompilerLock.Leave;
    end;
    if (prog<>nil) and prog.Msgs.HasErrors then
       Handle500(response, prog.Msgs)
@@ -464,42 +458,24 @@ begin
       response.ContentType:='text/javascript; charset=UTF-8';
    end;
 end;
-{$endif}
 
 // FlushDWSCache
 //
 procedure TSimpleDWScript.FlushDWSCache(const fileName : String = '');
-var
-   i : Integer;
-   oldHash : TCompiledProgramHash;
-   unitName : String;
 begin
-   // ignore .bak files
-   if StrEndsWith(fileName, '.bak') then exit;
-   // ignore .db folder
-   if Pos('/.db/', fileName)>0 then exit;
-
+   LogError('Flushing "'+fileName+'"');
    FCompiledProgramsLock.Enter;
    try
       if fileName='' then begin
-         FDependenciesHash.Clean;
          FCompiledPrograms.Clear;
       end else begin
-         unitName:=LowerCase(ExtractFileName(fileName));
-         FFlushProgList:=FDependenciesHash.Objects[unitName];
-         if FFlushProgList=nil then
-            FFlushProgList:=FDependenciesHash.Objects[ChangeFileExt(unitName, '')];
-         if (FFlushProgList<>nil) and (FFlushProgList.Count>0) then begin
-            oldHash:=FCompiledPrograms;
-            try
-               FCompiledPrograms:=TCompiledProgramHash.Create;
-               oldHash.Enumerate(AddNotMatching);
-            finally
-               oldHash.Free;
-            end;
-            for i:=0 to FFlushProgList.Count-1 do
-               FDependenciesHash.DeregisterProg(FFlushProgList[i]);
-            FFlushProgList.Clear;
+         if LastDelimiter('*?', fileName) > 0 then
+            FFlushMask := TMask.Create(fileName)
+         else FFlushMask := TMask.Create('*' + fileName + '*');
+         try
+            FCompiledPrograms.Enumerate(FlushMatchingMask);
+         finally
+            FreeAndNil(FFlushMask);
          end;
       end;
    finally
@@ -541,6 +517,7 @@ begin
       DelphiWebScript.Config.MaxRecursionDepth:=dws['MaxRecursionDepth'].AsInteger;
 
       dwsCompileSystem.Paths.Clear;
+      dwsCompileSystem.Paths.Add(IncludeTrailingPathDelimiter(PathVariables.Values['www']));
       ApplyPathsVariables(dws['LibraryPaths'], dwsCompileSystem.Paths);
 
       dwsRuntimeFileSystem.Paths.Clear;
@@ -587,10 +564,13 @@ var
    cp : TCompiledProgram;
    jit : TdwsJITx86;
 begin
-   code:=DoLoadSourceCode(fileName);
-
    FCompilerLock.Enter;
    try
+      LogCompilation('Compiling "%s"', [fileName]);
+      FCompilerFiles := TAutoStrings.Create;
+
+      code := dwsCompileSystem.AllocateFileSystem.LoadTextFile(fileName);
+
       // check after compiler lock in case of simultaneous requests
       TryAcquireDWS(fileName, prog);
       if prog<>nil then Exit;
@@ -617,17 +597,20 @@ begin
          LogCompileErrors(fileName, prog.Msgs);
       end;
 
-      cp.Name:=fileName;
-      cp.Prog:=prog;
+      cp.Name  := fileName;
 
       FCompiledProgramsLock.Enter;
       try
-         FCompiledPrograms.Add(cp);
-         FDependenciesHash.RegisterProg(cp);
+         if not FCompiledPrograms.Match(cp) then begin
+            cp.Prog  := prog;
+            cp.Files := FCompilerFiles;
+            FCompiledPrograms.Add(cp);
+         end;
       finally
          FCompiledProgramsLock.Leave;
       end;
    finally
+      FCompilerFiles := nil;
       FCompilerLock.Leave;
    end;
 end;
@@ -638,7 +621,7 @@ procedure TSimpleDWScript.LogError(const msg : String);
 var
    buf : String;
 begin
-   buf := #13#10+FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now)
+   buf := FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now)
          +' '+msg+#13#10;
    AppendTextToUTF8File(ErrorLogDirectory+'error.log', UTF8Encode(buf));
 end;
@@ -650,20 +633,28 @@ begin
    LogError('in '+fileName+#13#10+msgs.AsInfo);
 end;
 
-// AddNotMatching
+// LogCompilation
 //
-function TSimpleDWScript.AddNotMatching(const cp : TCompiledProgram) : TSimpleHashAction;
+procedure TSimpleDWScript.LogCompilation(const fmt : String; const params : array of const);
+begin
+   {$ifdef LogCompiles}
+   LogError(Format(fmt, params));
+   {$endif}
+end;
+
+// FlushMatchingMask
+//
+function TSimpleDWScript.FlushMatchingMask(const cp : TCompiledProgram) : TSimpleHashAction;
 var
    i : Integer;
+   list : TStringList;
 begin
-   Result:=shaNone;
-   if cp.Prog.Msgs.HasErrors then Exit;
-
-   for i:=0 to FFlushProgList.Count-1 do
-      if FFlushProgList[i]=cp.Prog then
-         Exit;
-
-   FCompiledPrograms.Add(cp);
+   list := cp.Files.Value;
+   for i := 0 to list.Count-1 do begin
+      if FFlushMask.Matches(list[i]) then
+         Exit(shaRemove);
+   end;
+   Result := shaNone;
 end;
 
 // DoInclude
@@ -671,7 +662,7 @@ end;
 procedure TSimpleDWScript.DoInclude(const scriptName: String; var scriptSource: String);
 begin
    if FHotPath<>'' then
-      scriptSource:=DoLoadSourceCode(FHotPath+scriptName);
+      scriptSource := dwsCompileSystem.AllocateFileSystem.LoadTextFile(FHotPath+scriptName);
 end;
 
 // DoNeedUnit
@@ -725,13 +716,11 @@ begin
    Result:=True;
 end;
 
-// DoLoadSourceCode
+// DoSourceFileStreamOpened
 //
-function TSimpleDWScript.DoLoadSourceCode(const fileName : String) : String;
+procedure TSimpleDWScript.DoSourceFileStreamOpened(Sender : TObject; const fileName : String; const mode : TdwsFileOpenMode);
 begin
-   if Assigned(FOnLoadSourceCode) then
-      Result:=FOnLoadSourceCode(fileName)
-   else Result:=LoadTextFromFile(fileName);
+   FCompilerFiles.Value.Add(fileName);
 end;
 
 // DoBackgroundWork
@@ -766,6 +755,99 @@ begin
    response.ContentType:='text/plain';
 end;
 
+// CheckDirectoryChanges
+//
+type
+   TFilesList = class (TFastCompareStringList)
+      private
+         FProgIndex : Integer;
+         FProgNames : array of String;
+         FChanged : array of Boolean;
+         function Enumerate(const item : TCompiledProgram) : TSimpleHashAction;
+   end;
+function TFilesList.Enumerate(const item : TCompiledProgram) : TSimpleHashAction;
+var
+   i : Integer;
+   sourceList : TStringList;
+begin
+   FProgNames[FProgIndex] := item.Name;
+   sourceList := item.Files.Value;
+   for i := 0 to sourceList.Count-1 do
+      AddObject(sourceList[i], TObject(FProgIndex));
+   Inc(FProgIndex);
+   Result := shaNone;
+end;
+procedure TSimpleDWScript.CheckDirectoryChanges;
+var
+   i, n : Integer;
+   prevFileName : String;
+   nextCheckTime : TFileTime;
+   fileChanged, gotChanges : Boolean;
+   files : TFilesList;
+   info : TWin32FileAttributeData;
+   cp : TCompiledProgram;
+begin
+   files := TFilesList.Create;
+   try
+      // speculative check and allocation outside of lock
+      n := FCompiledPrograms.Count;
+      SetLength(files.FProgNames, n);
+      // collect all files as fast as possible then release lock
+      FCompiledProgramsLock.Enter;
+      try
+         if n <> FCompiledPrograms.Count then
+            SetLength(files.FProgNames, n);
+         FCompiledPrograms.Enumerate(files.Enumerate);
+      finally
+         FCompiledProgramsLock.Leave;
+      end;
+      // sort to avoid duplicate checks
+      files.CaseSensitive := False;
+      files.Sort;
+      SetLength(files.FChanged, Length(files.FProgNames));
+      prevFileName := '';
+      fileChanged := False;
+      gotChanges := False;
+      GetSystemTimeAsFileTime(nextCheckTime);
+      for i := 0 to files.Count-1 do begin
+         if files[i] <> prevFileName then begin
+            prevFileName := files[i];
+            if GetFileAttributesEx(PChar(Pointer(prevFileName)), GetFileExInfoStandard, @info) then begin
+               fileChanged := (UInt64(info.ftLastWriteTime) >= UInt64(FLastCheckTime));
+               if fileChanged then
+                  LogCompilation('"%s" change detected', [prevFileName]);
+            end else begin
+               LogCompilation('"%s" check error: ', [prevFileName, SysErrorMessage(GetLastError)]);
+               fileChanged := True
+            end;
+         end;
+         if fileChanged then begin
+            files.FChanged[Integer(files.Objects[i])] := True;
+            gotChanges := True;
+         end;
+      end;
+      // purge programs whose file(s) changed
+      if gotChanges then begin
+         FCompiledProgramsLock.Enter;
+         try
+            for i := 0 to High(files.FChanged) do begin
+               if files.FChanged[i] then begin
+                  cp.Name := files.FProgNames[i];
+                  LogCompilation('Flushing "%s"', [cp.Name]);
+                  FCompiledPrograms.Remove(cp);
+               end;
+            end;
+         finally
+            FCompiledProgramsLock.Leave;
+         end;
+      end;
+      FLastCheckTime := nextCheckTime;
+   finally
+      files.Free;
+   end;
+   FCheckDirectoryChanges := TTimerTimeout.Create(cCheckDirectoryChangesInterval, CheckDirectoryChanges);
+end;
+
 // Initialize
 //
 procedure TSimpleDWScript.Initialize(const serverInfo : IWebServerInfo);
@@ -773,6 +855,8 @@ begin
    FWebServerLib:=TdwsWebServerLib.Create(Self);
    FWebServerLib.Server:=serverInfo;
    FWebServerLib.dwsWebServer.Script:=DelphiWebScript;
+
+   FWebLib.Server:=serverInfo;
 
    FBkgndWorkers:=TdwsBackgroundWorkersLib.Create(Self);
    FBkgndWorkers.dwsBackgroundWorkers.Script:=DelphiWebScript;
@@ -783,6 +867,7 @@ end;
 //
 procedure TSimpleDWScript.Finalize;
 begin
+   FWebLib.Server:=nil;
    FreeAndNil(FBkgndWorkers);
    FreeAndNil(FWebServerLib);
 end;
@@ -827,6 +912,9 @@ procedure TSimpleDWScript.Startup;
 begin
    FBackgroundFileSystem:=dwsRuntimeFileSystem.AllocateFileSystem;
 
+   GetSystemTimeAsFileTime(FLastCheckTime);
+   CheckDirectoryChanges;
+
    if StartupScriptName<>'' then
       HandleDWS(StartupScriptName, fatPAS, nil, nil, [optWorker]);
 end;
@@ -835,6 +923,8 @@ end;
 //
 procedure TSimpleDWScript.Shutdown;
 begin
+   FCheckDirectoryChanges := nil;
+
    FBackgroundFileSystem:=nil;
 
    StopDWS;
@@ -905,59 +995,6 @@ end;
 function TCompiledProgramHash.GetItemHashCode(const item1 : TCompiledProgram) : Integer;
 begin
    Result:=SimpleStringHash(item1.Name);
-end;
-
-// ------------------
-// ------------------ TDependenciesHash ------------------
-// ------------------
-
-// RegisterProg
-//
-procedure TDependenciesHash.RegisterProg(const cp : TCompiledProgram);
-var
-   i : Integer;
-   list : TScriptSourceList;
-   item : TScriptSourceItem;
-begin
-   AddName(cp.Name, cp.Prog);
-   list:=cp.Prog.SourceList;
-   for i:=0 to list.Count-1 do begin
-      item:=list[i];
-      if not StrBeginsWith(item.NameReference, '*') then
-         AddName(item.NameReference, cp.Prog);
-   end;
-end;
-
-// DeregisterProg
-//
-procedure TDependenciesHash.DeregisterProg(const prog : IdwsProgram);
-var
-   i, j : Integer;
-   list : TProgramList;
-begin
-   for i:=0 to HighIndex-1 do begin
-      list:=BucketObject[i];
-      if list<>nil then begin
-         for j:=list.Count-1 downto 0 do
-            list.Extract(j);
-      end;
-   end;
-end;
-
-// AddName
-//
-procedure TDependenciesHash.AddName(const name : String; const prog : IdwsProgram);
-var
-   lcName : String;
-   list : TProgramList;
-begin
-   lcName:=LowerCase(ExtractFileName(name));
-   list:=Objects[lcName];
-   if list=nil then begin
-      list:=TProgramList.Create;
-      Objects[lcName]:=list;
-   end;
-   list.Add(prog);
 end;
 
 end.

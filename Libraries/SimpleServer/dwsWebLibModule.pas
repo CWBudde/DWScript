@@ -23,7 +23,7 @@ uses
    SysUtils, Classes, StrUtils,
    SynZip, SynCrtSock, SynCommons, SynWinSock,
    dwsUtils, dwsComp, dwsExprs, dwsWebEnvironment, dwsExprList, dwsSymbols,
-   dwsJSONConnector;
+   dwsJSONConnector, dwsCryptoXPlatform, dwsHTTPSysServerEvents, dwsWebServerInfo;
 
 type
   TdwsWebLib = class(TDataModule)
@@ -161,10 +161,26 @@ type
       ExtObject: TObject);
     procedure dwsWebClassesHttpRequestMethodsCurrentContentSizeEval(
       Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebResponseMethodsSetContentEventStreamEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventsMethodsPostRawEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventsMethodsCloseEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventsMethodsConnectionsEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventsMethodsSourceNamesEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventMethodsPostEval(Info: TProgramInfo;
+      ExtObject: TObject);
+    procedure dwsWebClassesWebServerSentEventMethodsToRawDataEval(
+      Info: TProgramInfo; ExtObject: TObject);
   private
     { Private declarations }
+    FServer :  IWebServerInfo;
   public
-    { Public declarations }
+    { Public declaration }
+    property Server : IWebServerInfo read FServer write FServer;
   end;
 
 implementation
@@ -172,6 +188,86 @@ implementation
 {$R *.dfm}
 
 uses dwsWinHTTP;
+
+// WebServerSentEventToRawData
+//
+function WebServerSentEventToRawData(const obj : TScriptObjInstance) : RawByteString;
+var
+   i : Integer;
+   dyn : TScriptDynamicStringArray;
+   buf : String;
+begin
+   buf := obj.AsString[obj.FieldAddress('ID')];
+   if buf <> '' then
+      Result := 'id: ' + StringToUTF8(buf) + #10;
+   buf := obj.AsString[obj.FieldAddress('Name')];
+   if buf <> '' then
+      Result := Result + 'event: ' + StringToUTF8(buf) + #10;
+   i := obj.AsInteger[obj.FieldAddress('Retry')];
+   if i > 0 then
+      Result := Result + 'retry: ' + ScriptStringToRawByteString(IntToStr(i)) + #10;
+   dyn := (obj.AsInterface[obj.FieldAddress('Data')] as IScriptDynArray).GetSelf as TScriptDynamicStringArray;
+   for i := 0 to dyn.ArrayLength-1 do
+      Result := Result + 'data: ' + StringToUTF8(dyn.AsString[i]) + #10;
+   Result := Result + #10;
+end;
+
+// DeflateCompress
+//
+procedure DeflateCompress(var data : RawByteString; compressionLevel : Integer);
+var
+   strm : TZStream;
+   tmp : RawByteString;
+begin
+   StreamInit(strm);
+   strm.next_in := Pointer(data);
+   strm.avail_in := Length(data);
+   SetString(tmp, nil, strm.avail_in+256+strm.avail_in shr 3); // max mem required
+   strm.next_out := Pointer(tmp);
+   strm.avail_out := Length(tmp);
+   if deflateInit2_(strm, compressionLevel, Z_DEFLATED, -MAX_WBITS, DEF_MEM_LEVEL,
+                    Z_DEFAULT_STRATEGY, ZLIB_VERSION, SizeOf(strm))<0 then
+      raise Exception.Create('deflateInit2_ failed');
+   try
+      Check(deflate(strm,Z_FINISH),[Z_STREAM_END]);
+   finally
+      deflateEnd(strm);
+   end;
+   SetString(data, PAnsiChar(Pointer(tmp)), strm.total_out);
+end;
+
+// DeflateDecompress
+//
+procedure DeflateDecompress(var data : RawByteString);
+var
+   strm : TZStream;
+   code, len : integer;
+   tmp : RawByteString;
+begin
+   StreamInit(strm);
+   strm.next_in := Pointer(data);
+   strm.avail_in := Length(data);
+   len := (strm.avail_in*20) shr 3; // initial chunk size = comp. ratio of 60%
+   SetString(tmp,nil,len);
+   strm.next_out := Pointer(tmp);
+   strm.avail_out := len;
+   if inflateInit2_(strm, -MAX_WBITS, ZLIB_VERSION, SizeOf(strm))<0 then
+      raise Exception.Create('inflateInit2_ failed');
+   try
+      repeat
+         code := Check(inflate(strm, Z_FINISH),[Z_OK,Z_STREAM_END,Z_BUF_ERROR]);
+         if strm.avail_out=0 then begin
+            // need to increase buffer by chunk
+            SetLength(tmp,length(tmp)+len);
+            strm.next_out := PAnsiChar(pointer(tmp))+length(tmp)-len;
+            strm.avail_out := len;
+         end;
+      until code=Z_STREAM_END;
+   finally
+      inflateEnd(strm);
+   end;
+   SetString(data, PAnsiChar(Pointer(tmp)), strm.total_out);
+end;
 
 const
    cWinHttpConnection : TGUID = '{0B47FA19-7BE9-41AE-A3BD-2C686117D669}';
@@ -192,12 +288,12 @@ function HttpQuery(exec : TdwsProgramExecution;
                    const method, url : RawByteString;
                    const requestData, requestContentType : RawByteString;
                    var replyHeaders : SockString; var replyData : String;
-                   asText : Boolean; onProgress : TWinHttpProgress = nil) : Integer;
+                   asText : Boolean; onProgress : TWinHttpProgress = nil;
+                   customStates : TdwsCustomStates = nil) : Integer;
 var
    uri : TURI;
    conn : TdwsWinHttpConnection;
    iconn : IGetSelf;
-   customStates : TdwsCustomStates;
    unassignedVariant : Variant;
 begin
    if not uri.From(url) then
@@ -205,34 +301,43 @@ begin
 
    if exec <> nil then
       iconn := exec.CustomInterfaces[cWinHttpConnection] as IGetSelf;
-   if iconn = nil then
+   if iconn = nil then begin
       iconn := IGetSelf(TdwsWinHttpConnection.Create);
-
-   customStates := nil;
-   if exec <> nil then begin
-      exec.CustomInterfaces[cWinHttpConnection] := iconn;
-      if exec.HasCustomStates then
-         customStates := exec.CustomStates;
+      if exec <> nil then
+         exec.CustomInterfaces[cWinHttpConnection] := iconn;
    end;
 
-   conn := iconn.GetSelf as TdwsWinHttpConnection;
-   if customStates <> nil then begin
-      conn.ConnectServer(uri, customStates.StringStateDef(cWinHttpProxyName, ''),
-                         customStates.IntegerStateDef(cWinHttpConnectTimeout, HTTP_DEFAULT_CONNECTTIMEOUT),
-                         customStates.IntegerStateDef(cWinHttpSendTimeout, HTTP_DEFAULT_SENDTIMEOUT),
-                         customStates.IntegerStateDef(cWinHttpReceiveTimeout, HTTP_DEFAULT_RECEIVETIMEOUT));
-      conn.SetIgnoreSSLErrors(customStates[cWinHttpIgnoreSSLCertificateErrors]);
-      conn.SetCredentials(customStates[cWinHttpCredentials]);
-      conn.SetCustomHeaders(customStates[cWinHttpCustomHeaders]);
-   end else begin
-      conn.ConnectServer(uri, '', HTTP_DEFAULT_CONNECTTIMEOUT, HTTP_DEFAULT_SENDTIMEOUT, HTTP_DEFAULT_RECEIVETIMEOUT);
-      conn.SetIgnoreSSLErrors(unassignedVariant);
-      conn.SetCredentials(unassignedVariant);
-      conn.SetCustomHeaders(unassignedVariant);
-   end;
-   conn.SetOnProgress(onProgress);
+   try
+      if (customStates = nil) and (exec <> nil) then begin
+         if exec.HasCustomStates then
+            customStates := exec.CustomStates;
+      end;
 
-   Result := conn.Request(uri, method, 0, '', requestData, requestContentType, replyHeaders, replyData, asText);
+      conn := iconn.GetSelf as TdwsWinHttpConnection;
+      if customStates <> nil then begin
+         conn.ConnectServer(uri, customStates.StringStateDef(cWinHttpProxyName, ''),
+                            customStates.IntegerStateDef(cWinHttpConnectTimeout, HTTP_DEFAULT_CONNECTTIMEOUT),
+                            customStates.IntegerStateDef(cWinHttpSendTimeout, HTTP_DEFAULT_SENDTIMEOUT),
+                            customStates.IntegerStateDef(cWinHttpReceiveTimeout, HTTP_DEFAULT_RECEIVETIMEOUT));
+         conn.SetIgnoreSSLErrors(customStates[cWinHttpIgnoreSSLCertificateErrors]);
+         conn.SetCredentials(customStates[cWinHttpCredentials]);
+         conn.SetCustomHeaders(customStates[cWinHttpCustomHeaders]);
+      end else begin
+         conn.ConnectServer(uri, '', HTTP_DEFAULT_CONNECTTIMEOUT, HTTP_DEFAULT_SENDTIMEOUT, HTTP_DEFAULT_RECEIVETIMEOUT);
+         conn.SetIgnoreSSLErrors(unassignedVariant);
+         conn.SetCredentials(unassignedVariant);
+         conn.SetCustomHeaders(unassignedVariant);
+      end;
+      conn.SetOnProgress(onProgress);
+
+      Result := conn.Request(uri, method, 0, '', requestData, requestContentType, replyHeaders, replyData, asText);
+   except
+      on EWinHTTP do begin
+         if exec <> nil then
+            exec.CustomInterfaces[cWinHttpConnection] := nil;
+         raise;
+      end;
+   end;
 end;
 
 type
@@ -319,7 +424,7 @@ begin
    try
       StatusCode := HttpQuery(nil, Method, URL, RequestData, RequestContentType,
                               RawResponseHeaders, ResponseData, False,
-                              DoProgress);
+                              DoProgress, CustomStates);
       FreeAndNil(CustomStates);
       RequestData := '';
       RequestContentType := '';
@@ -689,6 +794,18 @@ begin
    Info.WebResponse.Compression:=Info.ParamAsBoolean[0];
 end;
 
+procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetContentEventStreamEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   sourceName : String;
+begin
+   sourceName := Info.ParamAsString[0];
+   if sourceName = '' then
+      sourceName := CryptographicToken;
+   Info.WebResponse.ContentType := 'text/event-stream,' + ScriptStringToRawByteString(sourceName);
+   Info.ResultAsString := sourceName;
+end;
+
 procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetContentJSONEval(
   Info: TProgramInfo; ExtObject: TObject);
 var
@@ -761,61 +878,46 @@ begin
    Info.WebResponse.StatusCode:=Info.ParamAsInteger[0];
 end;
 
-// DeflateCompress
-//
-procedure DeflateCompress(var data : RawByteString; compressionLevel : Integer);
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventMethodsPostEval(
+  Info: TProgramInfo; ExtObject: TObject);
 var
-   strm : TZStream;
-   tmp : RawByteString;
+   obj : TScriptObjInstance;
 begin
-   StreamInit(strm);
-   strm.next_in := Pointer(data);
-   strm.avail_in := Length(data);
-   SetString(tmp, nil, strm.avail_in+256+strm.avail_in shr 3); // max mem required
-   strm.next_out := Pointer(tmp);
-   strm.avail_out := Length(tmp);
-   if deflateInit2_(strm, compressionLevel, Z_DEFLATED, -MAX_WBITS, DEF_MEM_LEVEL,
-                    Z_DEFAULT_STRATEGY, ZLIB_VERSION, SizeOf(strm))<0 then
-      raise Exception.Create('deflateInit2_ failed');
-   try
-      Check(deflate(strm,Z_FINISH),[Z_STREAM_END]);
-   finally
-      deflateEnd(strm);
-   end;
-   SetString(data, PAnsiChar(Pointer(tmp)), strm.total_out);
+   obj := Info.ScriptObj.GetSelf as TScriptObjInstance;
+   FServer.ServerEvents.PostEvent(Info.ParamAsString[0], WebServerSentEventToRawData(obj));
 end;
 
-// DeflateDecompress
-//
-procedure DeflateDecompress(var data : RawByteString);
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventMethodsToRawDataEval(
+  Info: TProgramInfo; ExtObject: TObject);
 var
-   strm : TZStream;
-   code, len : integer;
-   tmp : RawByteString;
+   obj : TScriptObjInstance;
 begin
-   StreamInit(strm);
-   strm.next_in := Pointer(data);
-   strm.avail_in := Length(data);
-   len := (strm.avail_in*20) shr 3; // initial chunk size = comp. ratio of 60%
-   SetString(tmp,nil,len);
-   strm.next_out := Pointer(tmp);
-   strm.avail_out := len;
-   if inflateInit2_(strm, -MAX_WBITS, ZLIB_VERSION, SizeOf(strm))<0 then
-      raise Exception.Create('inflateInit2_ failed');
-   try
-      repeat
-         code := Check(inflate(strm, Z_FINISH),[Z_OK,Z_STREAM_END,Z_BUF_ERROR]);
-         if strm.avail_out=0 then begin
-            // need to increase buffer by chunk
-            SetLength(tmp,length(tmp)+len);
-            strm.next_out := PAnsiChar(pointer(tmp))+length(tmp)-len;
-            strm.avail_out := len;
-         end;
-      until code=Z_STREAM_END;
-   finally
-      inflateEnd(strm);
-   end;
-   SetString(data, PAnsiChar(Pointer(tmp)), strm.total_out);
+   obj := Info.ScriptObj.GetSelf as TScriptObjInstance;
+   Info.ResultAsDataString := WebServerSentEventToRawData(obj);
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsCloseEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   FServer.ServerEvents.CloseRequests(Info.ParamAsString[0]);
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsConnectionsEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsStringArray := FServer.ServerEvents.SourceRequests(Info.ParamAsString[0]);
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsPostRawEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   FServer.ServerEvents.PostEvent(Info.ParamAsString[0], Info.ParamAsDataString[1]);
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsSourceNamesEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsStringArray := FServer.ServerEvents.SourceNames;
 end;
 
 function TdwsWebLib.dwsWebFunctionsDeflateCompressFastEval(

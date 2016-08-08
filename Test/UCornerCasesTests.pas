@@ -92,6 +92,8 @@ type
          procedure IsAbstractFlag;
          procedure UnitOwnedByCompiler;
          procedure BugInForVarConnectorExpr;
+         procedure MultiLineUnixStyle;
+         procedure EmptyProgram;
    end;
 
    ETestException = class (Exception);
@@ -1969,6 +1971,41 @@ begin
                            +'for var n in a do j[n] := ...');
    // no expected leak
    prog := nil;
+end;
+
+// MultiLineUnixStyle
+//
+procedure TCornerCasesTests.MultiLineUnixStyle;
+var
+   prog : IdwsProgram;
+   exec : IdwsProgramExecution;
+begin
+   prog:=FCompiler.Compile( 'PrintLn(#'''#13#10
+                           +'   hello'#13#10
+                           +'   world'');');
+   exec := prog.CreateNewExecution;
+   exec.Execute(0);
+   CheckEquals('hello'#13#10'world'#13#10, exec.Result.ToString, 'CRLF');
+
+   prog:=FCompiler.Compile( 'PrintLn(#'''#10
+                           +'   hello'#10
+                           +'   world'');');
+   exec := prog.CreateNewExecution;
+   exec.Execute(0);
+   CheckEquals('hello'#10'world'#13#10, exec.Result.ToString, 'LF');
+
+end;
+
+// EmptyProgram
+//
+procedure TCornerCasesTests.EmptyProgram;
+var
+   prog : IdwsProgram;
+begin
+   prog:=FCompiler.Compile('');
+   CheckTrue(prog.IsEmpty, '""');
+   prog:=FCompiler.Compile('// blabla'#13#10);
+   CheckTrue(prog.IsEmpty, 'comments');
 end;
 
 // ------------------------------------------------------------------

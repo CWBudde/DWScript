@@ -1233,7 +1233,7 @@ begin
    try
       tokenizer.ParseStringArray(values);
 
-      newArray:=TScriptDynamicArray.CreateNew(info.Execution.Prog.TypInteger);
+      newArray:=TScriptDynamicArray.CreateNew(info.Execution.Prog.TypString);
       Info.ResultAsVariant:=IScriptDynArray(newArray);
       newArray.ArrayLength:=values.Count;
       newPData:=newArray.AsPData;
@@ -1308,7 +1308,7 @@ begin
          StringifyVariant(args.Exec, writer, v);
       end else begin
          dataExpr:=(expr as TDataExpr);
-         StringifySymbol(args.Exec as TdwsProgramExecution, writer, expr.Typ, dataExpr.DataPtr[args.Exec]);
+         StringifySymbol(args.Exec, writer, expr.Typ, dataExpr.DataPtr[args.Exec]);
       end;
       Result:=stream.ToString;
    finally
