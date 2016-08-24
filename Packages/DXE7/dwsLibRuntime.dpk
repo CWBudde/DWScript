@@ -64,6 +64,7 @@ contains
   dwsRelExprs in '..\..\Source\dwsRelExprs.pas',
   dwsStringResult in '..\..\source\dwsStringResult.pas',
   dwsJSON in '..\..\Source\dwsJSON.pas',
+  dwsJSONConnector in '..\..\Source\dwsJSONConnector.pas',
   dwsOperators in '..\..\Source\dwsOperators.pas',
   dwsSystemOperators in '..\..\Source\dwsSystemOperators.pas',
   dwsPascalTokenizer in '..\..\Source\dwsPascalTokenizer.pas',

@@ -32,7 +32,6 @@ requires
   rtl;
 
 contains
-contains
   dwsComConnector in '..\..\Source\dwsComConnector.pas',
   dwsStrings in '..\..\Source\dwsStrings.pas',
   dwsSymbols in '..\..\Source\dwsSymbols.pas',
