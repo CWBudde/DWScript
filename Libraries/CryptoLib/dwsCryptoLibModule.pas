@@ -95,7 +95,8 @@ implementation
 
 {$R *.dfm}
 
-uses SynCrypto, SynZip, dwsRipeMD160, dwsCryptProtect, dwsSHA3;
+uses
+  SynCrypto, SynZip, dwsRipeMD160, dwsCryptProtect, dwsSHA3;
 
 type
    THashFunction = function (const data : RawByteString) : RawByteString;

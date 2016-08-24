@@ -1989,7 +1989,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsFunctions, dwsCoreExprs, dwsMagicExprs, dwsMethodExprs,
+uses
+   dwsFunctions, dwsCoreExprs, dwsMagicExprs, dwsMethodExprs,
    dwsInfo, dwsCompilerUtils, dwsConstExprs, dwsResultFunctions;
 
 { TScriptObjectWrapper }
