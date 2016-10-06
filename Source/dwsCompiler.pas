@@ -3013,7 +3013,6 @@ var
    expr : TTypedExpr;
    dataExpr : TDataExpr;
    sas : TStaticArraySymbol;
-   detachTyp : Boolean;
    recordData : TData;
 begin
    if typ is TRecordSymbol then begin
@@ -3023,7 +3022,6 @@ begin
 
    end else begin
 
-      detachTyp:=False;
       if typ is TArraySymbol then begin
          case FTok.TestDeleteAny([ttALEFT, ttBLEFT]) of
             ttALEFT : expr:=factory.ReadArrayConstantExpr(ttARIGHT, typ);
@@ -3041,7 +3039,6 @@ begin
                expr:=CompilerUtils.WrapWithImplicitConversion(FProg, expr, typ, FTok.HotPos);
          end else if expr<>nil then begin
             typ:=expr.typ;
-            detachTyp:=(typ.Name='');
          end;
 
          if not expr.IsConstant then begin
@@ -3052,7 +3049,6 @@ begin
             if typ=nil then
                typ:=FProg.TypVariant;
             Result:=factory.CreateConstSymbol(name, constPos, typ, nil);
-            detachTyp:=False;
 
          end else begin
 
@@ -3066,7 +3062,6 @@ begin
                end;
                if expr is TConstExpr then begin
                   Result:=factory.CreateConstSymbol(name, constPos, sas, TConstExpr(expr).Data);
-                  detachTyp:=False;
                end else begin
                   Result:=factory.CreateConstSymbol(name, constPos, sas,
                                                     (expr as TArrayConstantExpr).EvalAsTData(FExec));
@@ -3092,8 +3087,6 @@ begin
          end;
 
       finally
-         if detachTyp then
-            expr.DetachTypes(FProg.Table);
          OrphanAndNil(expr);
       end;
    end;
@@ -5390,7 +5383,8 @@ begin
 
             end else begin
 
-               Assert(sym is TConstSymbol);
+               if not (sym is TConstSymbol) then
+                  FMsgs.AddCompilerStop(FTok.HotPos, CPE_ConstantExpressionExpected);
 
                OrphanAndNil(expr);
                Result:=TConstExpr.CreateTyped(FProg, sym.Typ, TConstSymbol(sym));
@@ -7333,7 +7327,11 @@ begin
       if FTok.Test(ttBLEFT) then begin
          ReadFuncArgs(funcExpr, argPosArray, overloads);
          if overloads<>nil then begin
-            if not ResolveOverload(funcExpr, overloads, argPosArray, nil, cfOptions) then Exit;
+            if not ResolveOverload(funcExpr, overloads, argPosArray, nil, cfOptions) then begin
+               Result := TErrorValueExpr.Create(FProg);
+               funcExpr.Orphan(FProg);
+               Exit;
+            end;
             Result:=funcExpr;
          end;
          TypeCheckArgs(funcExpr, argPosArray);
@@ -12031,14 +12029,13 @@ begin
             end;
 
          end;
-         siIfDef, siIfNDef : begin
+         siIfDef, siIfNDef, siIf : begin
 
             while FTok.HasTokens and not FTok.Test(ttCRIGHT) do
                FTok.KillToken;
             Inc(innerDepth);
 
          end;
-
       else
          while FTok.HasTokens and not FTok.Test(ttCRIGHT) do
             FTok.KillToken;
@@ -13163,8 +13160,8 @@ begin
    opSym:=ResolveOperatorFor(token, aLeft.Typ, aRight.Typ);
    if opSym=nil then Exit;
 
-   if opSym.OperatorExprClass<>nil then begin
-      Result:=TBinaryOpExprClass(opSym.OperatorExprClass).Create(FProg, scriptPos, aLeft, aRight);
+   if opSym.OperatorExprClass <> nil then begin
+      Result := TBinaryOpExprClass(opSym.OperatorExprClass).Create(FProg, scriptPos, aLeft, aRight);
    end else if opSym.UsesSym<>nil then begin
       if opSym.UsesSym is TMethodSymbol then
          funcExpr:=CreateMethodExpr(FProg, TMethodSymbol(opSym.UsesSym), aLeft, rkObjRef, scriptPos, [])

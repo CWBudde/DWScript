@@ -60,6 +60,7 @@ type
          CookedPathName : String;
          FileAttribs : Cardinal;
          Typ : TFileAccessType;
+         NextCheck : Int64;
    end;
 
    // this class is not thread safe, use from a single thread
@@ -67,7 +68,6 @@ type
       private
          FHash : TSimpleNameObjectHash<TFileAccessInfo>;
          FMaxSize, FSize : Integer;
-         FCacheCounter : Cardinal;
 
       public
          constructor Create(const aMaxSize : Integer);
@@ -75,10 +75,9 @@ type
 
          function FileAccessInfo(const pathInfo : String) : TFileAccessInfo; inline;
          function CreateFileAccessInfo(const pathInfo : String) : TFileAccessInfo;
+         function Count : Integer; inline;
 
          procedure Flush;
-
-         property CacheCounter : Cardinal read FCacheCounter write FCacheCounter;
    end;
 
    TMIMETypeInfo = class (TRefCountedObject)
@@ -91,6 +90,7 @@ type
    TMIMETypeCache = class
       private
          FList : TMIMETypeInfos;
+         FLock : TMultiReadSingleWrite;
 
          procedure Prime(const ext : String; const mimeType : RawByteString);
 
@@ -324,6 +324,13 @@ begin
    Inc(FSize);
 end;
 
+// Count
+//
+function TFileAccessInfoCache.Count : Integer;
+begin
+   Result := FHash.Count;
+end;
+
 // Flush
 //
 procedure TFileAccessInfoCache.Flush;
@@ -366,18 +373,26 @@ end;
 constructor TMIMETypeCache.Create;
 begin
    inherited;
-   FList:=TMIMETypeInfos.Create;
+   FList := TMIMETypeInfos.Create;
 
    // prime the cache with common extensions
 
    Prime('.txt', 'text/plain');
    Prime('.htm', 'text/html');
    Prime('.html', 'text/html');
-   Prime('.js', 'text/javascript');
+   Prime('.js',  'text/javascript');
    Prime('.css', 'text/css');
+
    Prime('.png', 'image/png');
    Prime('.jpg', 'image/jpeg');
    Prime('.gif', 'image/gif');
+   Prime('.svg', 'image/svg+xml');
+
+   Prime('.pdf', 'application/pdf');
+   Prime('.xml', 'application/xml');
+   Prime('.zip', 'application/zip');
+
+   FLock := TMultiReadSingleWrite.Create;
 end;
 
 // Destroy
@@ -387,6 +402,7 @@ begin
    inherited;
    FList.Clean;
    FList.Free;
+   FLock.Free;
 end;
 
 // MIMEType
@@ -397,11 +413,18 @@ var
    info : TMIMETypeInfo;
 begin
    ext:=ExtractFileExt(fileName);
+
+   FLock.BeginRead;
    info:=FList.Objects[ext];
+   FLock.EndRead;
+
    if info=nil then begin
       info:=TMIMETypeInfo.CreateAuto(ext);
+      FLock.BeginWrite;
       FList.Objects[ext]:=info;
+      FLock.EndWrite;
    end;
+
    Result:=info.MIMEType;
 end;
 

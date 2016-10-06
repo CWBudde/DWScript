@@ -890,6 +890,7 @@ function StrEndsWith(const aStr, aEnd : UnicodeString) : Boolean;
 function StrEndsWithA(const aStr, aEnd : RawByteString) : Boolean;
 function StrContains(const aStr, aSubStr : UnicodeString) : Boolean; overload;
 function StrContains(const aStr : UnicodeString; aChar : WideChar) : Boolean; overload;
+function StrIndexOfChar(const aStr : UnicodeString; aChar : WideChar) : Integer;
 function LowerCaseA(const aStr : RawByteString) : RawByteString;
 
 function StrMatches(const aStr, aMask : UnicodeString) : Boolean;
@@ -975,6 +976,26 @@ procedure SuppressH2077ValueAssignedToVariableNeverUsed(const X); inline;
 procedure dwsFreeAndNil(var O); // transitional function, do not use
 
 function CoalesceableIsFalsey(const unk : IUnknown) : Boolean;
+
+function ApplyStringVariables(const str : String; const variables : TStrings;
+                              const delimiter : String = '%') : String;
+
+type
+   TTwoChars = packed array [0..1] of WideChar;
+   PTwoChars = ^TTwoChars;
+const
+   cTwoDigits : packed array [0..99] of TTwoChars = (
+      ('0','0'), ('0','1'), ('0','2'), ('0','3'), ('0','4'), ('0','5'), ('0','6'), ('0','7'), ('0','8'), ('0','9'),
+      ('1','0'), ('1','1'), ('1','2'), ('1','3'), ('1','4'), ('1','5'), ('1','6'), ('1','7'), ('1','8'), ('1','9'),
+      ('2','0'), ('2','1'), ('2','2'), ('2','3'), ('2','4'), ('2','5'), ('2','6'), ('2','7'), ('2','8'), ('2','9'),
+      ('3','0'), ('3','1'), ('3','2'), ('3','3'), ('3','4'), ('3','5'), ('3','6'), ('3','7'), ('3','8'), ('3','9'),
+      ('4','0'), ('4','1'), ('4','2'), ('4','3'), ('4','4'), ('4','5'), ('4','6'), ('4','7'), ('4','8'), ('4','9'),
+      ('5','0'), ('5','1'), ('5','2'), ('5','3'), ('5','4'), ('5','5'), ('5','6'), ('5','7'), ('5','8'), ('5','9'),
+      ('6','0'), ('6','1'), ('6','2'), ('6','3'), ('6','4'), ('6','5'), ('6','6'), ('6','7'), ('6','8'), ('6','9'),
+      ('7','0'), ('7','1'), ('7','2'), ('7','3'), ('7','4'), ('7','5'), ('7','6'), ('7','7'), ('7','8'), ('7','9'),
+      ('8','0'), ('8','1'), ('8','2'), ('8','3'), ('8','4'), ('8','5'), ('8','6'), ('8','7'), ('8','8'), ('8','9'),
+      ('9','0'), ('9','1'), ('9','2'), ('9','3'), ('9','4'), ('9','5'), ('9','6'), ('9','7'), ('9','8'), ('9','9')
+      );
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -1282,22 +1303,6 @@ asm
 {$endif}
 end;
 
-type
-   TTwoChars = packed array [0..1] of WideChar;
-   PTwoChars = ^TTwoChars;
-const
-   cTwoDigits : packed array [0..99] of TTwoChars = (
-      ('0','0'), ('0','1'), ('0','2'), ('0','3'), ('0','4'), ('0','5'), ('0','6'), ('0','7'), ('0','8'), ('0','9'),
-      ('1','0'), ('1','1'), ('1','2'), ('1','3'), ('1','4'), ('1','5'), ('1','6'), ('1','7'), ('1','8'), ('1','9'),
-      ('2','0'), ('2','1'), ('2','2'), ('2','3'), ('2','4'), ('2','5'), ('2','6'), ('2','7'), ('2','8'), ('2','9'),
-      ('3','0'), ('3','1'), ('3','2'), ('3','3'), ('3','4'), ('3','5'), ('3','6'), ('3','7'), ('3','8'), ('3','9'),
-      ('4','0'), ('4','1'), ('4','2'), ('4','3'), ('4','4'), ('4','5'), ('4','6'), ('4','7'), ('4','8'), ('4','9'),
-      ('5','0'), ('5','1'), ('5','2'), ('5','3'), ('5','4'), ('5','5'), ('5','6'), ('5','7'), ('5','8'), ('5','9'),
-      ('6','0'), ('6','1'), ('6','2'), ('6','3'), ('6','4'), ('6','5'), ('6','6'), ('6','7'), ('6','8'), ('6','9'),
-      ('7','0'), ('7','1'), ('7','2'), ('7','3'), ('7','4'), ('7','5'), ('7','6'), ('7','7'), ('7','8'), ('7','9'),
-      ('8','0'), ('8','1'), ('8','2'), ('8','3'), ('8','4'), ('8','5'), ('8','6'), ('8','7'), ('8','8'), ('8','9'),
-      ('9','0'), ('9','1'), ('9','2'), ('9','3'), ('9','4'), ('9','5'), ('9','6'), ('9','7'), ('9','8'), ('9','9')
-      );
 function EightDigits(i : Cardinal; p : PWideChar) : Integer;
 var
    r : Integer;
@@ -2702,6 +2707,24 @@ begin
    else Result:=(Pos(aSubStr, aStr)>0);
 end;
 
+// StrContains (sub char)
+//
+function StrContains(const aStr : UnicodeString; aChar : WideChar) : Boolean;
+begin
+   Result := (StrIndexOfChar(aStr, aChar) > 0)
+end;
+
+// StrIndexOfChar
+//
+function StrIndexOfChar(const aStr : UnicodeString; aChar : WideChar) : Integer;
+var
+   i : Integer;
+begin
+   for i:=1 to Length(aStr) do
+      if aStr[i] = aChar then Exit(i);
+   Result := 0;
+end;
+
 // LowerCaseA
 //
 function LowerCaseA(const aStr : RawByteString) : RawByteString;
@@ -2740,17 +2763,6 @@ begin
    end;
 end;
 
-// StrContains (sub char)
-//
-function StrContains(const aStr : UnicodeString; aChar : WideChar) : Boolean;
-var
-   i : Integer;
-begin
-   for i:=0 to Length(aStr)-1 do
-      if aStr[i+1]=aChar then Exit(True);
-   Result:=False;
-end;
-
 // StrDeleteLeft
 //
 function StrDeleteLeft(const aStr : UnicodeString; n : Integer) : UnicodeString;
@@ -2771,7 +2783,7 @@ function StrAfterChar(const aStr : UnicodeString; aChar : WideChar) : UnicodeStr
 var
    p : Integer;
 begin
-   p:=Pos(aChar, aStr);
+   p:=StrIndexOfChar(aStr, aChar);
    if p>0 then
       Result:=Copy(aStr, p+1)
    else Result:='';
@@ -2783,7 +2795,7 @@ function StrBeforeChar(const aStr : UnicodeString; aChar : WideChar) : UnicodeSt
 var
    p : Integer;
 begin
-   p:=Pos(aChar, aStr);
+   p:=StrIndexOfChar(aStr, aChar);
    if p>0 then
       Result:=Copy(aStr, 1, p-1)
    else Result:=aStr;
@@ -2836,6 +2848,27 @@ begin
       end;
    end;
    Result:=-1;
+end;
+
+// ApplyStringVariables
+//
+function ApplyStringVariables(const str : String; const variables : TStrings;
+                              const delimiter : String = '%') : String;
+var
+   p1, p2 : Integer;
+begin
+   Result := str;
+   if (str='') or (variables.Count=0) then Exit;
+
+   p1:=Pos(delimiter, Result);
+   while p1>0 do begin
+      p2:=PosEx(delimiter, Result, p1+1);
+      if p2<p1 then Break;
+      Result:= Copy(Result, 1, p1-1)
+              +variables.Values[Copy(Result, p1+1, p2-p1-1)]
+              +Copy(Result, p2+1);
+      p1:=PosEx('%', Result, p1);
+   end;
 end;
 
 // ------------------

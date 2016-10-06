@@ -186,6 +186,10 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+const
+   cFileCacheExpiryMilliseconds = 1000;
+   cFileCacheCountFlush = 200;
+
 // ExpandPathFileName
 //
 function ExpandPathFileName(const path : String; var fileName : String) : Boolean;
@@ -403,26 +407,29 @@ var
    noTrailingPathDelimiter : Boolean;
    infoCache : TFileAccessInfoCache;
    fileInfo : TFileAccessInfo;
+   t : TFileTime;
 begin
    if request.MethodVerb in FMethodsNotAllowed then begin
       ProcessStandardError(request, 405, 'method not allowed',  response);
       Exit;
    end;
 
-   infoCache:=TFileAccessInfoCache(request.Custom);
-   if infoCache=nil then begin
-      infoCache:=TFileAccessInfoCache.Create(FileAccessInfoCacheSize);
-      request.Custom:=infoCache;
-      infoCache.CacheCounter:=FCacheCounter;
-   end else if infoCache.CacheCounter<>FCacheCounter then begin
+   infoCache := TFileAccessInfoCache(request.Custom);
+   if infoCache = nil then begin
+      infoCache := TFileAccessInfoCache.Create(FileAccessInfoCacheSize);
+      request.Custom := infoCache;
+   end else if infoCache.Count > cFileCacheCountFlush then begin
       infoCache.Flush;
-      infoCache.CacheCounter:=FCacheCounter;
    end;
 
-   fileInfo:=infoCache.FileAccessInfo(request.PathInfo);
-   if fileInfo=nil then begin
+   GetSystemTimeAsFileTime(t);
+   fileInfo := infoCache.FileAccessInfo(request.PathInfo);
+   if (fileInfo = nil) or (Int64(t) > fileInfo.NextCheck) then begin
 
-      fileInfo:=infoCache.CreateFileAccessInfo(request.PathInfo);
+      if fileInfo = nil then
+         fileInfo := infoCache.CreateFileAccessInfo(request.PathInfo)
+      else fileInfo.CookedPathName := request.PathInfo;
+      fileInfo.NextCheck := Int64(t) + cFileCacheExpiryMilliseconds * 10000;
 
       if not ExpandPathFileName(FPath, fileInfo.CookedPathName) then
 
@@ -493,26 +500,26 @@ var
    ifModifiedSince : TDateTime;
    lastModified : TDateTime;
 begin
-   lastModified:=FileDateTime(pathName);
-   if lastModified=0 then begin
+   lastModified := FileDateTime(pathName);
+   if lastModified = 0 then begin
       ProcessStandardError(request, 404, 'not found',  response);
       Exit;
    end;
 
-   ifModifiedSince:=request.IfModifiedSince;
+   ifModifiedSince := request.IfModifiedSince;
 
    // compare with a precision to the second and no more
-   if Round(lastModified*86400)>Round(ifModifiedSince*86400) then begin
+   if Round(lastModified*86400) > Round(ifModifiedSince*86400) then begin
 
       // http.sys will send the specified file from kernel mode
 
-      response.ContentData:=UnicodeStringToUtf8(pathName);
-      response.ContentType:=HTTP_RESP_STATICFILE;
-      response.LastModified:=lastModified;
+      response.ContentData := UnicodeStringToUtf8(pathName);
+      response.ContentType := HTTP_RESP_STATICFILE;
+      response.LastModified := lastModified;
 
    end else begin
 
-      response.StatusCode:=304;
+      response.StatusCode := 304;
 
    end;
 end;

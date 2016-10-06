@@ -233,8 +233,6 @@ type
                                         var inContent : RawByteString) : Boolean;
 
          function GetHttpResponseFlags: Cardinal; virtual;
-         procedure BeforeWaitForNextRequest; virtual;
-         procedure AfterWaitForNextRequest(const aCurRequest: PHTTP_REQUEST_V2); virtual;
 
          function GetLogging : Boolean; inline;
          procedure SetLogging(const val : Boolean);
@@ -795,16 +793,6 @@ begin
    end;
 end;
 
-procedure THttpApi2Server.AfterWaitForNextRequest(const aCurRequest: PHTTP_REQUEST_V2);
-begin
-//
-end;
-
-procedure THttpApi2Server.BeforeWaitForNextRequest;
-begin
-//
-end;
-
 procedure THttpApi2Server.Clone(ChildThreadCount : Integer);
 var
    i : Integer;
@@ -1021,12 +1009,10 @@ begin
    // main loop
    requestID := 0;
    repeat
-      BeforeWaitForNextRequest;
       // retrieve next pending request, and read its headers
       FillChar(request^, SizeOf(HTTP_REQUEST_V2), 0);
       errCode := HttpAPI.ReceiveHttpRequest(FReqQueue, requestID, 0, request^,
                                             Length(requestBuffer), bytesRead);
-      AfterWaitForNextRequest(request);
       if Terminated then
          break;
       case errCode of
@@ -1116,7 +1102,9 @@ begin
                         end;
                      end;
 
-                     response^.SetContent(dataChunkInMemory, FWebResponse.ContentData, FWebResponse.ContentType);
+                     if FWebResponse.StatusCode <> 304 then begin
+                        response^.SetContent(dataChunkInMemory, FWebResponse.ContentData, FWebResponse.ContentType);
+                     end;
                      HttpAPI.Check(
                         HttpAPI.SendHttpResponse(FReqQueue, request^.RequestId, GetHttpResponseFlags,
                                                  response^, nil, bytesSent, nil, 0, nil, FLogDataPtr),

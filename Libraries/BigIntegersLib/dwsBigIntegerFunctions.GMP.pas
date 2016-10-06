@@ -86,39 +86,40 @@ type
 
    TBigIntegerOpExpr = class(TBinaryOpExpr)
       constructor Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr); override;
+      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    TBigIntegerAddOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerSubOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerMultOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerDivOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerModOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
 
    TBigIntegerAndOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerOrOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerXorOpExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
 
    TBigIntegerShiftLeftExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TBigIntegerShiftRightExpr = class(TBigIntegerOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
 
    TBigIntegerOpAssignExpr = class(TOpAssignExpr)
@@ -163,13 +164,14 @@ type
    TBigIntegerUnaryOpExpr = class (TUnaryOpExpr)
       public
          constructor Create(prog : TdwsProgram; expr : TTypedExpr); override;
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    TConvIntegerToBigIntegerExpr = class(TBigIntegerUnaryOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TConvStringToBigIntegerExpr = class(TBigIntegerUnaryOpExpr)
-      procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TConvBigIntegerToIntegerExpr = class(TUnaryOpIntExpr)
       function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
@@ -194,8 +196,8 @@ type
    TBigIntegerToBlobFunc = class(TInternalMagicVariantFunction)
       procedure DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant); override;
    end;
-   TBlobToBigIntegerFunc = class(TInternalMagicVariantFunction)
-      procedure DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant); override;
+   TBlobToBigIntegerFunc = class(TInternalMagicInterfaceFunction)
+      procedure DoEvalAsInterface(const args : TExprBaseListExec; var result : IUnknown); override;
    end;
 
    TBigIntegerToFloatFunc = class(TInternalMagicFloatFunction)
@@ -218,6 +220,22 @@ type
 
    TBigIntegerBitLengthFunc = class(TInternalMagicIntFunction)
       function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
+   end;
+
+   TBigIntegerTestBitFunc = class(TInternalMagicBoolFunction)
+      function DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean; override;
+   end;
+
+   TBigIntegerSetBitFunc = class(TInternalMagicProcedure)
+      procedure DoEvalProc(const args : TExprBaseListExec); override;
+   end;
+
+   TBigIntegerSetBitValFunc = class(TInternalMagicProcedure)
+      procedure DoEvalProc(const args : TExprBaseListExec); override;
+   end;
+
+   TBigIntegerClearBitFunc = class(TInternalMagicProcedure)
+      procedure DoEvalProc(const args : TExprBaseListExec); override;
    end;
 
    TBigIntegerAbsExpr = class(TBigIntegerUnaryOpExpr)
@@ -355,15 +373,11 @@ type
    end;
 
 function TTypedExprBigIntegerHelper.EvalAsBigInteger(exec : TdwsExecution) : IdwsBigInteger;
-var
-   v : Variant;
 begin
    if Typ.UnAliasedType.ClassType = TBaseBigIntegerSymbol then begin
-      EvalAsVariant(exec, v);
-      Assert(TVarData(v).VType=varUnknown);
-      if TVarData(v).VUnknown<>nil then
-         Result := IdwsBigInteger(TVarData(v).VUnknown)
-      else Result := TBigIntegerWrapper.CreateZero;
+      EvalAsInterface(exec, IUnknown(Result));
+      if Result = nil then
+         Result := TBigIntegerWrapper.CreateZero;
    end else Result := TBigIntegerWrapper.CreateInt64( EvalAsInteger(exec) );
 end;
 
@@ -379,6 +393,28 @@ end;
 function BigIntegerWrap(const bi : mpz_t) : IInterface;
 begin
    Result := TBigIntegerWrapper.Wrap(bi) as IdwsBigInteger;
+end;
+
+// ArgVarBigInteger
+//
+function ArgVarBigInteger(const args : TExprBaseListExec; index : Integer) : IdwsBigInteger;
+
+   procedure Allocate(varExpr : TBaseTypeVarExpr; var result : IdwsBigInteger);
+   var
+      v : Variant;
+   begin
+      Result := TBigIntegerWrapper.CreateZero;
+      v := IUnknown(Result);
+      varExpr.AssignValue(args.Exec, v);
+   end;
+
+var
+   varExpr : TBaseTypeVarExpr;
+begin
+   varExpr := (args.ExprBase[index] as TBaseTypeVarExpr);
+   varExpr.EvalAsInterface(args.Exec, IUnknown(Result));
+   if Result = nil then
+      Allocate(varExpr, Result);
 end;
 
 // ------------------
@@ -559,7 +595,6 @@ begin
    Typ := expr.Typ;
 end;
 
-
 // EvalAsVariant
 //
 procedure TBigIntegerNegateExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
@@ -570,6 +605,7 @@ begin
    mpz_neg(bi.Value, Expr.EvalAsBigInteger(exec).Value^);
    result := bi as IdwsBigInteger;
 end;
+
 // ------------------
 // ------------------ TBigIntegerOpExpr ------------------
 // ------------------
@@ -579,17 +615,36 @@ end;
 constructor TBigIntegerOpExpr.Create(Prog: TdwsProgram; const aScriptPos : TScriptPos; aLeft, aRight : TTypedExpr);
 begin
    inherited;
-   Bind_MPIR_DLL;
+   try
+      Bind_MPIR_DLL;
+   except
+      on E : Exception do begin
+         Prog.CompileMsgs.AddCompilerErrorFmt(aScriptPos, 'mpir.dll binding failed, %s: %s', [E.ClassName, E.Message]);
+      end;
+   end;
    if aLeft.Typ.UnAliasedTypeIs(TBaseIntegerSymbol) then
       Typ := aRight.Typ
    else Typ := aLeft.Typ;
+end;
+
+
+// EvalAsVariant
+//
+procedure TBigIntegerOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+var
+   intf : IUnknown;
+begin
+   EvalAsInterface(exec, intf);
+   result := intf;
 end;
 
 // ------------------
 // ------------------ TBigIntegerAddOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerAddOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+// EvalAsInterface
+//
+procedure TBigIntegerAddOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -602,7 +657,7 @@ end;
 // ------------------ TBigIntegerSubOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerSubOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerSubOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -615,7 +670,7 @@ end;
 // ------------------ TBigIntegerMultOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerMultOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerMultOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -628,7 +683,7 @@ end;
 // ------------------ TBigIntegerDivOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerDivOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerDivOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -641,7 +696,7 @@ end;
 // ------------------ TBigIntegerModOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerModOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerModOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -654,7 +709,7 @@ end;
 // ------------------ TBigIntegerAndOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerAndOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerAndOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -667,7 +722,7 @@ end;
 // ------------------ TBigIntegerOrOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerOrOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerOrOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -680,7 +735,7 @@ end;
 // ------------------ TBigIntegerXorOpExpr ------------------
 // ------------------
 
-procedure TBigIntegerXorOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerXorOpExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -693,8 +748,6 @@ end;
 // ------------------ TBigIntegerRelOpExpr ------------------
 // ------------------
 
-// InternalCompare
-//
 function TBigIntegerRelOpExpr.InternalCompare(exec : TdwsExecution) : Integer;
 begin
    Result := mpz_cmp(Left.EvalAsBigInteger(exec).Value^, Right.EvalAsBigInteger(exec).Value^);
@@ -764,27 +817,33 @@ begin
    Typ := prog.Root.SystemTable.SymbolTable.FindTypeSymbol(SYS_BIGINTEGER, cvMagic);
 end;
 
+procedure TBigIntegerUnaryOpExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+var
+   intf : IUnknown;
+begin
+   EvalAsInterface(exec, intf);
+   result := intf;
+end;
+
 // ------------------
 // ------------------ TConvIntegerToBigIntegerExpr ------------------
 // ------------------
 
-procedure TConvIntegerToBigIntegerExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TConvIntegerToBigIntegerExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 begin
    result := TBigIntegerWrapper.CreateInt64( Expr.EvalAsInteger(exec) ) as IdwsBigInteger;
 end;
-
 // ------------------
 // ------------------ TConvStringToBigIntegerExpr ------------------
 // ------------------
 
-procedure TConvStringToBigIntegerExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TConvStringToBigIntegerExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    s : String;
 begin
    Expr.EvalAsString(exec, s);
    result := TBigIntegerWrapper.CreateString( s, 10 ) as IdwsBigInteger;
 end;
-
 // ------------------
 // ------------------ TConvBigIntegerToIntegerExpr ------------------
 // ------------------
@@ -1039,7 +1098,9 @@ end;
 // ------------------ TBlobToBigIntegerFunc ------------------
 // ------------------
 
-procedure TBlobToBigIntegerFunc.DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant);
+// DoEvalAsInterface
+//
+procedure TBlobToBigIntegerFunc.DoEvalAsInterface(const args : TExprBaseListExec; var result : IUnknown);
 var
    bufString : RawByteString;
    pSrc, pDest : PByte;
@@ -1084,7 +1145,7 @@ end;
 // ------------------ TBigIntegerShiftLeftExpr ------------------
 // ------------------
 
-procedure TBigIntegerShiftLeftExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerShiftLeftExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -1097,7 +1158,7 @@ end;
 // ------------------ TBigIntegerShiftRightExpr ------------------
 // ------------------
 
-procedure TBigIntegerShiftRightExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+procedure TBigIntegerShiftRightExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    bi : TBigIntegerWrapper;
 begin
@@ -1217,6 +1278,57 @@ begin
 end;
 
 // ------------------
+// ------------------ TBigIntegerTestBitFunc ------------------
+// ------------------
+
+// DoEvalAsBoolean
+//
+function TBigIntegerTestBitFunc.DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean;
+begin
+   Result := mpz_tstbit(ArgBigInteger(args, 0).Value^, args.AsInteger[1]) <> 0;
+end;
+
+// ------------------
+// ------------------ TBigIntegerSetBitFunc ------------------
+// ------------------
+
+// DoEvalProc
+//
+procedure TBigIntegerSetBitFunc.DoEvalProc(const args : TExprBaseListExec);
+begin
+   mpz_setbit(ArgVarBigInteger(args, 0).Value^, args.AsInteger[1]);
+end;
+
+// ------------------
+// ------------------ TBigIntegerSetBitValFunc ------------------
+// ------------------
+
+// DoEvalProc
+//
+procedure TBigIntegerSetBitValFunc.DoEvalProc(const args : TExprBaseListExec);
+var
+   bi : IdwsBigInteger;
+   bit : Integer;
+begin
+   bi := ArgVarBigInteger(args, 0);
+   bit := args.AsInteger[1];
+   if args.AsBoolean[2] then
+      mpz_setbit(bi.Value^, bit)
+   else mpz_clrbit(bi.Value^, bit)
+end;
+
+// ------------------
+// ------------------ TBigIntegerClearBitFunc ------------------
+// ------------------
+
+// DoEvalProc
+//
+procedure TBigIntegerClearBitFunc.DoEvalProc(const args : TExprBaseListExec);
+begin
+   mpz_clrbit(ArgVarBigInteger(args, 0).Value^, args.AsInteger[1]);
+end;
+
+// ------------------
 // ------------------ TBigIntegerModPowFunc ------------------
 // ------------------
 
@@ -1267,7 +1379,7 @@ initialization
    RegisterInternalFunction(THexToBigIntegerFunc,           'HexToBigInteger', ['h', SYS_STRING], SYS_BIGINTEGER, [iffStateLess], 'HexToBigInteger');
 
    RegisterInternalFunction(TBigIntegerToBlobFunc,          'BigIntegerToBlobParameter', ['v', SYS_BIGINTEGER], SYS_VARIANT, [iffStateLess], 'ToBlobParameter');
-   RegisterInternalFunction(TBlobToBigIntegerFunc,          'BlobFieldToBigInteger', ['b', SYS_STRING], SYS_BIGINTEGER, [iffStateLess]);
+   RegisterInternalInterfaceFunction(TBlobToBigIntegerFunc, 'BlobFieldToBigInteger', ['b', SYS_STRING], SYS_BIGINTEGER, [iffStateLess]);
 
    RegisterInternalFloatFunction(TBigIntegerToFloatFunc,    '',   ['v', SYS_BIGINTEGER], [iffStateLess], 'ToFloat');
    RegisterInternalIntFunction(TBigIntegerToIntegerFunc,    '',   ['v', SYS_BIGINTEGER], [iffStateLess], 'ToInteger');
@@ -1275,7 +1387,12 @@ initialization
    RegisterInternalBoolFunction(TBigIntegerOddFunc,   'Odd',      ['i', SYS_BIGINTEGER], [iffStateLess, iffOverloaded], 'IsOdd');
    RegisterInternalBoolFunction(TBigIntegerEvenFunc,  'Even',     ['i', SYS_BIGINTEGER], [iffStateLess, iffOverloaded], 'IsEven');
    RegisterInternalIntFunction(TBigIntegerSignFunc,   'Sign',     ['v', SYS_BIGINTEGER], [iffStateLess, iffOverloaded], 'Sign');
-   RegisterInternalIntFunction(TBigIntegerBitLengthFunc, '',      ['v', SYS_BIGINTEGER], [iffStateLess], 'BitLength');
+   RegisterInternalIntFunction(TBigIntegerBitLengthFunc,  '',     ['v', SYS_BIGINTEGER], [iffStateLess], 'BitLength');
+   RegisterInternalBoolFunction(TBigIntegerTestBitFunc,   '',     ['i', SYS_BIGINTEGER, 'bit', SYS_INTEGER], [iffStateLess], 'TestBit');
+   RegisterInternalProcedure(TBigIntegerSetBitFunc,       '',     ['@i', SYS_BIGINTEGER, 'bit', SYS_INTEGER], 'SetBit', [iffOverloaded]);
+   RegisterInternalProcedure(TBigIntegerSetBitValFunc,    '',     ['@i', SYS_BIGINTEGER, 'bit', SYS_INTEGER, 'v', SYS_BOOLEAN], 'SetBit', [iffOverloaded]);
+   RegisterInternalProcedure(TBigIntegerClearBitFunc,     '',     ['@i', SYS_BIGINTEGER, 'bit', SYS_INTEGER], 'ClearBit', []);
+
    RegisterInternalFunction(TBigIntegerGcdFunc,       'Gcd',      ['a', SYS_BIGINTEGER, 'b', SYS_BIGINTEGER], SYS_BIGINTEGER, [iffStateLess, iffOverloaded]);
    RegisterInternalFunction(TBigIntegerLcmFunc,       'Gcd',      ['a', SYS_BIGINTEGER, 'b', SYS_BIGINTEGER], SYS_BIGINTEGER, [iffStateLess, iffOverloaded]);
    RegisterInternalBoolFunction(TBigIntegerIsPrimeFunc, 'IsPrime',['n', SYS_BIGINTEGER, 'prob=25', SYS_INTEGER], [iffStateLess, iffOverloaded], 'IsPrime');

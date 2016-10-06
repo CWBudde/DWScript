@@ -169,6 +169,7 @@ type
          function  EvalAsFloat(exec : TdwsExecution) : Double; virtual; abstract;
          procedure EvalAsString(exec : TdwsExecution; var result : UnicodeString); overload; virtual; abstract;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); overload; virtual; abstract;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); virtual; abstract;
          procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); virtual; abstract;
          procedure EvalAsScriptObjInterface(exec : TdwsExecution; var result : IScriptObjInterface); virtual; abstract;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); virtual; abstract;
@@ -1853,6 +1854,8 @@ type
       function ToInt64Array : TInt64DynArray;
 
       procedure ReplaceData(const v : TData);
+
+      procedure Reverse;
    end;
 
    // IScriptAssociativeArray

@@ -69,6 +69,7 @@ type
    TBaseTypeVarExpr = class (TVarExpr)
       public
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
 
    TIntVarExpr = class (TBaseTypeVarExpr)
@@ -120,7 +121,6 @@ type
       public
          procedure AssignExpr(exec : TdwsExecution; Expr: TTypedExpr); override;
          procedure EvalAsScriptObj(exec : TdwsExecution; var Result : IScriptObj); override;
-         function EvalAsPIScriptObj(exec : TdwsExecution) : PIScriptObj; inline;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
    end;
 
@@ -196,6 +196,7 @@ type
          procedure AssignValueAsScriptObj(exec : TdwsExecution; const value : IScriptObj); override;
 
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
    end;
 
@@ -2450,6 +2451,13 @@ begin
    exec.Stack.ReadValue(exec.Stack.BasePointer + FStackAddr, Result);
 end;
 
+// EvalAsInterface
+//
+procedure TBaseTypeVarExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+begin
+   exec.Stack.ReadInterfaceValue(exec.Stack.BasePointer + FStackAddr, Result);
+end;
+
 // ------------------
 // ------------------ TIntVarExpr ------------------
 // ------------------
@@ -2676,13 +2684,6 @@ begin
    exec.Stack.ReadInterfaceValue(exec.Stack.BasePointer + FStackAddr, PUnknown(@Result)^);
 end;
 
-// EvalAsPIScriptObj
-//
-function TObjectVarExpr.EvalAsPIScriptObj(exec : TdwsExecution) : PIScriptObj;
-begin
-   Result:=PIScriptObj(exec.Stack.PointerToInterfaceValue_BaseRelative(FStackAddr));
-end;
-
 // EvalAsScriptDynArray
 //
 procedure TObjectVarExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
@@ -2873,6 +2874,13 @@ end;
 procedure TByRefParamExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 begin
    VarCopySafe(Result, GetVarParamEval(exec)^);
+end;
+
+// EvalAsInterface
+//
+procedure TByRefParamExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+begin
+   IDataContext(GetVarParamDataAsPointer(exec)).EvalAsInterface(0, result);
 end;
 
 // EvalAsFloat
@@ -3493,15 +3501,13 @@ end;
 //
 procedure TDynamicArraySetVarExpr.EvalNoResult(exec : TdwsExecution);
 var
-   dynArray : TScriptDynamicArray;
+   dyn : IScriptDynArray;
    index : Integer;
-   base : PIScriptObj;
 begin
-   base:=TObjectVarExpr(ArrayExpr).EvalAsPIScriptObj(exec);
-   dynArray:=TScriptDynamicArray(base^.GetSelf);
+   ArrayExpr.EvalAsScriptDynArray(exec, dyn);
    index:=IndexExpr.EvalAsInteger(exec);
-   BoundsCheck(exec, dynArray.ArrayLength, index);
-   ValueExpr.EvalAsVariant(exec, dynArray.AsPVariant(index)^);
+   BoundsCheck(exec, dyn.ArrayLength, index);
+   ValueExpr.EvalAsVariant(exec, dyn.AsPVariant(index)^);
 end;
 
 // ------------------
@@ -3514,10 +3520,10 @@ procedure TDynamicArraySetDataExpr.EvalNoResult(exec : TdwsExecution);
 var
    dynArray : TScriptDynamicArray;
    index : Integer;
-   base : IScriptObj;
+   base : IScriptDynArray;
    dataExpr : TDataExpr;
 begin
-   FArrayExpr.EvalAsScriptObj(exec, base);
+   FArrayExpr.EvalAsScriptDynArray(exec, base);
    dynArray:=TScriptDynamicArray(base.GetSelf);
    index:=IndexExpr.EvalAsInteger(exec);
    BoundsCheck(exec, dynArray.ArrayLength, index);
@@ -8660,11 +8666,11 @@ end;
 //
 procedure TArraySwapExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicArray;
    i1, i2 : Integer;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicArray(base.GetSelf);
    i1:=Index1Expr.EvalAsInteger(exec);
    i2:=Index2Expr.EvalAsInteger(exec);
@@ -8777,12 +8783,12 @@ end;
 //
 procedure TArraySortExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicValueArray;
    qs : TQuickSort;
    comparer : TArraySortComparer;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicValueArray(base.GetSelf);
    comparer:=TArraySortComparer.Create(exec, dyn, CompareExpr);
    try
@@ -8820,11 +8826,11 @@ end;
 //
 procedure TArraySortNaturalExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicValueArray;
    qs : TQuickSort;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicValueArray(base.GetSelf);
    SetCompareMethod(qs, dyn);
    qs.SwapMethod:=dyn.Swap;
@@ -8983,11 +8989,9 @@ end;
 //
 procedure TArrayReverseExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
-   dyn : TScriptDynamicArray;
+   dyn : IScriptDynArray;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
-   dyn:=TScriptDynamicArray(base.GetSelf);
+   BaseExpr.EvalAsScriptDynArray(exec, dyn);
    dyn.Reverse;
 end;
 
@@ -9233,11 +9237,11 @@ end;
 //
 procedure TArrayDeleteExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicArray;
    index, count : Integer;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicArray(base.GetSelf);
    index:=IndexExpr.EvalAsInteger(exec);
    BoundsCheck(exec, dyn.ArrayLength, index);
@@ -9321,7 +9325,8 @@ begin
       count:=CountExpr.EvalAsInteger(exec);
       if count<0 then
          RaiseScriptError(exec, EScriptError.CreateFmt(RTE_PositiveCountExpected, [count]));
-      BoundsCheck(exec, dyn.ArrayLength, index+count-1);
+      if index+count >= dyn.ArrayLength then
+         count := dyn.ArrayLength-index;
    end else count:=dyn.ArrayLength-index;
 
    newDyn:=TScriptDynamicArray.CreateNew(dyn.ElementTyp);
@@ -9503,17 +9508,14 @@ end;
 function TArrayRemoveExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
 var
    index : Integer;
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicArray;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicArray(base.GetSelf);
    index:=FMethod(exec, dyn);
-   if index>=0 then begin
-      BaseExpr.EvalAsScriptObj(exec, base);
-      dyn:=TScriptDynamicArray(base.GetSelf);
+   if index>=0 then
       dyn.Delete(index, 1);
-   end;
    Result:=index;
 end;
 
@@ -9544,11 +9546,11 @@ end;
 //
 procedure TArrayInsertExpr.EvalNoResult(exec : TdwsExecution);
 var
-   base : IScriptObj;
+   base : IScriptDynArray;
    dyn : TScriptDynamicArray;
    n, index : Integer;
 begin
-   BaseExpr.EvalAsScriptObj(exec, base);
+   BaseExpr.EvalAsScriptDynArray(exec, base);
    dyn:=TScriptDynamicArray(base.GetSelf);
 
    n:=dyn.ArrayLength;

@@ -979,6 +979,7 @@ type
          function  EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
          procedure EvalAsString(exec : TdwsExecution; var result : UnicodeString); override;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
          procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); override;
          procedure EvalAsScriptObjInterface(exec : TdwsExecution; var result : IScriptObjInterface); override;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
@@ -1028,8 +1029,6 @@ type
          function SameDataExpr(expr : TTypedExpr) : Boolean; virtual;
 
          property Typ : TTypeSymbol read FTyp write FTyp;
-
-         procedure DetachTypes(toTable : TSymbolTable); virtual;
    end;
 
    TTypedExprClass = class of TTypedExpr;
@@ -1063,11 +1062,19 @@ type
 
    // Does nothing! E. g.: "for x := 1 to 10 do {TNullExpr};"
    TNullExpr = class (TNoResultExpr)
-      procedure EvalNoResult(exec : TdwsExecution); override;
+      public
+         procedure EvalNoResult(exec : TdwsExecution); override;
+   end;
+
+   // invalid statement
+   TErrorExpr = class sealed (TNullExpr)
    end;
 
    // invalid expression
-   TErrorExpr = class sealed (TNullExpr)
+   TErrorValueExpr = class sealed (TTypedExpr)
+      public
+         constructor Create(prog : TdwsProgram);
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    // statement; statement; statement;
@@ -3965,15 +3972,23 @@ begin
    Result:=nil;
 end;
 
-// EvalAsScriptObj
+// EvalAsInterface
 //
-procedure TProgramExpr.EvalAsScriptObj(exec : TdwsExecution; var Result : IScriptObj);
+procedure TProgramExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
 var
    buf : Variant;
 begin
    EvalAsVariant(exec, buf);
    Assert(VarType(buf)=varUnknown);
-   Result:=(IUnknown(TVarData(buf).VUnknown) as IScriptObj);
+   Result:=IUnknown(TVarData(buf).VUnknown);
+end;
+
+// EvalAsScriptObj
+//
+procedure TProgramExpr.EvalAsScriptObj(exec : TdwsExecution; var Result : IScriptObj);
+begin
+   EvalAsInterface(exec, IUnknown(Result));
+   Result := IUnknown(Result) as IScriptObj;
 end;
 
 // EvalAsScriptObjInterface
@@ -4245,14 +4260,6 @@ begin
    Result:=False;
 end;
 
-// DetachTypes
-//
-procedure TTypedExpr.DetachTypes(toTable : TSymbolTable);
-begin
-   toTable.AddSymbol(Typ);
-   FTyp:=nil;
-end;
-
 // GetBaseType
 //
 function TTypedExpr.GetBaseType : TTypeSymbol;
@@ -4365,6 +4372,24 @@ begin
 end;
 
 // ------------------
+// ------------------ TErrorValueExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TErrorValueExpr.Create(prog : TdwsProgram);
+begin
+   Typ := prog.TypAnyType;
+end;
+
+// EvalAsVariant
+//
+procedure TErrorValueExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+begin
+   Assert(False);
+end;
+
+// ------------------
 // ------------------ TBlockExprBase ------------------
 // ------------------
 
@@ -4383,7 +4408,12 @@ end;
 // Orphan
 //
 procedure TBlockExprBase.Orphan(prog : TdwsProgram);
+var
+   i : Integer;
 begin
+   for i := 0 to FCount-1 do
+      prog.Root.OrphanObject(FStatements[i]);
+   FCount := 0;
    DecRefCount;
 end;
 
