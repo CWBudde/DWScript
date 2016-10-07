@@ -66,7 +66,7 @@ type
    TdwsOnNeedUnitEvent = function (const unitName : UnicodeString; var unitSource : UnicodeString) : IdwsUnit of object;
    TdwsResourceEvent = procedure (compiler : TdwsCompiler; const resourceName : UnicodeString) of object;
    TdwsCodeGenEvent = procedure (compiler : TdwsCompiler; const switchPos : TScriptPos; const code : UnicodeString) of object;
-   TdwsFilterEvent = procedure (compiler : TdwsCompiler; const sourceName : String; var sourceCode : String; var filter : TdwsFilter) of object;
+   TdwsFilterEvent = procedure (compiler : TdwsCompiler; const sourceName : UnicodeString; var sourceCode : UnicodeString; var filter : TdwsFilter) of object;
 
    TCompilerCreateBaseVariantSymbolEvent = function (table : TSystemSymbolTable) : TBaseVariantSymbol of object;
    TCompilerCreateSystemSymbolsEvent = procedure (table : TSystemSymbolTable) of object;
@@ -398,7 +398,7 @@ type
       function Compiler : TdwsCompiler;
 
       function Compile(const aCodeText : UnicodeString; aConf : TdwsConfiguration;
-                       const mainFileName : String = '') : IdwsProgram;
+                       const mainFileName : UnicodeString = '') : IdwsProgram;
       procedure RecompileInContext(const context : IdwsProgram; const aCodeText : UnicodeString;
                                    aConf : TdwsConfiguration);
 
@@ -828,7 +828,7 @@ type
          function CreateProgram(const systemTable : ISystemSymbolTable;
                                 resultType : TdwsResultType;
                                 const stackParams : TStackParameters;
-                                const mainFileName : String) : TdwsMainProgram;
+                                const mainFileName : UnicodeString) : TdwsMainProgram;
          function CreateAssign(const scriptPos : TScriptPos; token : TTokenType;
                                left : TDataExpr; right : TTypedExpr) : TProgramExpr;
 
@@ -892,7 +892,7 @@ type
          destructor Destroy; override;
 
          function Compile(const aCodeText : UnicodeString; aConf : TdwsConfiguration;
-                          const mainFileName : String = '') : IdwsProgram;
+                          const mainFileName : UnicodeString = '') : IdwsProgram;
          procedure RecompileInContext(const context : IdwsProgram; const aCodeText : UnicodeString; aConf : TdwsConfiguration);
 
          procedure AbortCompilation;
@@ -1635,7 +1635,7 @@ end;
 // Compile
 //
 function TdwsCompiler.Compile(const aCodeText : UnicodeString; aConf : TdwsConfiguration;
-                              const mainFileName : String = '') : IdwsProgram;
+                              const mainFileName : UnicodeString = '') : IdwsProgram;
 var
    stackParams : TStackParameters;
    codeText : UnicodeString;
@@ -2861,7 +2861,7 @@ var
    hotPos : TScriptPos;
    initExpr : TTypedExpr;
    assignExpr : TProgramExpr;
-   externalName : String;
+   externalName : UnicodeString;
 begin
    initExpr := nil;
    try
@@ -4344,9 +4344,8 @@ end;
 //
 procedure TdwsCompiler.UnexpectedBlockTokenError(const endTokens : TTokenTypes);
 var
-   msg : String;
+   msg, found : UnicodeString;
    foundTyp : TTokenType;
-   found : String;
 begin
    msg:=TokenTypesToString(endTokens);
    if FTok.HasTokens then begin
@@ -7422,7 +7421,7 @@ procedure TdwsCompiler.TypeCheckArgs(funcExpr : TFuncExprBase; const argPosArray
 
 var
    arg : TTypedExpr;
-   x, paramCount, nbParamsToCheck : Integer;
+   i, paramCount, nbParamsToCheck : Integer;
    funcSym : TFuncSymbol;
    paramSymbol : TParamSymbol;
    argTyp : TTypeSymbol;
@@ -7462,11 +7461,13 @@ begin
       nbParamsToCheck:=paramCount
    else nbParamsToCheck:=funcExpr.Args.Count;
 
-   for x:=0 to nbParamsToCheck-1 do begin
-      arg:=TTypedExpr(funcExpr.Args.ExprBase[x]);
-      paramSymbol:=TParamSymbol(funcSym.Params[x]);
-      if x<Length(argPosArray) then
-         argPos:=argPosArray[x]
+   for i := 0 to nbParamsToCheck-1 do begin
+      arg := TTypedExpr(funcExpr.Args.ExprBase[i]);
+      if arg.ClassType = TErrorValueExpr then continue;
+
+      paramSymbol:=TParamSymbol(funcSym.Params[i]);
+      if i < Length(argPosArray) then
+         argPos:=argPosArray[i]
       else argPos:=funcExpr.ScriptPos;
 
       if arg.ClassType=TArrayConstantExpr then
@@ -7477,20 +7478,20 @@ begin
       if paramSymbol.ClassType<>TVarParamSymbol then begin
          arg:=TConvExpr.WrapWithConvCast(FProg, argPos, FExec, paramSymbol.Typ, arg, '');
       end;
-      funcExpr.Args.ExprBase[x]:=arg;
+      funcExpr.Args.ExprBase[i] := arg;
 
       if argTyp=nil then
-         WrongArgumentError(argPos, x, paramSymbol.Typ)
+         WrongArgumentError(argPos, i, paramSymbol.Typ)
       else if not paramSymbol.Typ.IsCompatible(arg.Typ) then
-         WrongArgumentLongError(argPos, x, paramSymbol.Typ, arg.Typ)
+         WrongArgumentLongError(argPos, i, paramSymbol.Typ, arg.Typ)
       else if paramSymbol.ClassType=TVarParamSymbol then begin
          if not paramSymbol.Typ.IsOfType(arg.Typ) then
-            WrongArgumentLongError(argPos, x, paramSymbol.Typ, argTyp);
+            WrongArgumentLongError(argPos, i, paramSymbol.Typ, argTyp);
          if arg is TDataExpr then begin
             if     (coVariablesAsVarOnly in Options)
                and (not (arg is TVarExpr))
                and (not (argTyp.UnAliasedType.ClassType=TRecordSymbol))
-               and (   (x>0)
+               and (   (i > 0)
                     or (not (funcSym is TMethodSymbol))
                     or (not (TMethodSymbol(funcSym).StructSymbol is TRecordSymbol))
                     or TMethodSymbol(funcSym).IsClassMethod
@@ -7498,11 +7499,11 @@ begin
                FMsgs.AddCompilerError(argPos, CPE_OnlyVariablesAsVarParam)
             // Record methods ignore the IsWritable constraints, as in Delphi
             else if     (not TDataExpr(arg).IsWritable)
-                    and (   (x>0)
+                    and (   (i > 0)
                          or (not (funcSym is TMethodSymbol))
                          or (not (TMethodSymbol(funcSym).StructSymbol is TRecordSymbol))) then
-               FMsgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [x, paramSymbol.Name]);
-         end else FMsgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [x, paramSymbol.Name]);
+               FMsgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [i, paramSymbol.Name]);
+         end else FMsgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [i, paramSymbol.Name]);
       end;
 
    end;
@@ -8452,7 +8453,7 @@ end;
 //
 function TdwsCompiler.ReadNew(restrictTo : TClassSymbol; asAttribute : Boolean) : TProgramExpr;
 
-   function FindAsAttribute(table : TSymbolTable; const name : String) : TSymbol;
+   function FindAsAttribute(table : TSymbolTable; const name : UnicodeString) : TSymbol;
    begin
       Result:=table.FindSymbol(name+'Attribute', cvPrivate);
       if Result<>nil then begin
@@ -11122,12 +11123,16 @@ var
    hotPos : TScriptPos;
 begin
    FTok.TestName; // make sure hotpos is on next token
-   hotPos:=FTok.HotPos;
-   negTerm:=ReadTerm;
+   hotPos := FTok.HotPos;
+   negTerm := ReadTerm;
+   if negTerm = nil then begin
+      Result := TErrorValueExpr.Create(FProg);
+      Exit;
+   end;
 
    // shortcut for common negations
    if negTerm.Typ = FProg.TypInteger then
-      negExprClass:=TNegIntExpr
+      negExprClass := TNegIntExpr
    else if negTerm.Typ = FProg.TypFloat then
       negExprClass:=TNegFloatExpr
    else begin
@@ -12301,7 +12306,7 @@ end;
 //
 procedure TdwsCompiler.CompareFuncKinds(a, b : TFuncKind);
 const
-   cErrorForFunkKind : array [TFuncKind] of String = (
+   cErrorForFunkKind : array [TFuncKind] of UnicodeString = (
       CPE_FunctionExpected, CPE_ProcedureExpected, CPE_ConstructorExpected,
       CPE_DestructorExpected, CPE_MethodExpected, CPE_LambdaExpected
    );
@@ -12642,7 +12647,7 @@ end;
 function TdwsCompiler.CreateProgram(const systemTable : ISystemSymbolTable;
                                     resultType : TdwsResultType;
                                     const stackParams : TStackParameters;
-                                    const mainFileName : String) : TdwsMainProgram;
+                                    const mainFileName : UnicodeString) : TdwsMainProgram;
 begin
    Result:=TdwsMainProgram.Create(systemTable, resultType, stackParams, mainFileName);
 end;
@@ -14105,7 +14110,7 @@ begin
 
    sysTable.TypString:=TBaseStringSymbol.Create;
    sysTable.AddSymbol(sysTable.TypString);
-   sysTable.AddSymbol(TDynamicArraySymbol.Create('array of string', sysTable.TypString, sysTable.TypInteger));
+   sysTable.AddSymbol(TDynamicArraySymbol.Create(SYS_ARRAY_OF_STRING, sysTable.TypString, sysTable.TypInteger));
 
    if Assigned(FOnCreateBaseVariantSymbol) then
       FOnCreateBaseVariantSymbol(sysTable)
