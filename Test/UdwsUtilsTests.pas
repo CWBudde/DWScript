@@ -20,7 +20,8 @@ interface
 uses Classes, SysUtils, Math, Variants, Types,
    dwsXPlatformTests, dwsUtils,
    dwsXPlatform, dwsWebUtils, dwsTokenStore, dwsCryptoXPlatform,
-   dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext;
+   dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext,
+   dwsXXHash;
 
 type
 
@@ -88,6 +89,8 @@ type
 
          procedure NameObjectHashTest;
 
+         procedure ObjectListTest;
+
          procedure MultiThreadedGlobalVars;
          procedure Eratosthenes;
          procedure GlobalVarsCollect;
@@ -97,6 +100,8 @@ type
          procedure DataContextCasts;
 
          procedure VariantPersist;
+
+         procedure xxHashTest;
    end;
 
 // ------------------------------------------------------------------
@@ -1134,6 +1139,41 @@ begin
    end;
 end;
 
+// ObjectListTest
+//
+procedure TdwsUtilsTests.ObjectListTest;
+var
+   list : TObjectList<TRefCountedObject>;
+   obj1, obj2 : TRefCountedObject;
+begin
+   list := TObjectList<TRefCountedObject>.Create;
+   try
+      CheckEquals(0, list.Count);
+      list.Add(nil);
+      CheckEquals(1, list.Count);
+      Check(list[0] = nil);
+      obj1 := TRefCountedObject.Create;
+      list.Add(obj1);
+      CheckEquals(2, list.Count);
+      Check(list[1] = obj1);
+      obj2 := TRefCountedObject.Create;
+      list.Add(obj2);
+      CheckEquals(3, list.Count);
+      Check(list[2] = obj2);
+      list.Extract(2).Free;
+      CheckEquals(2, list.Count);
+      Check(list[0] = nil);
+      Check(list[1] = obj1);
+      list.Extract(0).Free;
+      CheckEquals(1, list.Count);
+      Check(list[0] = obj1);
+      list.Extract(0).Free;
+      CheckEquals(0, list.Count);
+   finally
+      list.Free;
+   end;
+end;
+
 // MultiThreadedGlobalVars
 //
 type
@@ -1387,6 +1427,42 @@ begin
       wobs.Free;
    end;
 
+end;
+
+// xxHashTest
+//
+procedure TdwsUtilsTests.xxHashTest;
+
+   procedure CheckFull(const data : RawByteString; expected : Cardinal; seed : Cardinal = 0);
+   begin
+      CheckEquals(expected, xxHash32.Full(Pointer(data), Length(data), seed), 'for '+UTF8ToString(data));
+   end;
+
+var
+   i : Integer;
+   abc : RawByteString;
+begin
+   CheckFull('A', $10659A4D);
+   CheckFull('ZOOLOGICALLY', $A5D0E117);
+   CheckFull('ab', $4999fc53);
+   CheckFull('abc', $32D153FF);
+   CheckFull('abcd', $A3643705);
+   CheckFull('abcde', $9738f19b);
+   CheckFull('abcde', $9738f19b);
+   CheckFull('abcdef', $8b7cd587);
+   CheckFull('abcdefg', $9dd093b3);
+   CheckFull('abcdefgh', $0bb3c6bb);
+   CheckFull('abcdefghi', $d03c13fd);
+
+   CheckFull('1234567890', $e8412d73);
+   CheckFull('1234567890abcdefgh', $1f03d5e7);
+
+   CheckFull('1234567890', $9d1f13e5, 1234);
+   CheckFull('1234567890abcdefgh', $8e1995a7, 1234);
+
+   for i := 1 to 1000 do
+      abc := abc + 'abc';
+   CheckFull(abc, $598bfdf6);
 end;
 
 // ------------------------------------------------------------------
