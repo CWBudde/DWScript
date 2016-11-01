@@ -164,6 +164,9 @@ function UnixTime : Int64;
 function LocalDateTimeToUTCDateTime(t : TDateTime) : TDateTime;
 function UTCDateTimeToLocalDateTime(t : TDateTime) : TDateTime;
 
+function SystemMillisecondsToUnixTime(t : Int64) : Int64;
+function UnixTimeToSystemMilliseconds(ut : Int64) : Int64;
+
 procedure SystemSleep(msec : Integer);
 
 {$ifndef FPC}
@@ -212,7 +215,8 @@ function VarToUnicodeStr(const v : Variant) : UnicodeString; inline;
 {$endif}
 
 function RawByteStringToBytes(const buf : RawByteString) : TBytes;
-function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString;
+function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString; overload;
+function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString; overload;
 
 function LoadDataFromFile(const fileName : UnicodeString) : TBytes;
 procedure SaveDataToFile(const fileName : UnicodeString; const data : TBytes);
@@ -406,6 +410,20 @@ begin
    if not SystemTimeToTzSpecificLocalTime(@tzInfo, universalSystemTime, localSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(localSystemTime);
+end;
+
+// SystemMillisecondsToUnixTime
+//
+function SystemMillisecondsToUnixTime(t : Int64) : Int64;
+begin
+   Result := UnixTime + (GetSystemTimeMilliseconds-t) div 1000;
+end;
+
+// UnixTimeToSystemMilliseconds
+//
+function UnixTimeToSystemMilliseconds(ut : Int64) : Int64;
+begin
+   Result := (UnixTime-ut)*1000 + GetSystemTimeMilliseconds;
 end;
 
 // SystemSleep
@@ -839,8 +857,16 @@ begin
       Result:=''
    else begin
       SetLength(Result, n);
-      System.Move(buf[startIndex], Result[1], n);
+      System.Move(buf[startIndex], Pointer(Result)^, n);
    end;
+end;
+
+// BytesToRawByteString
+//
+function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString;
+begin
+   SetLength(Result, size);
+   System.Move(p^, Pointer(Result)^, size);
 end;
 
 // TryTextToFloat
