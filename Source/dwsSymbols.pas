@@ -94,6 +94,7 @@ type
       function GetSleeping : Boolean;
 
       function GetCallStack : TdwsExprLocationArray;
+      function GetLastScriptErrorExpr : TExprBase;
 
       property ProgramState : TProgramState read GetProgramState;
       property Sleeping : Boolean read GetSleeping;
@@ -1761,6 +1762,7 @@ type
 
          class function Status_Offset : Integer;
 
+         function GetLastScriptErrorExpr : TExprBase;
          procedure SetScriptError(expr : TExprBase);
          procedure ClearScriptError;
 
@@ -3174,9 +3176,7 @@ begin
       if (typSym=nil) or not UnicodeSameText(typSym.Name, paramRec.ParamType) then
          typSym:=Table.FindTypeSymbol(paramRec.ParamType, cvMagic);
       if (typSym = nil) and (paramRec.ParamType = 'array of Any Type') then begin
-         typSym := TAnyTypeSymbol.Create('Any Type', nil);
-         table.AddSymbol(typSym);
-         typSym := TDynamicArraySymbol.Create('', typSym, Table.FindTypeSymbol(SYS_INTEGER, cvPublic));
+         typSym := TDynamicArraySymbol.Create('', table.FindTypeSymbol(SYS_ANY_TYPE, cvPublic), Table.FindTypeSymbol(SYS_INTEGER, cvPublic));
          table.AddSymbol(typSym);
       end;
 
@@ -6933,6 +6933,13 @@ asm
 begin
    Result:=0;
 {$endif}
+end;
+
+// GetLastScriptErrorExpr
+//
+function TdwsExecution.GetLastScriptErrorExpr : TExprBase;
+begin
+   Result := FLastScriptError;
 end;
 
 // SetScriptError

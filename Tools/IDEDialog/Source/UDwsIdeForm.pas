@@ -40,7 +40,7 @@ uses
   SynMacroRecorder, SynCompletionProposal,
 
   UDwsIdeDefs, UDwsIdeConfig, UDwsIdeLocalVariablesFrame, UDwsIdeWatchesFrame,
-  UDwsIdeCallStackFrame, UDwsIdeGotoLine;
+  UDwsIdeCallStackFrame, UDwsIdeGotoLine, System.Actions;
 
 const
   ecOpenFileUnderCursor = ecUserFirst;
@@ -309,6 +309,8 @@ type
     procedure ActionFileSaveUpdate(Sender: TObject);
     procedure ActionGotoHomePositionExecute(Sender: TObject);
     procedure ActionGotoHomePositionUpdate(Sender: TObject);
+    procedure ActionGotoLineNumberExecute(Sender: TObject);
+    procedure ActionGotoLineNumberUpdate(Sender: TObject);
     procedure ActionOpenFileExecute(Sender: TObject);
     procedure ActionFileOpenProjectExecute(Sender: TObject);
     procedure ActionProgramResetExecute(Sender: TObject);
@@ -348,8 +350,6 @@ type
     procedure SynCodeCompletionShow(Sender: TObject);
     procedure SynParametersExecute(Kind: SynCompletionType; Sender: TObject;
       var CurrentInput: string; var x, y: Integer; var CanExecute: Boolean);
-    procedure ActionGotoLineNumberExecute(Sender: TObject);
-    procedure ActionGotoLineNumberUpdate(Sender: TObject);
   private
     FScript: TDelphiWebScript;
     FOnNewProject: TDwsNewProjectEvent;

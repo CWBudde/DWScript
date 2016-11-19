@@ -37,7 +37,6 @@ const
   SYS_SYSTEM = 'System';
   SYS_DEFAULT = 'Default';
   SYS_OBJECT = 'Object';
-  SYS_ANY = 'Any';
   SYS_TCLASS = 'TClass';
   SYS_TOBJECT = 'TObject';
   SYS_TOBJECT_CREATE = 'Create';
@@ -57,6 +56,7 @@ const
   SYS_EDELPHI_EXCEPTIONCLASS_FIELD = 'FExceptionClass';
   SYS_TCUSTOMATTRIBUTE = 'TCustomAttribute';
   SYS_IINTERFACE = 'IInterface';
+  SYS_ANY_TYPE = 'Any Type';
 
   SYS_ARRAY_OF_STRING = 'array of String';
 
@@ -610,6 +610,7 @@ const
   RTE_UseParameter = 'Use ''Parameter'' property to set parameter "%s" of Function "%s"';
   RTE_NoParameterFound = 'No parameter "%s" found in function "%s"';
   RTE_IncorrectParameterIndex = 'Incorrect parameter index %d';
+  RTE_IncorrectParameterValue = 'Incorrect parameter value';
   RTE_NoIndexFound = 'No index parameter "%s" found for property "%s"';
 
   RTE_NoRecordMemberFound = 'No member "%s" found in record "%s"';

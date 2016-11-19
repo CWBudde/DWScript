@@ -4,8 +4,8 @@ interface
 
 uses
    Classes, SysUtils, Variants, ComObj,
-   dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsErrors,
-   dwsUtils, dwsSymbols, dwsDebugger, dwsStrings;
+   dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsErrors, dwsInfo,
+   dwsUtils, dwsSymbols, dwsDebugger, dwsStrings, dwsEvaluate;
 
 type
 
@@ -20,6 +20,7 @@ type
          FDebugLastEvalResult : String;
          FDebugLastMessage : String;
          FDebugLastNotificationPos : TScriptPos;
+         FDebugResumed : Integer;
 
          procedure DoCreateExternal(Info: TProgramInfo; var ExtObject: TObject);
          procedure DoCleanupExternal(externalObject : TObject);
@@ -28,6 +29,9 @@ type
          procedure DoDebugEval(exec: TdwsExecution; expr: TExprBase);
          procedure DoDebugMessage(const msg : UnicodeString);
          procedure DoDebugExceptionNotification(const exceptObj : IInfo);
+         procedure DoDebugSuspended(sender : TObject);
+
+         procedure DoToggleBreakpointEnabled(info : TProgramInfo);
 
       public
          procedure SetUp; override;
@@ -48,6 +52,9 @@ type
          procedure DebugMessage;
 
          procedure ExceptionNotification;
+
+         procedure BreakpointsStatic;
+         procedure BreakpointsDynamic;
    end;
 
    TDebuggerOptimizedTests = class (TDebuggerTests)
@@ -90,6 +97,8 @@ var
    cls : TdwsClass;
    cst : TdwsConstructor;
    meth : TdwsMethod;
+   fn : TdwsFunction;
+   p : TdwsParameter;
 begin
    FCompiler:=TDelphiWebScript.Create(nil);
    FCompiler.Config.CompilerOptions:=[coContextMap, coAssertions];
@@ -100,6 +109,7 @@ begin
    FDebugger.OnDebug:=DoDebugEval;
    FDebugger.OnDebugMessage:=DoDebugMessage;
    FDebugger.OnNotifyException:=DoDebugExceptionNotification;
+   FDebugger.OnDebugSuspended:=DoDebugSuspended;
 
    cls:=FUnits.Classes.Add;
    cls.Name:='TTestClass';
@@ -112,6 +122,13 @@ begin
    meth.ResultType:='String';
    meth.Name:='GetValue';
    meth.OnEval:=DoGetValue;
+
+   fn := FUnits.Functions.Add;
+   fn.Name := 'ToggleBreakpointEnabled';
+   p := fn.Parameters.Add;
+   p.Name := 'index';
+   p.DataType := SYS_INTEGER;
+   fn.OnEval := DoToggleBreakpointEnabled;
 end;
 
 // TearDown
@@ -176,6 +193,24 @@ begin
    else FDebugLastNotificationPos:=cNullPos;
 end;
 
+// DoDebugSuspended
+//
+procedure TDebuggerTests.DoDebugSuspended(sender : TObject);
+begin
+   Inc(FDebugResumed);
+   FDebugger.Resume;
+end;
+
+// DoToggleBreakpointEnabled
+//
+procedure TDebuggerTests.DoToggleBreakpointEnabled(info : TProgramInfo);
+var
+   bp : TdwsDebuggerBreakpoint;
+begin
+   bp := FDebugger.Breakpoints[info.ParamAsInteger[0]];
+   bp.Enabled := not bp.Enabled;
+end;
+
 // EvaluateSimpleTest
 //
 procedure TDebuggerTests.EvaluateSimpleTest;
@@ -193,24 +228,24 @@ begin
 
          CheckEquals(10, exec.Info.ValueAsInteger['i'], 'value of i');
 
-         expr:=TdwsCompiler.Evaluate(exec, 'i+i*10');
+         expr:=TdwsEvaluateExpr.Evaluate(exec, 'i+i*10');
          try
             CheckEquals(110, expr.Expression.EvalAsInteger(exec.ExecutionObject), 'i+i*10');
          finally
             expr:=nil;
          end;
 
-         expr:=TdwsCompiler.Evaluate(exec, 'StrToInt(''123'')');
+         expr:=TdwsEvaluateExpr.Evaluate(exec, 'StrToInt(''123'')');
          try
             CheckEquals(123, expr.Expression.EvalAsInteger(exec.ExecutionObject), 'StrToInt(''123'')');
          finally
             expr:=nil;
          end;
 
-         expr:=TdwsCompiler.Evaluate(exec, 'i +* i');
+         expr:=TdwsEvaluateExpr.Evaluate(exec, 'i +* i');
          try
             expr.Expression.EvalAsString(exec.ExecutionObject, buf);
-            CheckEquals('Syntax Error: Expression expected [line: 1, column: 4]'#13#10, buf, 'i +* i');
+            CheckEquals('Syntax Error: Expression expected [line: 1, column: 4]', buf, 'i +* i');
          finally
             expr:=nil;
          end;
@@ -230,7 +265,7 @@ procedure TDebuggerTests.EvaluateOutsideOfExec;
 var
    expr : IdwsEvaluateExpr;
 begin
-   expr:=TdwsCompiler.Evaluate(nil, 'StrToInt(''113'')+10');
+   expr:=TdwsEvaluateExpr.Evaluate(nil, 'StrToInt(''113'')+10');
    try
       CheckEquals(123, expr.Expression.EvalAsInteger(expr.Execution.ExecutionObject), 'StrToInt(''113'')+10');
    finally
@@ -540,6 +575,83 @@ begin
 
    RunExceptNotification('procedure Test;'#13#10'begin'#13#10'var i:=0;'#13#10'i := i div i;'#13#10'end;'#13#10'Test');
    CheckEquals(' [line: 4, column: 8]', FDebugLastNotificationPos.AsInfo, '4');
+end;
+
+// BreakpointsStatic
+//
+procedure TDebuggerTests.BreakpointsStatic;
+var
+   prog : IdwsProgram;
+   exec : IdwsProgramExecution;
+begin
+   FDebugger.Breakpoints.Add(2, SYS_MainModule);
+   try
+      prog := FCompiler.Compile( 'var a := "a";'#13#10
+                                +'a += "b";'#13#10
+                                +'a += "c";'#13#10);
+      FDebugEvalExpr := 'a';
+      FDebugEvalAtLine := 3;
+
+      FDebugLastEvalResult := '';
+      FDebugResumed := 0;
+
+      exec := prog.CreateNewExecution;
+      FDebugger.BeginDebug(exec);
+      FDebugger.EndDebug;
+
+      CheckEquals(1, FDebugResumed, 'Breakpoint not resumed');
+      CheckEquals('ab', FDebugLastEvalResult, 'with breakpoint');
+
+      FDebugLastEvalResult := '';
+      FDebugResumed := 0;
+      FDebugger.Breakpoints[0].Enabled := False;
+
+      exec := prog.CreateNewExecution;
+      FDebugger.BeginDebug(exec);
+      FDebugger.EndDebug;
+
+      CheckEquals(0, FDebugResumed, 'Breakpoint resumed');
+      CheckEquals('ab', FDebugLastEvalResult, 'with breakpoint disabled');
+   finally
+      FDebugger.Breakpoints.Clear;
+   end;
+end;
+
+// BreakpointsDynamic
+//
+procedure TDebuggerTests.BreakpointsDynamic;
+var
+   prog : IdwsProgram;
+   exec : IdwsProgramExecution;
+begin
+   FDebugger.Breakpoints.Add(3, SYS_MainModule);
+   try
+      prog := FCompiler.Compile( 'var a := "a";'#13#10
+                                +'ToggleBreakpointEnabled(0);'#13#10
+                                +'a += "b";'#13#10
+                                +'Print(a);');
+      CheckEquals('', prog.Msgs.AsInfo);
+
+      FDebugResumed := 0;
+
+      exec := prog.CreateNewExecution;
+      FDebugger.BeginDebug(exec);
+      FDebugger.EndDebug;
+
+      CheckEquals(0, FDebugResumed, 'disabled at runtime');
+      CheckEquals('ab', exec.Result.ToString, 'case 1');
+
+      FDebugger.Breakpoints[0].Enabled := False;
+
+      exec := prog.CreateNewExecution;
+      FDebugger.BeginDebug(exec);
+      FDebugger.EndDebug;
+
+      CheckEquals(1, FDebugResumed, 'enabled at runtime');
+      CheckEquals('ab', exec.Result.ToString, 'case 2');
+   finally
+      FDebugger.Breakpoints.Clear;
+   end;
 end;
 
 // ------------------

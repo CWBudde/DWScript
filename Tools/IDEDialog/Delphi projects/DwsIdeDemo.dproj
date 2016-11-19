@@ -7,7 +7,7 @@
         <AppType>Application</AppType>
         <FrameworkType>VCL</FrameworkType>
         <DCC_DCCCompiler>DCC32</DCC_DCCCompiler>
-        <ProjectVersion>14.3</ProjectVersion>
+        <ProjectVersion>16.1</ProjectVersion>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
     </PropertyGroup>
@@ -41,6 +41,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <SanitizedProjectName>DwsIdeDemo</SanitizedProjectName>
         <VerInfo_Locale>2057</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <DCC_Namespace>Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;System;Xml;Data;Datasnap;Web;Soap;Winapi;System.Win;$(DCC_Namespace)</DCC_Namespace>
@@ -59,7 +60,6 @@
         <DCC_Namespace>Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;Bde;$(DCC_Namespace)</DCC_Namespace>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win64)'!=''">
         <Icon_MainIcon>DwsIdeDemo_Icon.ico</Icon_MainIcon>
@@ -69,7 +69,7 @@
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
         <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
         <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
-        <DCC_DebugInformation>false</DCC_DebugInformation>
+        <DCC_DebugInformation>0</DCC_DebugInformation>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
@@ -85,12 +85,10 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
+        <DCCReference Include="..\..\..\Source\SynEdit\SynHighlighterDWS.pas"/>
         <DCCReference Include="..\Source\UDwsIdeConfig.pas"/>
         <DCCReference Include="..\Source\UDwsIdeForm.pas">
             <Form>DwsIdeForm</Form>
-        </DCCReference>
-        <DCCReference Include="UDwsIdeDemoForm.pas">
-            <Form>DwsIdeDemoForm</Form>
         </DCCReference>
         <DCCReference Include="..\Source\UDwsIdeLocalVariablesFrame.pas">
             <Form>DwsIdeLocalVariablesFrame</Form>
@@ -105,10 +103,13 @@
             <Form>DwsIdeCallStackFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
-        <DCCReference Include="..\Source\UDwsIdeCodeProposalForm.pas">
-            <Form>DwsIdeCodeProposalForm</Form>
+        <DCCReference Include="..\Source\UDwsIdeGotoLine.pas">
+            <Form>DwsIdeGotoLineNumber</Form>
         </DCCReference>
-        <DCCReference Include="..\..\..\Source\SynEdit\SynHighlighterDWS.pas"/>
+        <DCCReference Include="UDwsIdeDemoModule.pas">
+            <Form>DwsIdeDemoModule</Form>
+            <DesignClass>TDwsIdeDemoModule</DesignClass>
+        </DCCReference>
         <BuildConfiguration Include="Debug">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

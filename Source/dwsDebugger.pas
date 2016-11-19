@@ -26,9 +26,8 @@ interface
 uses
    Classes, SysUtils, Variants,
    dwsSymbols, dwsXPlatform, dwsCompiler, dwsErrors, dwsDataContext,
-   dwsExprs, dwsCoreExprs,
-   dwsUtils, dwsXPlatformUI, dwsStrings, dwsUnitSymbols, dwsStack,
-   dwsInfo;
+   dwsExprs, dwsCoreExprs, dwsInfo, dwsEvaluate,
+   dwsUtils, dwsXPlatformUI, dwsStrings, dwsUnitSymbols, dwsStack, dwsInfoClasses;
 
 type
    TdwsDebugger = class;
@@ -125,7 +124,7 @@ type
 
          procedure Add(aLine : Integer; const aSourceName : UnicodeString);
 
-         procedure Clear;
+         procedure Clear; inline;
 
          function BreakpointAt(const scriptPos : TScriptPos) : TdwsDebuggerBreakpoint;
 
@@ -301,12 +300,14 @@ type
          FWatches : TdwsDebuggerWatches;
          FLastAutoProcessMessages : Int64;
          FSuspendOnException : Boolean;
+         FOnDebugSuspended : TNotifyEvent;
 
          FParams : TVariantDynArray;
          FBeginOptions : TdwsDebugBeginOptions;
 
       protected
          procedure DoDebug(exec : TdwsExecution; expr : TExprBase); override;
+         procedure DoDebugSuspended; virtual;
          function  LastDebugStepExpr : TExprBase; override;
          procedure NotifyException(exec : TdwsExecution; const exceptObj : IScriptObj); override;
 
@@ -360,6 +361,7 @@ type
          property Mode : TdwsDebuggerMode read FMode write FMode default dmMainThread;
 
          property OnStateChanged : TNotifyEvent read FOnStateChanged write FOnStateChanged;
+         property OnDebugSuspended : TNotifyEvent read FOnDebugSuspended write FOnDebugSuspended;
    end;
 
    TBreakpointBits = class(TBits)
@@ -906,7 +908,7 @@ begin
    Assert(daCanEvaluate in AllowedActions, 'Evaluate not allowed');
 
    if FExecution<>nil then
-      Result:=TdwsCompiler.Evaluate(FExecution, expression, [], scriptPos)
+      Result:=TdwsEvaluateExpr.Evaluate(FExecution, expression, [], scriptPos)
    else Result:=nil;
 end;
 
@@ -1013,7 +1015,7 @@ begin
       FState:=dsDebugSuspended;
       StateChanged;
       while FState=dsDebugSuspended do
-         ProcessApplicationMessages(10);
+         DoDebugSuspended;
       if FState=dsDebugResuming then
          FState:=dsDebugRun;
       StateChanged;
@@ -1025,6 +1027,15 @@ begin
          ProcessApplicationMessages(0);
       end;
    end;
+end;
+
+// DoDebugSuspended
+//
+procedure TdwsDebugger.DoDebugSuspended;
+begin
+   if Assigned(FOnDebugSuspended) then
+      FOnDebugSuspended(Self)
+   else ProcessApplicationMessages(10);
 end;
 
 // LastDebugStepExpr
@@ -1190,14 +1201,12 @@ var
    i : Integer;
    bp : TdwsDebuggerBreakpoint;
 begin
-   FBitmap.Size:=0;
-   for i:=FBreakpoints.Count-1 downto 0 do begin
-      bp:=FBreakpoints[i];
-      if bp.Enabled then begin
-         if FBitmap.Size<=bp.Line then
-            FBitmap.Size:=bp.Line+1;
-         FBitmap.Bits[bp.Line]:=True;
-      end;
+   FBitmap.Size := 0;
+   for i := FBreakpoints.Count-1 downto 0 do begin
+      bp := FBreakpoints[i];
+      if FBitmap.Size <= bp.Line then
+         FBitmap.Size := bp.Line+1;
+      FBitmap.Bits[bp.Line] := True;
    end;
 end;
 
@@ -1206,11 +1215,12 @@ end;
 function TdwsDSCBreakpoints.SuspendExecution : Boolean;
 var
    scriptPos : TScriptPos;
+   breakpoint : TdwsDebuggerBreakpoint;
 begin
    scriptPos:=Debugger.CurrentScriptPos;
-   if scriptPos.Line<FBitmap.Size then begin
-      if     FBitmap.Bits[scriptPos.Line]
-         and (FBreakpoints.BreakpointAt(scriptPos)<>nil) then
+   if (scriptPos.Line<FBitmap.Size) and FBitmap.Bits[scriptPos.Line] then begin
+      breakpoint := FBreakpoints.BreakpointAt(scriptPos);
+      if (breakpoint <> nil) and breakpoint.Enabled then
          Exit(True);
    end;
 
@@ -1329,12 +1339,12 @@ begin
 
    if (Evaluator=nil) or (not Evaluator.ContextIsValid) then begin
       scriptPos:=debugger.GetCurrentScriptPos;
-      Evaluator:=TdwsCompiler.Evaluate(debugger.Execution, ExpressionText, [], @scriptPos);
+      Evaluator:=TdwsEvaluateExpr.Evaluate(debugger.Execution, ExpressionText, [], @scriptPos);
    end;
 
    expr:=Evaluator.Expression;
    if expr.Typ=nil then begin
-      Evaluator:=TdwsCompiler.Evaluate(debugger.Execution, '''(not an expression)''');
+      Evaluator:=TdwsEvaluateExpr.Evaluate(debugger.Execution, '''(not an expression)''');
       expr:=Evaluator.Expression;
       FEvaluationError:=dweeCompile;
    end else if Evaluator.EvaluationError then

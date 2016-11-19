@@ -99,8 +99,6 @@ type
                             const flags : TInternalFunctionFlags = [];
                             compositeSymbol : TCompositeTypeSymbol = nil;
                             const helperName : UnicodeString = ''); overload;
-         procedure Call(exec : TdwsProgramExecution; func : TFuncSymbol); override;
-         procedure Execute(info : TProgramInfo); virtual; abstract;
    end;
    TInternalFunctionClass = class of TInternalFunction;
 
@@ -125,12 +123,6 @@ type
       public
          procedure Call(exec : TdwsProgramExecution; func : TFuncSymbol); override;
          procedure Execute(info : TProgramInfo; var externalObject : TObject); virtual; abstract;
-   end;
-
-   TInternalStaticMethod = class (TInternalBaseMethod)
-      public
-         procedure Call(exec : TdwsProgramExecution; func : TFuncSymbol); override;
-         procedure Execute(info : TProgramInfo); virtual; abstract;
    end;
 
    TInternalRecordMethod = class(TInternalFunction)
@@ -486,20 +478,6 @@ begin
           compositeSymbol, helperName);
 end;
 
-// Call
-//
-procedure TInternalFunction.Call(exec : TdwsProgramExecution; func : TFuncSymbol);
-var
-   info : TProgramInfo;
-begin
-   info:=exec.AcquireProgramInfo(func);
-   try
-      Execute(info);
-   finally
-      exec.ReleaseProgramInfo(info);
-   end;
-end;
-
 // ------------------
 // ------------------ TInternalBaseMethod ------------------
 // ------------------
@@ -558,22 +536,6 @@ begin
          extObj := nil;
          Execute(info, extObj);
       end;
-   finally
-      exec.ReleaseProgramInfo(info);
-   end;
-end;
-
-// ------------------
-// ------------------ TInternalStaticMethod ------------------
-// ------------------
-
-procedure TInternalStaticMethod.Call(exec: TdwsProgramExecution; func: TFuncSymbol);
-var
-   info : TProgramInfo;
-begin
-   info:=exec.AcquireProgramInfo(func);
-   try
-      Execute(info);
    finally
       exec.ReleaseProgramInfo(info);
    end;
