@@ -30,8 +30,8 @@ uses
   dwsStrings, dwsFunctions, dwsStack, dwsConnectorSymbols, dwsFilter,
   dwsCoreExprs, dwsMagicExprs, dwsRelExprs, dwsMethodExprs, dwsConstExprs,
   dwsConnectorExprs, dwsConvExprs, dwsSetOfExprs,
-  dwsOperators, dwsPascalTokenizer, dwsSystemOperators,
-  dwsUnitSymbols, dwsCompilerUtils;
+  dwsOperators, dwsPascalTokenizer, dwsSystemOperators, dwsContextMap,
+  dwsUnitSymbols, dwsCompilerUtils, dwsScriptSource, dwsSymbolDictionary;
 
 type
    TCompilerOption = (
@@ -1076,15 +1076,19 @@ end;
 // ReadInitExpr
 //
 function TStandardSymbolFactory.ReadInitExpr(expecting : TTypeSymbol = nil) : TTypedExpr;
-var
-   recSym : TRecordSymbol;
+
+   function ReadConstRecordInitExpr(recSym : TRecordSymbol) : TTypedExpr;
+   begin
+      // isolate because of the temporary dynamic array
+      Result := TConstExpr.Create(expecting, FCompiler.ReadConstRecord(recSym), 0);
+   end;
+
 begin
    if expecting<>nil then begin
       case FCompiler.Tokenizer.TestAny([ttBLEFT, ttALEFT]) of
          ttBLEFT :
             if expecting.ClassType=TRecordSymbol then begin
-               recSym:=TRecordSymbol(expecting);
-               Result:=TConstExpr.Create(expecting, FCompiler.ReadConstRecord(recSym), 0);
+               Result := ReadConstRecordInitExpr(TRecordSymbol(expecting));
                Exit;
             end else if expecting is TArraySymbol then begin
                FCompiler.Tokenizer.KillToken;
@@ -3080,7 +3084,7 @@ begin
 
    finally
       if coContextMap in FOptions then
-         FSourceContextMap.CloseContext(endPos);
+         FSourceContextMap.CloseContext(endPos, ttName);
    end;
 end;
 
@@ -4007,7 +4011,7 @@ begin
             msg:=Trim(msg);
             if (msg<>'') and (msg[Length(msg)]=';') then
                SetLength(msg, Length(msg)-1);
-            msgExpr:=TConstStringExpr.CreateUnified(FProg, FProg.TypString, msg);
+            msgExpr:=TConstExpr.CreateStringValue(FProg, msg);
          end;
 
          ReadSemiColon;
@@ -4991,8 +4995,8 @@ begin
       FMsgs.AddCompilerError(FTok.HotPos, CPE_FunctionOrValueExpected);
       // keep going
       OrphanAndNil(oldExpr);
-      expr:=TUnifiedConstExpr.CreateUnified(FProg, FProg.TypVariant, Unassigned);
-   end else expr:=TTypedExpr(oldExpr);
+      expr := TConstExpr.Create(FProg, FProg.TypVariant, Unassigned);
+   end else expr := TTypedExpr(oldExpr);
 
    sym:=TDataSymbol.Create('old$'+IntToStr(FSourcePostConditionsIndex), expr.Typ);
    Inc(FSourcePostConditionsIndex);
@@ -10308,21 +10312,20 @@ end;
 //
 function TdwsCompiler.ReadExprAdd(expecting : TTypeSymbol = nil; leftExpr : TTypedExpr = nil) : TTypedExpr;
 var
-   right: TTypedExpr;
-   tt: TTokenType;
-   hotPos: TScriptPos;
+   right : TTypedExpr;
+   tt : TTokenType;
+   hotPos : TScriptPos;
    opExpr : TTypedExpr;
 begin
    // Read left argument
-   if leftExpr=nil then
-      Result:=ReadExprMult(expecting)
-   else Result:=leftExpr;
+   if leftExpr = nil then
+      Result := ReadExprMult(expecting)
+   else Result := leftExpr;
    try
 
       repeat
-         tt:=FTok.TestDeleteAny([ttPLUS, ttMINUS, ttOR, ttXOR,
-                                 ttNOT]);
-         if tt=ttNone then Break;
+         tt := FTok.TestDeleteAny([ttPLUS, ttMINUS, ttOR, ttXOR, ttNOT]);
+         if tt = ttNone then Break;
 
          hotPos := FTok.HotPos;
 
@@ -10387,15 +10390,15 @@ var
    rightTyp : TTypeSymbol;
 begin
    // Read left argument
-   if leftExpr=nil then
-      Result:=ReadTerm(False, expecting)
-   else Result:=leftExpr;
+   if leftExpr = nil then
+      Result := ReadTerm(False, expecting)
+   else Result := leftExpr;
    try
       repeat
-         tt:=FTok.TestDeleteAny([ttTIMES, ttDIVIDE, ttMOD, ttDIV, ttAND,
-                                 ttCARET, ttAS, ttLESSLESS, ttGTRGTR, ttQUESTIONQUESTION,
-                                 ttSHL, ttSHR, ttSAR]);
-         if tt=ttNone then Break;
+         tt := FTok.TestDeleteAny([ttTIMES, ttDIVIDE, ttMOD, ttDIV, ttAND,
+                                   ttCARET, ttAS, ttLESSLESS, ttGTRGTR, ttQUESTIONQUESTION,
+                                   ttSHL, ttSHR, ttSAR]);
+         if tt = ttNone then Break;
 
          // Save position of the operator
          hotPos := FTok.HotPos;
@@ -10666,19 +10669,19 @@ function TdwsCompiler.ReadTerm(isWrite : Boolean = False; expecting : TTypeSymbo
 
    function ReadNilTerm : TConstExpr;
    begin
-      Result:=TUnifiedConstList(FMainProg.UnifiedConstList).NilConst;
+      Result:=TUnifiedConstants(FMainProg.UnifiedConstants).NilConst;
       Result.IncRefCount;
    end;
 
    function ReadTrue : TConstExpr;
    begin
-      Result:=TUnifiedConstList(FMainProg.UnifiedConstList).TrueConst;
+      Result:=TUnifiedConstants(FMainProg.UnifiedConstants).TrueConst;
       Result.IncRefCount;
    end;
 
    function ReadFalse : TConstExpr;
    begin
-      Result:=TUnifiedConstList(FMainProg.UnifiedConstList).FalseConst;
+      Result:=TUnifiedConstants(FMainProg.UnifiedConstants).FalseConst;
       Result.IncRefCount;
    end;
 
@@ -10821,13 +10824,17 @@ function TdwsCompiler.ReadTerm(isWrite : Boolean = False; expecting : TTypeSymbo
       else if expecting=FAnyFuncSymbol then
          FMsgs.AddCompilerStop(hotPos, CPE_UnexpectedAt);
       Result:=ReadTerm(isWrite, expecting);
-      if (Result.Typ=nil) or (Result.Typ.AsFuncSymbol=nil) then begin
+      if Result = nil then begin
+         // error was already reported
+         Result := TBogusConstExpr.Create(FProg, FProg.TypNil, cNilIntf);
+      end else if (Result.Typ=nil) or (Result.Typ.AsFuncSymbol=nil) then begin
          if (expecting=FAnyFuncSymbol) or (Result is TConstExpr) then
             FMsgs.AddCompilerError(hotPos, CPE_UnexpectedAt)
-         else ReportIncompatibleAt(hotPos, Result);
+         else if Result <> nil then // if nil, error was already reported
+            ReportIncompatibleAt(hotPos, Result);
          // keep compiling
          OrphanAndNil(Result);
-         Result:=TBogusConstExpr.Create(FProg, FProg.TypNil, cNilIntf);
+         Result := TBogusConstExpr.Create(FProg, FProg.TypNil, cNilIntf);
       end;
    end;
 
@@ -10855,12 +10862,12 @@ var
    nameExpr : TProgramExpr;
    hotPos : TScriptPos;
 begin
-   tt:=FTok.TestAny([ttPLUS, ttMINUS, ttALEFT, ttNOT, ttBLEFT, ttAT,
-                     ttTRUE, ttFALSE, ttNIL, ttIF,
-                     ttFUNCTION, ttPROCEDURE, ttLAMBDA,
-                     ttRECORD, ttCLASS,
-                     ttBRIGHT]);
-   if tt<>ttNone then begin
+   tt := FTok.TestAny([ttPLUS, ttMINUS, ttALEFT, ttNOT, ttBLEFT, ttAT,
+                       ttTRUE, ttFALSE, ttNIL, ttIF,
+                       ttFUNCTION, ttPROCEDURE, ttLAMBDA,
+                       ttRECORD, ttCLASS,
+                       ttBRIGHT]);
+   if tt <> ttNone then begin
       // special logic for property write expressions
       if tt=ttBRIGHT then begin
          if FPendingSetterValueExpr<>nil then begin
@@ -11096,11 +11103,11 @@ end;
 function TdwsCompiler.ReadConstImmediateValue: TConstExpr;
 var
    tt : TTokenType;
-   unifiedList : TUnifiedConstList;
+   unifiedConstants : TUnifiedConstants;
    token : TToken;
 begin
    Result:=nil;
-   unifiedList:=TUnifiedConstList(FMainProg.UnifiedConstList);
+   unifiedConstants:=TUnifiedConstants(FMainProg.UnifiedConstants);
    tt:=FTok.TestAny([ttStrVal, ttIntVal, ttFloatVal]);
    if tt<>ttNone then begin
       token:=FTok.GetToken;
@@ -11108,19 +11115,19 @@ begin
          ttIntVal :
             // can't use a "case of" or range here because of compiler bug (will do a 32bit comparison)
             if (token.FInteger>=-1) and (token.FInteger<=2) then begin
-               Result:=unifiedList.Integers[token.FInteger];
+               Result:=unifiedConstants.Integers[token.FInteger];
                Result.IncRefCount;
-            end else Result:=TConstIntExpr.CreateUnified(FProg, nil, token.FInteger);
+            end else Result:=TConstExpr.CreateIntegerValue(FProg, token.FInteger);
          ttFloatVal :
             if token.FFloat=0 then begin
-               Result:=unifiedList.ZeroFloat;
+               Result:=unifiedConstants.ZeroFloat;
                Result.IncRefCount;
-            end else Result:=TConstFloatExpr.CreateUnified(FProg, nil, token.FFloat);
+            end else Result:=TConstExpr.CreateFloatValue(FProg, token.FFloat);
          ttStrVal :
             if token.EmptyString then begin
-               Result:=unifiedList.EmptyString;
+               Result:=unifiedConstants.EmptyString;
                Result.IncRefCount;
-            end else Result:=TConstStringExpr.CreateUnified(FProg, nil, token.AsString);
+            end else Result:=TConstExpr.CreateStringValue(FProg, token.AsString);
       end;
       FTok.KillToken;
    end;
@@ -13054,10 +13061,12 @@ end;
 procedure TdwsCompiler.DoTokenizerEndSourceFile(sourceFile : TSourceFile);
 begin
    Inc(FLineCount, FTok.CurrentPos.Line-2);
-   if     (coContextMap in Options)
-      and (FSourceContextMap.Current<>nil)
-      and (FSourceContextMap.Current.StartPos.SourceFile=sourceFile) then
-      FSourceContextMap.CloseContext(FTok.CurrentPos);
+   if coContextMap in Options then begin
+      while     (FSourceContextMap.Current<>nil)
+            and (FSourceContextMap.Current.StartPos.SourceFile=sourceFile) do begin
+         FSourceContextMap.CloseContext(FTok.CurrentPos);
+      end;
+   end;
 end;
 
 // EnterUnit
@@ -13329,9 +13338,9 @@ begin
                try
                   case SpecialKind of
                      skDefined :
-                        Result:=TConstBooleanExpr.CreateUnified(FProg, FProg.TypBoolean, EvaluateDefined(argExpr));
+                        Result := TConstExpr.CreateBooleanValue(FProg, EvaluateDefined(argExpr));
                      skDeclared :
-                        Result:=TConstBooleanExpr.CreateUnified(FProg, FProg.TypBoolean, EvaluateDeclared(argExpr));
+                        Result := TConstExpr.CreateBooleanValue(FProg, EvaluateDeclared(argExpr));
                   end;
                finally
                   OrphanAndNil(argExpr);
@@ -13396,9 +13405,9 @@ begin
          // fake expression to keep compiling
          case SpecialKind of
             skDefined, skDeclared, skAssigned :
-               Result:=TConstBooleanExpr.CreateUnified(FProg, nil, False);
+               Result:=TConstExpr.CreateBooleanValue(FProg, False);
          else
-            Result:=TConstIntExpr.CreateUnified(FProg, nil, 0);
+            Result:=TConstExpr.CreateIntegerValue(FProg, 0);
          end;
       end else if Optimize then
          Result:=Result.Optimize(FProg, FExec);

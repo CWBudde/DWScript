@@ -24,7 +24,7 @@ uses
    dwsExprs, dwsRelExprs, dwsJSON, dwsMagicExprs, dwsStrings, dwsMethodExprs,
    dwsConnectorExprs, dwsConvExprs, dwsSetOfExprs, dwsCompilerUtils,
    dwsJSLibModule, dwsJSMin, dwsFunctions, dwsGlobalVarsFunctions, dwsErrors,
-   dwsRTTIFunctions, dwsConstExprs, dwsInfo;
+   dwsRTTIFunctions, dwsConstExprs, dwsInfo, dwsScriptSource, dwsSymbolDictionary;
 
 type
 
@@ -418,6 +418,14 @@ type
    end;
    TJSArrayConcatExpr = class (TJSExprCodeGen)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
+   end;
+
+   TJSArrayTypedFluentExpr = class (TJSExprCodeGen)
+      private
+         FCode, FDependency : String;
+      public
+         constructor Create(const code, dependency : String);
+         procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
 
    TJSStaticArrayExpr = class (TJSExprCodeGen)
@@ -953,7 +961,6 @@ begin
    RegisterCodeGen(TNoResultWrapperExpr,  TJSNoResultWrapperExpr.Create);
 
    RegisterCodeGen(TConstExpr,            TJSConstExpr.Create);
-   RegisterCodeGen(TUnifiedConstExpr,     TJSConstExpr.Create);
    RegisterCodeGen(TConstNilExpr,         TdwsExprGenericCodeGen.Create(['null']));
    RegisterCodeGen(TConstIntExpr,         TJSConstIntExpr.Create);
    RegisterCodeGen(TConstStringExpr,      TJSConstStringExpr.Create);
@@ -1251,9 +1258,9 @@ begin
    RegisterCodeGen(TArraySortExpr,                 TJSArraySortExpr.Create);
    RegisterCodeGen(TArrayMapExpr,                  TJSArrayMapExpr.Create);
    RegisterCodeGen(TArrayConcatExpr,               TJSArrayConcatExpr.Create);
-   RegisterCodeGen(TArraySortNaturalStringExpr,    TdwsExprGenericCodeGen.Create([0, '.sort()'], gcgStatement));
-   RegisterCodeGen(TArraySortNaturalIntegerExpr,   TdwsExprGenericCodeGen.Create([0, '.sort($CmpNum)'], gcgStatement, '$CmpNum'));
-   RegisterCodeGen(TArraySortNaturalFloatExpr,     TdwsExprGenericCodeGen.Create([0, '.sort($CmpNum)'], gcgStatement, '$CmpNum'));
+   RegisterCodeGen(TArraySortNaturalStringExpr,    TJSArrayTypedFluentExpr.Create('.sort()', ''));
+   RegisterCodeGen(TArraySortNaturalIntegerExpr,   TJSArrayTypedFluentExpr.Create('.sort($CmpNum)', '$CmpNum'));
+   RegisterCodeGen(TArraySortNaturalFloatExpr,     TJSArrayTypedFluentExpr.Create('.sort($CmpNum)', '$CmpNum'));
 
    RegisterCodeGen(TStaticArrayExpr,         TJSStaticArrayExpr.Create);
    RegisterCodeGen(TStaticArrayBoolExpr,     TJSStaticArrayBoolExpr.Create);
@@ -7234,6 +7241,34 @@ begin
       codeGen.CompileNoWrap(e.ArgExpr[i]);
    end;
    codeGen.WriteString(')');
+end;
+
+// ------------------
+// ------------------ TJSArrayTypedFluentExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TJSArrayTypedFluentExpr.Create(const code, dependency : String);
+begin
+   inherited Create;
+   FCode := code;
+   FDependency := dependency;
+end;
+
+// CodeGen
+//
+procedure TJSArrayTypedFluentExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+var
+   e : TArrayTypedFluentExpr;
+begin
+   e := TArrayTypedFluentExpr(expr);
+
+   codeGen.Compile(e.BaseExpr);
+   codeGen.WriteString(FCode);
+
+   if FDependency <> '' then
+      codeGen.Dependencies.Add(FDependency);
 end;
 
 // ------------------

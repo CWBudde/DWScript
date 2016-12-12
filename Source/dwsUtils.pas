@@ -968,6 +968,7 @@ function DivMod100(var dividend : Cardinal) : Cardinal;
 procedure FastStringReplace(var str : UnicodeString; const sub, newSub : UnicodeString);
 
 procedure VariantToString(const v : Variant; var s : UnicodeString);
+procedure VariantToUnifiedString(const v : Variant; var s : UnicodeString);
 procedure VariantToInt64(const v : Variant; var r : Int64);
 function VariantToBool(const v : Variant) : Boolean;
 function VariantToFloat(const v : Variant) : Double;
@@ -982,7 +983,7 @@ procedure VarCopySafe(var dest : Variant; const src : Double); overload;
 procedure VarCopySafe(var dest : Variant; const src : Boolean); overload;
 
 procedure VarSetDefaultInt64(var dest : Variant); inline;
-
+procedure VarSetDefaultString(var dest : Variant); inline;
 
 procedure WriteVariant(writer: TWriter; const value: Variant);
 function ReadVariant(reader: TReader): Variant;
@@ -1661,6 +1662,15 @@ begin
    end;
 end;
 
+// VariantToUnifiedString
+//
+procedure VariantToUnifiedString(const v : Variant; var s : UnicodeString);
+begin
+   if TVarData(v).VType = varUString then
+      UnifyAssignString(UnicodeString(TVarData(v).VUString), s)
+   else VariantToString(v, s);
+end;
+
 // VariantToInt64
 //
 procedure VariantToInt64(const v : Variant; var r : Int64);
@@ -1884,8 +1894,18 @@ procedure VarSetDefaultInt64(var dest : Variant); overload;
 begin
    VarClearSafe(dest);
 
-   TVarData(dest).VType:=varInt64;
-   TVarData(dest).VInt64:=0;
+   TVarData(dest).VType := varInt64;
+   TVarData(dest).VInt64 := 0;
+end;
+
+// VarSetDefaultString
+//
+procedure VarSetDefaultString(var dest : Variant); inline;
+begin
+   VarClearSafe(dest);
+
+   TVarData(dest).VType := varUString;
+   TVarData(dest).VUString := nil;
 end;
 
 // WriteVariant

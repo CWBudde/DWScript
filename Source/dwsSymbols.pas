@@ -24,7 +24,7 @@ unit dwsSymbols;
 interface
 
 uses SysUtils, Variants, Classes,
-   dwsStrings, dwsErrors, dwsUtils, dwsDateTime,
+   dwsStrings, dwsErrors, dwsUtils, dwsDateTime, dwsScriptSource,
    dwsTokenizer, dwsStack, dwsXPlatform, dwsDataContext
    {$ifdef FPC},LazUTF8{$endif};
 
@@ -5054,7 +5054,7 @@ end;
 //
 procedure TBaseStringSymbol.InitData(const data : TData; offset : Integer);
 begin
-   data[offset]:='';
+   VarSetDefaultString(data[offset]);
 end;
 
 // ------------------

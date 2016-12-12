@@ -26,7 +26,7 @@ interface
 uses
    Variants, SysUtils,
    dwsUtils, dwsDataContext, dwsStack, dwsXPlatform, dwsErrors, dwsStrings,
-   dwsExprs, dwsExprList, dwsConstExprs, dwsSymbols, dwsUnitSymbols;
+   dwsExprs, dwsExprList, dwsConstExprs, dwsSymbols, dwsUnitSymbols, dwsScriptSource;
 
 type
 
@@ -291,19 +291,20 @@ begin
    end else if     (toTyp is TStructuredTypeMetaSymbol)
                and (expr.Typ.IsOfType(toTyp.Typ)) then begin
 
-      Assert(toTyp.ClassType=TClassOfSymbol);
-      Result:=TObjToClassTypeExpr.Create(prog, expr);
-      if toTyp.Typ<>expr.Typ then
-         Result:=TClassAsClassExpr.Create(prog, scriptPos, Result, toTyp);
+      if toTyp.ClassType=TClassOfSymbol then begin
+         Result:=TObjToClassTypeExpr.Create(prog, expr);
+         if toTyp.Typ<>expr.Typ then
+            Result:=TClassAsClassExpr.Create(prog, scriptPos, Result, toTyp);
+      end;
 
    end else begin
 
       if     toTyp.IsOfType(prog.TypFloat)
          and expr.IsOfType(prog.TypInteger) then begin
          if expr is TConstIntExpr then begin
-            Result:=TConstFloatExpr.CreateTypedVariantValue(prog, prog.TypFloat, TConstIntExpr(expr).Value);
+            Result := TConstFloatExpr.CreateTypedVariantValue(prog, prog.TypFloat, TConstIntExpr(expr).Value);
             expr.Free;
-         end else Result:=TConvIntToFloatExpr.Create(prog, expr);
+         end else Result := TConvIntToFloatExpr.Create(prog, expr);
       end;
 
    end;
@@ -398,7 +399,7 @@ begin
          Result:=Expr;
          Expr:=nil;
       end else begin
-         Result:=TConstIntExpr.CreateUnified(prog, Typ, TConstIntExpr(Expr).Value);
+         Result := TConstIntExpr.Create(prog, typ, TConstIntExpr(Expr).Value);
       end;
       Free;
    end else Result:=Self;

@@ -43,6 +43,8 @@ uses
   ULocalizerTests in 'ULocalizerTests.pas',
   dwsRTTIFunctions,
   dwsRTTIConnector,
+  dwsStringResult,
+  dwsMetrics,
   UJSONTests in 'UJSONTests.pas',
   UJSONConnectorTests in 'UJSONConnectorTests.pas',
   UTokenizerTests in 'UTokenizerTests.pas',
@@ -64,7 +66,10 @@ uses
   dwsEncoding in '..\Source\dwsEncoding.pas',
   dwsInfo in '..\Source\dwsInfo.pas',
   dwsEvaluate in '..\Source\dwsEvaluate.pas',
-  dwsFilter in '..\Source\dwsFilter.pas';
+  dwsFilter in '..\Source\dwsFilter.pas',
+  dwsScriptSource in '..\Source\dwsScriptSource.pas',
+  dwsSymbolDictionary in '..\Source\dwsSymbolDictionary.pas',
+  dwsContextMap in '..\Source\dwsContextMap.pas';
 
 {$R *.res}
 
