@@ -568,27 +568,28 @@ type
 
    TStringUnifier = class
       private
-         FLock : TMultiReadSingleWrite;
          FBuckets : TStringUnifierBuckets;
          FCount : Integer;
          FGrowth : Integer;
          FCapacity : Integer;
+         FMask : Integer;
+         FTag : Integer;
 
       protected
          procedure Grow;
 
       public
          constructor Create;
-         destructor Destroy; override;
 
-         // aString must NOT be empty
-         procedure UnifyAssign(const aString : UnicodeString; h : Cardinal; var unifiedString : UnicodeString);
-
-         procedure Lock; inline;
-         procedure UnLock; inline;
+         procedure UnifyAssign(const aString : UnicodeString; var unifiedString : UnicodeString); inline;
+         procedure UnifyAssignPChar(p : PChar; size : Integer; var unifiedString : UnicodeString);
 
          property Count : Integer read FCount;
          procedure Clear;
+
+         property Tag : Integer read FTag write FTag;
+
+         const HighestUnifiedChar = #$007F;
    end;
 
    TThreadCached<T> = class
@@ -885,10 +886,14 @@ type
 const
    cMSecToDateTime : Double = 1/(24*3600*1000);
 
-procedure UnifyAssignString(const fromStr : UnicodeString; var toStr : UnicodeString);
+function AcquireUnifier : TStringUnifier;
+procedure ReleaseUnifier(unifier : TStringUnifier);
+
+procedure UnifyAssignString(const fromStr : UnicodeString; var toStr : UnicodeString); inline;
+procedure UnifyAssignPChar(p : PChar; size : Integer; var toStr : UnicodeString);
+procedure UnifyAssignChar(p : PChar; var toStr : UnicodeString);
 function  UnifiedString(const fromStr : UnicodeString) : UnicodeString; inline;
-procedure TidyStringsUnifier;
-function  StringUnifierHistogram : TIntegerDynArray;
+function  TidyStringsUnifier : Integer;
 
 function UnicodeCompareLen(p1, p2 : PWideChar; n : Integer) : Integer;
 function UnicodeCompareText(const s1, s2 : UnicodeString) : Integer;
@@ -932,7 +937,8 @@ function Min(a, b : Integer) : Integer; inline;
 
 function WhichPowerOfTwo(const v : Int64) : Integer;
 
-function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
+function SimpleStringHash(const s : UnicodeString) : Cardinal; overload; inline;
+function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload; inline;
 function SimpleLowerCaseStringHash(const s : UnicodeString) : Cardinal;
 function SimpleByteHash(p : PByte; n : Integer) : Cardinal;
 
@@ -968,7 +974,6 @@ function DivMod100(var dividend : Cardinal) : Cardinal;
 procedure FastStringReplace(var str : UnicodeString; const sub, newSub : UnicodeString);
 
 procedure VariantToString(const v : Variant; var s : UnicodeString);
-procedure VariantToUnifiedString(const v : Variant; var s : UnicodeString);
 procedure VariantToInt64(const v : Variant; var r : Int64);
 function VariantToBool(const v : Variant) : Boolean;
 function VariantToFloat(const v : Variant) : Double;
@@ -1061,39 +1066,23 @@ end;
 
 // SimpleStringHash
 //
-function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
-var
-   i : Integer;
+function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload; inline;
 begin
-   // modified FNV-1a using length as seed
-   Result:=Length(s);
-   for i:=1 to Result do
-      Result:=(Result xor Ord(s[i]))*16777619;
+   Result := xxHash32.Full(p, sizeInChars*SizeOf(Char));
+end;
+
+// SimpleStringHash
+//
+function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
+begin
+   Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(Char));
 end;
 
 // SimpleLowerCaseStringHash
 //
 function SimpleLowerCaseStringHash(const s : UnicodeString) : Cardinal;
-
-   function Fallback(const s : UnicodeString) : Cardinal;
-   begin
-      Result:=SimpleStringHash(UnicodeLowerCase(s));
-   end;
-
-var
-   i : Integer;
-   c : Word;
 begin
-   // modified FNV-1a using length as seed
-   Result:=Length(s);
-   for i:=1 to Result do begin
-      c:=Ord(s[i]);
-      if c>127 then
-         Exit(Fallback(s))
-      else if c in [Ord('A')..Ord('Z')] then
-         c:=c+(Ord('a')-Ord('A'));
-      Result:=(Result xor c)*16777619;
-   end;
+   Result:=SimpleStringHash(UnicodeLowerCase(s));
 end;
 
 // SimpleByteHash
@@ -1660,15 +1649,6 @@ begin
    else
       s:=v;
    end;
-end;
-
-// VariantToUnifiedString
-//
-procedure VariantToUnifiedString(const v : Variant; var s : UnicodeString);
-begin
-   if TVarData(v).VType = varUString then
-      UnifyAssignString(UnicodeString(TVarData(v).VUString), s)
-   else VariantToString(v, s);
 end;
 
 // VariantToInt64
@@ -2279,6 +2259,10 @@ begin
    end;
 end;
 
+var
+   vUnifiedStrings : array [0..1] of Pointer;
+   vUnifiedCharacters : array [0..Ord(TStringUnifier.HighestUnifiedChar)] of String;
+
 // ------------------
 // ------------------ TStringUnifier ------------------
 // ------------------
@@ -2288,67 +2272,67 @@ end;
 constructor TStringUnifier.Create;
 begin
    inherited;
-   FLock:=TMultiReadSingleWrite.Create;
-end;
-
-// Destroy
-//
-destructor TStringUnifier.Destroy;
-begin
-   inherited;
-   FLock.Free;
+   Grow;
 end;
 
 // UnifyAssign
 //
-procedure TStringUnifier.UnifyAssign(const aString : UnicodeString; h : Cardinal; var unifiedString : UnicodeString);
+procedure TStringUnifier.UnifyAssign(const aString : UnicodeString; var unifiedString : UnicodeString);
+begin
+   UnifyAssignPChar(Pointer(aString), Length(aString), unifiedString);
+end;
+
+// UnifyAssignPChar
+//
+procedure TStringUnifier.UnifyAssignPChar(p : PChar; size : Integer; var unifiedString : UnicodeString);
 var
    i : Integer;
+   h : Cardinal;
    bucket : PStringUnifierBucket;
 begin
-   if FGrowth=0 then Grow;
-
-   i:=(h and (FCapacity-1));
-
-   repeat
-      bucket:=@FBuckets[i];
-      if (bucket^.Hash=h) and (bucket^.Str=aString) then begin
-         unifiedString:=bucket^.Str;
-         Exit;
-      end else if bucket^.Hash=0 then begin
-         bucket^.Hash:=h;
-         bucket^.Str:=aString;
-         unifiedString:=aString;
-         Inc(FCount);
-         Dec(FGrowth);
+   case size of
+      0 : begin
+         unifiedString := '';
          Exit;
       end;
-      i:=(i+1) and (FCapacity-1);
+      1 : if Cardinal(Ord(p^)) <= Cardinal(High(vUnifiedCharacters)) then begin
+         unifiedString := vUnifiedCharacters[Ord(p^)];
+         Exit;
+      end;
+   end;
+
+   h := SimpleStringHash(p, size);
+   i := (h and FMask);
+
+   repeat
+      bucket := @FBuckets[i];
+      // bypass Length() as only non-empty strings can be in the buckets
+      if bucket^.Hash = h then begin
+         if (PInteger(NativeUInt(bucket^.Str)-4)^=size) and CompareMem(p, Pointer(bucket^.Str), size*SizeOf(Char)) then begin
+            unifiedString := bucket^.Str;
+            Exit;
+         end;
+      end else if bucket^.Hash=0 then begin
+         bucket^.Hash := h;
+         SetString(unifiedString, p, size);
+         bucket^.Str := unifiedString;
+         Inc(FCount);
+         Dec(FGrowth);
+         if FGrowth = 0 then Grow;
+         Exit;
+      end;
+      i := (i+1) and FMask;
    until False;
-end;
-
-// Lock
-//
-procedure TStringUnifier.Lock;
-begin
-   FLock.BeginWrite;
-end;
-
-// UnLock
-//
-procedure TStringUnifier.UnLock;
-begin
-   FLock.EndWrite;
 end;
 
 // Clear
 //
 procedure TStringUnifier.Clear;
 begin
-   SetLength(FBuckets, 0);
-   FCount:=0;
-   FGrowth:=0;
-   FCapacity:=0;
+   FBuckets := nil;
+   FCount := 0;
+   FCapacity := 0;
+   Grow;
 end;
 
 // Grow
@@ -2358,23 +2342,25 @@ var
    i, j, n : Integer;
    oldBuckets : TStringUnifierBuckets;
 begin
-   if FCapacity=0 then
-      FCapacity:=32
-   else FCapacity:=FCapacity*2;
-   FGrowth:=(FCapacity*3) div 4-FCount;
+   if FCapacity = 0 then
+      FCapacity := 64
+   else FCapacity := FCapacity*2;
+   FGrowth := (FCapacity*5) div 8 - FCount;
 
-   oldBuckets:=FBuckets;
-   FBuckets:=nil;
+   oldBuckets := FBuckets;
+   FBuckets := nil;
    SetLength(FBuckets, FCapacity);
 
-   n:=FCapacity-1;
-   for i:=0 to High(oldBuckets) do begin
+   n := FCapacity-1;
+   FMask := n;
+   for i := 0 to High(oldBuckets) do begin
       if oldBuckets[i].Hash=0 then continue;
-      j:=(oldBuckets[i].Hash and (FCapacity-1));
-      while FBuckets[j].Hash<>0 do
-         j:=(j+1) and n;
-      FBuckets[j].Hash:=oldBuckets[i].Hash;
-      FBuckets[j].Str:=oldBuckets[i].Str;
+      j := (oldBuckets[i].Hash and (FCapacity-1));
+      while FBuckets[j].Hash <> 0 do
+         j := (j+1) and n;
+      FBuckets[j].Hash := oldBuckets[i].Hash;
+      Pointer(FBuckets[j].Str) := Pointer(oldBuckets[i].Str);
+      Pointer(oldBuckets[i].Str) := nil;
    end;
 end;
 
@@ -2399,9 +2385,6 @@ type
          FList : TStringListList;
    end;
    {$endif}
-
-var
-   vUnifiedStrings : array [0..63] of TStringUnifier;
 
 // CompareStrings
 //
@@ -2443,8 +2426,13 @@ procedure InitializeStringsUnifier;
 var
    i : Integer;
 begin
-   for i:=Low(vUnifiedStrings) to High(vUnifiedStrings) do
-      vUnifiedStrings[i]:=TStringUnifier.Create;
+   for i := Low(vUnifiedStrings) to High(vUnifiedStrings) do begin
+      vUnifiedStrings[i] := TStringUnifier.Create;
+      TStringUnifier(vUnifiedStrings[i]).Tag := i;
+   end;
+
+   for i := Low(vUnifiedCharacters) to High(vUnifiedCharacters) do
+      vUnifiedCharacters[i] := Char(Ord(i));
 end;
 
 // FinalizeStringsUnifier
@@ -2454,29 +2442,68 @@ var
    i : Integer;
 begin
    for i:=Low(vUnifiedStrings) to High(vUnifiedStrings) do begin
-      vUnifiedStrings[i].Free;
+      TStringUnifier(vUnifiedStrings[i]).Free;
       vUnifiedStrings[i]:=nil;
    end;
+end;
+
+// AcquireUnifier
+//
+function AcquireUnifier : TStringUnifier;
+begin
+   repeat
+      Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[0], nil, vUnifiedStrings[0]));
+      if Result <> nil then Exit;
+      Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[1], nil, vUnifiedStrings[1]));
+      if Result <> nil then Exit;
+      Sleep(0);
+   until False;
+end;
+
+// ReleaseUnifier
+//
+procedure ReleaseUnifier(unifier : TStringUnifier);
+begin
+   vUnifiedStrings[unifier.Tag] := unifier;
 end;
 
 // UnifyAssignString
 //
 procedure UnifyAssignString(const fromStr : UnicodeString; var toStr : UnicodeString);
-var
-   i : Integer;
-   su : TStringUnifier;
-   h : Cardinal;
 begin
-   if fromStr='' then
-      toStr:=''
-   else begin
-      h:=SimpleStringHash(fromStr);
-      i:=h and High(vUnifiedStrings);
-      su:=vUnifiedStrings[i];
-      su.Lock;
-      su.UnifyAssign(fromStr, h shr 6, toStr);
-      su.UnLock;
+   UnifyAssignPChar(Pointer(fromStr), Length(fromStr), toStr);
+end;
+
+// UnifyAssignPChar
+//
+procedure UnifyAssignPChar(p : PChar; size : Integer; var toStr : UnicodeString);
+var
+   su : TStringUnifier;
+begin
+   case size of
+      0 : begin
+         toStr := '';
+         Exit;
+      end;
+      1 : begin
+         if (Cardinal(Ord(p^)) <= Cardinal(High(vUnifiedCharacters))) then begin
+            toStr := vUnifiedCharacters[Ord(p^)];
+            Exit;
+         end;
+      end;
    end;
+   su := AcquireUnifier;
+   su.UnifyAssignPChar(p, size, toStr);
+   ReleaseUnifier(su);
+end;
+
+// UnifyAssignChar
+//
+procedure UnifyAssignChar(p : PChar; var toStr : UnicodeString);
+begin
+   if Cardinal(Ord(p^)) <= Cardinal(High(vUnifiedCharacters)) then
+      toStr := vUnifiedCharacters[Ord(p^)]
+   else UnifyAssignPChar(p, 1, toStr);
 end;
 
 // UnifiedString
@@ -2488,28 +2515,21 @@ end;
 
 // TidyStringsUnifier
 //
-procedure TidyStringsUnifier;
+function TidyStringsUnifier : Integer;
 var
    i : Integer;
-   su : TStringUnifier;
+   su : array [0..High(vUnifiedStrings)] of TStringUnifier;
 begin
-   for i:=Low(vUnifiedStrings) to High(vUnifiedStrings) do begin
-      su:=vUnifiedStrings[i];
-      su.Lock;
-      su.Clear;
-      su.UnLock;
+   Result := 0;
+   for i := Low(vUnifiedStrings) to High(vUnifiedStrings) do begin
+      repeat
+         su[i] := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[i], nil, vUnifiedStrings[i]));
+      until su[i] <> nil;
+      Result := Result + su[i].FCount;
+      su[i].Clear;
    end;
-end;
-
-// StringUnifierHistogram
-//
-function StringUnifierHistogram : TIntegerDynArray;
-var
-   i : Integer;
-begin
-   SetLength(Result, Length(vUnifiedStrings));
-   for i:=Low(vUnifiedStrings) to High(vUnifiedStrings) do
-      Result[i-Low(vUnifiedStrings)]:=vUnifiedStrings[i].Count;
+   for i := Low(vUnifiedStrings) to High(vUnifiedStrings) do
+      vUnifiedStrings[i] := su[i];
 end;
 
 // UnicodeCompareLen
@@ -2552,6 +2572,7 @@ var
 begin
    ps1:=PWideChar(NativeInt(s1));
    ps2:=PWideChar(NativeInt(s2));
+   if ps1 = ps2 then Exit(0);
    if ps1<>nil then begin
       if ps2<>nil then begin
          n1:=PInteger(NativeUInt(ps1)-4)^;

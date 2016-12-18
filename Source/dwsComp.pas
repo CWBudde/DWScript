@@ -26,7 +26,7 @@ interface
 uses
   Variants, Classes, SysUtils, TypInfo,
   dwsCompiler, dwsExprs, dwsSymbols, dwsDataContext, dwsExprList, dwsScriptSource,
-  dwsStack, dwsFunctions, dwsStrings, dwsLanguageExtension,
+  dwsStack, dwsFunctions, dwsStrings, dwsLanguageExtension, dwsCompilerContext,
   dwsTokenizer, dwsUtils, dwsOperators, dwsUnitSymbols, dwsXPlatform,
   // Built-In functions
 {$IFNDEF DWS_NO_BUILTIN_FUNCTIONS}
@@ -210,7 +210,7 @@ type
          procedure Notification(AComponent: TComponent; Operation: TOperation); override;
 
          procedure BeforeAdditionTo(dwscript : TObject);
-         function GetUnitName: UnicodeString; virtual;
+         function GetUnitName: UnicodeString;
          function GetUnitTable(systemTable : TSystemSymbolTable; unitSyms : TUnitMainSymbols;
                                operators : TOperators; rootTable : TSymbolTable) : TUnitSymbolTable; virtual; abstract;
          function GetUnitFlags : TIdwsUnitFlags;
@@ -218,7 +218,7 @@ type
 
          property Dependencies: TStrings read FDependencies write SetDependencies;
          {$WARNINGS OFF}
-         property UnitName: UnicodeString read GetUnitName write SetUnitName;
+         property UnitName: UnicodeString read FUnitName write SetUnitName;
          {$WARNINGS ON}
 
          property DeprecatedMessage : UnicodeString read FDeprecatedMessage write FDeprecatedMessage;
@@ -403,7 +403,7 @@ type
 
       protected
          procedure Call(exec : TdwsProgramExecution; func : TFuncSymbol); virtual; abstract;
-         procedure CompileTimeCheck(prog : TdwsProgram; expr : TFuncExprBase); virtual;
+         procedure CompileTimeCheck(context : TdwsCompilerContext; expr : TFuncExprBase); virtual;
          procedure InitSymbol(symbol : TSymbol; const msgs : TdwsCompileMessageList);
          procedure InitExpression(expr : TExprBase);
          function SubExpr(i : Integer) : TExprBase;
@@ -3170,7 +3170,7 @@ end;
 
 // CompileTimeCheck
 //
-procedure TdwsCallable.CompileTimeCheck(prog : TdwsProgram; expr : TFuncExprBase);
+procedure TdwsCallable.CompileTimeCheck(context : TdwsCompilerContext; expr : TFuncExprBase);
 begin
    // nothing yet
 end;
