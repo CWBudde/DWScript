@@ -24,6 +24,14 @@ type
       Info: TProgramInfo; ExtObject: TObject);
     procedure dwsWebServerClassesWebServerMethodsCompilationInfoJSONEval(
       Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebServerClassesWebServerMethodsGetRewriteRulesJSONEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebServerClassesWebServerMethodsSetURLRewriteRulesJSONEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebServerClassesWebServerMethodsCompiledProgramsEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebServerClassesWebServerMethodsExecutionInfoJSONEval(
+      Info: TProgramInfo; ExtObject: TObject);
   private
     { Private declarations }
     FServer :  IWebServerInfo;
@@ -46,6 +54,18 @@ procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsCompilationInfoJSO
   Info: TProgramInfo; ExtObject: TObject);
 begin
    Info.ResultAsString := FServer.CompilationInfoJSON(Info.ParamAsString[0]);
+end;
+
+procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsCompiledProgramsEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsStringArray := FServer.CompiledPrograms;
+end;
+
+procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsExecutionInfoJSONEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsString := FServer.ExecutionInfoJSON(Info.ParamAsString[0]);
 end;
 
 procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsFlushCompiledProgramsEval(
@@ -76,6 +96,18 @@ procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsNameEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
    Info.ResultAsString:=FServer.Name;
+end;
+
+procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsGetRewriteRulesJSONEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsString := FServer.GetURLRewriteRules;
+end;
+
+procedure TdwsWebServerLib.dwsWebServerClassesWebServerMethodsSetURLRewriteRulesJSONEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   FServer.SetURLRewriteRules(Info.ParamAsString[0]);
 end;
 
 end.

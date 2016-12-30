@@ -91,7 +91,7 @@ type
       FBkgndWorkers : TdwsBackgroundWorkersLib;
 
       FCompiledPrograms : TCompiledProgramHash;
-      FCompiledProgramsLock : TFixedCriticalSection;
+      FCompiledProgramsLock : TMultiReadSingleWrite;
 
       FCompilerLock : TFixedCriticalSection;
       FCompilerFiles : IAutoStrings;
@@ -152,6 +152,8 @@ type
       procedure HandleP2JS(const fileName : String; request : TWebRequest; response : TWebResponse);
 
       function CompilationInfoJSON(const sourceName : String; fileType : TFileAccessType) : String;
+      function ExecutionInfoJSON(const sourceName : String; fileType : TFileAccessType) : String;
+      function CompiledPrograms : TStringDynArray;
       procedure FlushDWSCache(const fileName : String = '');
 
       procedure LoadCPUOptions(options : TdwsJSONValue);
@@ -276,10 +278,11 @@ begin
 
    TdwsZipLib.Create(Self).dwsZip.Script:=DelphiWebScript;
 
-   FCompiledPrograms:=TCompiledProgramHash.Create;
-   FCompiledProgramsLock:=TFixedCriticalSection.Create;
-   FCompilerLock:=TFixedCriticalSection.Create;
-   FCodeGenLock:=TFixedCriticalSection.Create;
+   FCompiledPrograms := TCompiledProgramHash.Create;
+   FCompiledProgramsLock := TMultiReadSingleWrite.Create;
+
+   FCompilerLock := TFixedCriticalSection.Create;
+   FCodeGenLock := TFixedCriticalSection.Create;
 
    FExecutingScriptsLock:=TMultiReadSingleWrite.Create;
 
@@ -475,6 +478,8 @@ var
    fileName : String;
 begin
    fileName := dwsCompileSystem.AllocateFileSystem.ValidateFileName(sourceName);
+   if (fileName = '') and Assigned(FBackgroundFileSystem) then
+      fileName := FBackgroundFileSystem.ValidateFileName(sourceName);
    if fileName = '' then
       Exit('"Access denied or does not exist"')
    else begin
@@ -485,11 +490,77 @@ begin
    end;
 end;
 
+// ExecutionInfoJSON
+//
+function TSimpleDWScript.ExecutionInfoJSON(const sourceName : String; fileType : TFileAccessType) : String;
+var
+   prog : IdwsProgram;
+   fileName : String;
+   wr : TdwsJSONWriter;
+   execStats : TdwsProgramExecStats;
+begin
+   fileName := dwsCompileSystem.AllocateFileSystem.ValidateFileName(sourceName);
+   if (fileName = '') and Assigned(FBackgroundFileSystem) then
+      fileName := FBackgroundFileSystem.ValidateFileName(sourceName);
+   if fileName = '' then
+      Exit('"Access denied or does not exist"')
+   else begin
+      TryAcquireDWS(fileName, prog);
+      if prog = nil then
+         FillChar(execStats, SizeOf(execStats), 0)
+      else execStats := prog.ProgramObject.ExecStats;
+      wr := TdwsJSONWriter.Create;
+      try
+         wr.BeginObject;
+            wr.WriteInteger('count', execStats.Count);
+            wr.WriteInteger('totalTimeMSec', execStats.TimeMSec);
+         wr.EndObject;
+         Result := wr.ToString;
+      finally
+         wr.Free;
+      end;
+   end;
+
+end;
+
+// CompiledPrograms
+//
+type
+   TCompiledProgramsEnumerator = class
+      a : TStringDynArray;
+      i : Integer;
+      function Callback(const item : TCompiledProgram) : TSimpleHashAction;
+   end;
+function TCompiledProgramsEnumerator.Callback(const item : TCompiledProgram) : TSimpleHashAction;
+begin
+   a[i] := item.Name;
+   Inc(i);
+   Result := shaNone;
+end;
+function TSimpleDWScript.CompiledPrograms : TStringDynArray;
+var
+   enumerator : TCompiledProgramsEnumerator;
+begin
+   enumerator := TCompiledProgramsEnumerator.Create;
+   try
+      FCompiledProgramsLock.BeginRead;
+      try
+         SetLength(enumerator.a, FCompiledPrograms.Count);
+         FCompiledPrograms.Enumerate(enumerator.Callback);
+      finally
+         FCompiledProgramsLock.EndRead;
+      end;
+      Result := enumerator.a;
+   finally
+      enumerator.Free;
+   end;
+end;
+
 // FlushDWSCache
 //
 procedure TSimpleDWScript.FlushDWSCache(const fileName : String = '');
 begin
-   FCompiledProgramsLock.Enter;
+   FCompiledProgramsLock.BeginWrite;
    try
       if fileName='' then begin
          FCompiledPrograms.Clear;
@@ -504,7 +575,7 @@ begin
          end;
       end;
    finally
-      FCompiledProgramsLock.Leave;
+      FCompiledProgramsLock.EndWrite;
    end;
 end;
 
@@ -580,12 +651,12 @@ var
    cp : TCompiledProgram;
 begin
    cp.Name:=fileName;
-   FCompiledProgramsLock.Enter;
+   FCompiledProgramsLock.BeginRead;
    try
       if FCompiledPrograms.Match(cp) then
          prog:=cp.Prog;
    finally
-      FCompiledProgramsLock.Leave;
+      FCompiledProgramsLock.EndRead;
    end;
 end;
 
@@ -633,7 +704,7 @@ begin
 
       cp.Name  := fileName;
 
-      FCompiledProgramsLock.Enter;
+      FCompiledProgramsLock.BeginWrite;
       try
          if not FCompiledPrograms.Match(cp) then begin
             cp.Prog  := prog;
@@ -641,7 +712,7 @@ begin
             FCompiledPrograms.Add(cp);
          end;
       finally
-         FCompiledProgramsLock.Leave;
+         FCompiledProgramsLock.EndWrite;
       end;
    finally
       FCompilerFiles := nil;
@@ -845,13 +916,13 @@ begin
       n := FCompiledPrograms.Count;
       SetLength(files.FProgs, n);
       // collect all files as fast as possible then release lock
-      FCompiledProgramsLock.Enter;
+      FCompiledProgramsLock.BeginRead;
       try
          if n <> FCompiledPrograms.Count then
             SetLength(files.FProgs, n);
          FCompiledPrograms.Enumerate(files.Enumerate);
       finally
-         FCompiledProgramsLock.Leave;
+         FCompiledProgramsLock.EndRead;
       end;
       // sort to avoid duplicate checks
       files.CaseSensitive := False;
@@ -880,11 +951,11 @@ begin
       end;
       // purge programs whose file(s) changed
       if gotChanges then begin
-         FCompiledProgramsLock.Enter;
+         FCompiledProgramsLock.BeginWrite;
          try
             FCompiledPrograms.Enumerate(files.RemoveChanged);
          finally
-            FCompiledProgramsLock.Leave;
+            FCompiledProgramsLock.EndWrite;
          end;
       end;
       FLastCheckTime := nextCheckTime;

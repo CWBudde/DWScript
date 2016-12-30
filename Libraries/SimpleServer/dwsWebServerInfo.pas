@@ -31,10 +31,18 @@ type
       function HttpPort : Integer;
       function HttpsPort : Integer;
       function Authentications : TWebRequestAuthentications;
+
       function LiveQueries : String;
+
       function CompilationInfoJSON(const sourceName : String) : String;
+      function ExecutionInfoJSON(const sourceName : String) : String;
+      function CompiledPrograms : TStringDynArray;
       procedure FlushCompiledPrograms;
+
       function ServerEvents : IdwsHTTPServerEvents;
+
+      function  GetURLRewriteRules : String;
+      procedure SetURLRewriteRules(const json : String);
    end;
 
 implementation
