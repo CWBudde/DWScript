@@ -57,6 +57,8 @@ type
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
          procedure GetRelativeDataPtr(exec : TdwsExecution; var result : IDataContext); override;
 
+         function IsWritable : Boolean; override;
+
          function ReferencesVariable(varSymbol : TDataSymbol) : Boolean; override;
 
          function SameDataExpr(expr : TTypedExpr) : Boolean; override;
@@ -2398,6 +2400,13 @@ begin
    exec.Stack.InitRelativeDataPtr(Result, FStackAddr);
 end;
 
+// IsWritable
+//
+function TVarExpr.IsWritable : Boolean;
+begin
+   Result := FDataSym.IsWritable;
+end;
+
 // AssignDataExpr
 //
 procedure TVarExpr.AssignDataExpr(exec : TdwsExecution; DataExpr: TDataExpr);
@@ -3237,17 +3246,26 @@ end;
 // Optimize
 //
 function TStaticArrayExpr.Optimize(context : TdwsCompilerContext; exec : TdwsExecution) : TProgramExpr;
-var
-   v : Variant;
-begin
-   Result:=Self;
-   if IsConstant then begin
+
+   function DoOptimize(exec : TdwsExecution) : TProgramExpr;
+   var
+      v : Variant;
+      dc : IDataContext;
+   begin
       if Typ.Size=1 then begin
          EvalAsVariant(exec, v);
-         Result:=TConstExpr.Create(Typ, v);
-         Orphan(context);
+         Result := TConstExpr.Create(Typ, v);
+      end else begin
+         dc := DataPtr[exec];
+         Result := TConstExpr.Create(Typ, dc.AsPData^, dc.Addr);
       end;
+      Orphan(context);
    end;
+
+begin
+   if IsConstant then
+      Result := DoOptimize(exec)
+   else Result := Self;
 end;
 
 // AssignExpr
@@ -3291,15 +3309,21 @@ end;
 // EvalAsInteger
 //
 function TStaticArrayExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+var
+   dc : IDataContext;
 begin
-   Result:=FBaseExpr.DataPtr[exec].AsInteger[GetIndex(exec)];
+   FBaseExpr.GetDataPtr(exec, dc);
+   Result := dc.AsInteger[GetIndex(exec)];
 end;
 
 // EvalAsFloat
 //
 function TStaticArrayExpr.EvalAsFloat(exec : TdwsExecution) : Double;
+var
+   dc : IDataContext;
 begin
-   Result:=FBaseExpr.DataPtr[exec].AsFloat[GetIndex(exec)];
+   FBaseExpr.GetDataPtr(exec, dc);
+   Result := dc.AsFloat[GetIndex(exec)];
 end;
 
 // EvalAsBoolean
@@ -4734,12 +4758,12 @@ end;
 procedure TStringInOpStaticSetExpr.Prepare;
 var
    i : Integer;
-   cc : TCompareCaseCondition;
+   cc : TCompareConstStringCaseCondition;
 begin
    FSortedStrings:=TFastCompareStringList.Create;
    for i:=0 to FCaseConditions.Count-1 do begin
-      cc:=(FCaseConditions.List[i] as TCompareCaseCondition);
-      FSortedStrings.AddObject((cc.FCompareExpr as TConstStringExpr).Value, cc);
+      cc:=(FCaseConditions.List[i] as TCompareConstStringCaseCondition);
+      FSortedStrings.AddObject(cc.Value, cc);
    end;
    FSortedStrings.Sorted:=True;
 end;
@@ -6266,18 +6290,25 @@ end;
 //
 procedure TAssignArrayConstantExpr.TypeCheckAssign(context : TdwsCompilerContext; exec : TdwsExecution);
 var
-   leftItemTyp : TTypeSymbol;
+   leftItemTyp, rightItemTyp : TTypeSymbol;
 begin
+   if     FLeft.Typ.Typ.IsOfType(context.TypFloat)
+      and (Right is TArrayConstantExpr)
+      and Right.Typ.Typ.IsOfType(context.TypInteger) then begin
+      TArrayConstantExpr(Right).ElementsFromIntegerToFloat(context);
+   end;
    if FLeft.Typ is TDynamicArraySymbol then begin
-      leftItemTyp:=TDynamicArraySymbol(FLeft.Typ).Typ;
-      if not (   leftItemTyp.IsOfType(TArraySymbol(FRight.Typ).Typ)
-              or leftItemTyp.IsOfType(context.TypVariant)) then
+      leftItemTyp := TDynamicArraySymbol(FLeft.Typ).Typ;
+      rightItemTyp := TArraySymbol(FRight.Typ).Typ;
+      if not (
+            leftItemTyp.IsOfType(rightItemTyp)
+         or leftItemTyp.IsCompatible(rightItemTyp)
+         or leftItemTyp.IsOfType(context.TypVariant)
+         or (leftItemTyp.IsPointerType and rightItemTyp.IsOfType(context.TypNil))
+         ) then begin
          context.Msgs.AddCompilerErrorFmt(ScriptPos, CPE_AssignIncompatibleTypes,
                                               [Right.Typ.Caption, Left.Typ.Caption]);
-   end else if     FLeft.Typ.Typ.IsOfType(context.TypFloat)
-               and (Right is TArrayConstantExpr)
-               and Right.Typ.Typ.IsOfType(context.TypInteger) then begin
-      TArrayConstantExpr(Right).ElementsFromIntegerToFloat(context);
+      end;
    end else inherited;
 end;
 

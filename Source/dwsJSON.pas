@@ -1052,7 +1052,7 @@ begin
    writer:=TdwsJSONWriter.Create(nil);
    try
       WriteTo(writer);
-      Result:=writer.Stream.ToString;
+      Result:=writer.Stream.ToUnicodeString;
    finally
       writer.Free;
    end;
@@ -1068,7 +1068,7 @@ begin
    writer:=TdwsJSONBeautifiedWriter.Create(nil, initialTabs, indentTabs);
    try
       WriteTo(writer);
-      Result:=writer.Stream.ToString;
+      Result:=writer.Stream.ToUnicodeString;
    finally
       writer.Free;
    end;
@@ -2219,7 +2219,7 @@ function TdwsJSONImmediate.GetAsString : UnicodeString;
 begin
    if Assigned(Self) then
       case FType of
-         jvtNull : Result:='Null';
+         jvtNull : Result:='null';
          jvtString : Result:=PString(@FData)^;
          jvtNumber : Result:=FloatToStr(FData);
          jvtBoolean :
@@ -2795,7 +2795,7 @@ end;
 //
 function TdwsJSONWriter.ToString : String;
 begin
-   Result:=FStream.ToString;
+   Result:=FStream.ToUnicodeString;
 end;
 
 // ToUTF8String
@@ -2951,7 +2951,7 @@ begin
    wr:=TdwsJSONWriter.Create(wobs);
    try
       WriteTo(wr);
-      Result:=wobs.ToString;
+      Result:=wobs.ToUnicodeString;
    finally
       wr.Free;
       wobs.ReturnToPool;

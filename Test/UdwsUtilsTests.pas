@@ -21,7 +21,7 @@ uses Classes, SysUtils, Math, Variants, Types,
    dwsXPlatformTests, dwsUtils,
    dwsXPlatform, dwsWebUtils, dwsTokenStore, dwsCryptoXPlatform,
    dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext,
-   dwsXXHash, dwsURLRewriter;
+   dwsXXHash, dwsURLRewriter, dwsJSON;
 
 type
 
@@ -29,7 +29,7 @@ type
       private
          FTightList : TTightList;
          FDummy : TObject;
-         FRewriterPattern, FRewriterRewrite : String;
+         FRewriterPattern, FRewriterRewrite, FRewriterURL : String;
 
       protected
          procedure SetUp; override;
@@ -75,7 +75,6 @@ type
 
          procedure QueueTest;
 
-         procedure StringHash;
          procedure TestDWSHashCode;
          procedure TestDWSHashCodeEmptyStrings;
 
@@ -360,7 +359,7 @@ begin
    try
       for i := 0 to 10 do
          wobs.WriteString('Hello World');
-      str := wobs.ToString;
+      str := wobs.ToUnicodeString;
       ms := TMemoryStream.Create;
       try
          wobs.StoreData(ms);
@@ -398,8 +397,16 @@ end;
 // FailURLRewriterRule
 //
 procedure TdwsUtilsTests.FailURLRewriterRule;
+var
+   rule :  TdwsURLRewriteRuleGeneric;
+   rewritten : String;
 begin
-   TdwsURLRewriteRuleGeneric.Create(FRewriterPattern, FRewriterRewrite).Free;
+   rule := TdwsURLRewriteRuleGeneric.Create(FRewriterPattern, FRewriterRewrite);
+   try
+      rule.Apply(FRewriterURL, rewritten);
+   finally
+      rule.Free;
+   end;
 end;
 
 // SetUp
@@ -881,16 +888,6 @@ begin
    end;
 end;
 
-// StringHash
-//
-procedure TdwsUtilsTests.StringHash;
-begin
-   CheckEquals(SimpleLowerCaseStringHash(''), SimpleStringHash(''), 'empty');
-   CheckEquals(SimpleLowerCaseStringHash('abc'), SimpleStringHash('abc'), 'abc');
-   CheckEquals(SimpleLowerCaseStringHash('ABC'), SimpleStringHash(LowerCase('ABC')), 'ABC');
-   CheckEquals(SimpleLowerCaseStringHash('ÈRic'), SimpleStringHash(UnicodeLowerCase('ÈRic')), 'ÈRic');
-end;
-
 // TestDWSHashCode
 //
 procedure TdwsUtilsTests.TestDWSHashCode;
@@ -1030,6 +1027,7 @@ end;
 procedure TdwsUtilsTests.TokenStoreData;
 var
    store : TdwsTokenStore;
+   js : TdwsJSONWriter;
 begin
    store:=TdwsTokenStore.Create;
    try
@@ -1043,6 +1041,13 @@ begin
       CheckEquals('', store.TokenData['a']);
       CheckEquals('bb', store.TokenData['b']);
       CheckEquals('', store.TokenData['c']);
+      js := TdwsJSONWriter.Create;
+      try
+         store.SaveToJSON(js);
+         CheckTrue(StrMatches(js.ToString, '{"b":{"data":"bb","expire":*}}'), js.ToString);
+      finally
+         js.Free;
+      end;
    finally
       store.Free;
    end;
@@ -1479,10 +1484,11 @@ end;
 //
 procedure TdwsUtilsTests.URLRewriter;
 
-   procedure CheckFail(const pattern, rewrite : String);
+   procedure CheckFail(const pattern, rewrite : String; const url : String = '');
    begin
       FRewriterPattern := pattern;
       FRewriterRewrite := rewrite;
+      FRewriterURL := url;
       CheckException(FailURLRewriterRule, EdwsURLRewriterException,
                      'No exception for "' + pattern + '", "' + rewrite + '"');
    end;
@@ -1501,6 +1507,19 @@ procedure TdwsUtilsTests.URLRewriter;
          finally
             rule.Free;
          end;
+
+         if     (Pos('*', pattern) = Length(pattern))
+            and (Pos('$1', rewrite) = Length(rewrite)-1) then begin
+            rule := TdwsURLRewriteRuleStartMatch.Create(pattern, rewrite);
+            try
+               if rule.Apply(testUrl, rw) then
+                  CheckEquals(rewrittenUrl, rw, pattern + ', ' + rewrite + ', ' + testUrl)
+               else CheckEquals(rewrittenUrl, testUrl, pattern + ', ' + rewrite + ', ' + testUrl);
+            finally
+               rule.Free;
+            end;
+         end;
+
       except
          on E: Exception do
             Check(False, 'Got exception for "'+pattern + '", "' + rewrite + '": ' +E.Message);
@@ -1515,11 +1534,18 @@ begin
    CheckFail('a', '$1');
    CheckFail('*aa*', '$1$2$3');
    CheckFail('a*b*c*d*e*f*g*h*i*j*', '$1$2$3');
+   CheckFail('*', '$2');
+   CheckFail('*', '$');
+   CheckFail('*', '$1$1$1', StringOfChar('a', cMAX_REWRITTEN_URL_SIZE div 2));
 
    CheckPass('*', '$1', 'abc', 'abc');
 
    CheckPass('a*', '$1a', 'abc', 'bca');
    CheckPass('a*', '$1a', 'a', 'a');
+
+   CheckPass('abc*', 'def$1', 'ab', 'ab');
+   CheckPass('abc*', 'def$1', 'abc', 'def');
+   CheckPass('abc*', 'def$1', 'abc123', 'def123');
 
    CheckPass('*a', 'a$1', 'za', 'az');
    CheckPass('*a', 'a$1', 'a', 'a');

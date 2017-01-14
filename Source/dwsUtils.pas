@@ -466,6 +466,7 @@ type
          property BucketObject[index : Integer] : TObject read GetBucketObject write SetBucketObject;
          property BucketName[index : Integer] : UnicodeString read GetBucketName;
          property BucketIndex[const aName : UnicodeString] : Integer read GetIndex;
+         property BucketHashedIndex[const aName : UnicodeString; aHash : Cardinal] : Integer read GetHashedIndex;
 
          property Count : Integer read FCount;
          property HighIndex : Integer read FHighIndex;
@@ -541,17 +542,6 @@ type
          procedure Clear;
 
          procedure CleanValues;
-   end;
-
-   TNameValueHashBucket<T> = record
-      Name : UnicodeString;
-      Value : T;
-   end;
-
-   TCaseInsensitiveNameValueHash<T> = class (TSimpleHash<TNameValueHashBucket<T>>)
-      protected
-         function SameItem(const item1, item2 : TNameValueHashBucket<T>) : Boolean; override;
-         function GetItemHashCode(const item1 : TNameValueHashBucket<T>) : Integer; override;
    end;
 
    TObjectsLookup = class (TSortedList<TRefCountedObject>)
@@ -692,7 +682,7 @@ type
          procedure ReturnToPool;
 
          function Seek(Offset: Longint; Origin: Word): Longint; override;
-         function Read(var Buffer; Count: Longint): Longint; override;
+         function Read(var {%H-}Buffer; {%H-}Count: Longint): Longint; override;
          function Write(const buffer; count: Longint): Longint; override;
 
          procedure WriteByte(b : Byte); inline;
@@ -713,8 +703,8 @@ type
          procedure WriteChar(utf16Char : WideChar); inline;
          procedure WriteDigits(value : Int64; digits : Integer);
 
-         // assumes data is an utf16 UnicodeString, spits out utf8 in FPC, utf16 in Delphi
-         function ToString : UnicodeString; override;
+         function ToString : String; override; deprecated 'use ToUnicodeString'; final;
+         function ToUnicodeString : UnicodeString;
          function ToUTF8String : RawByteString;
          function ToBytes : TBytes;
          function ToRawBytes : RawByteString;
@@ -724,34 +714,6 @@ type
          procedure StoreData(var buffer); overload;
          procedure StoreData(destStream : TStream); overload;
          procedure StoreUTF8Data(destStream : TStream); overload;
-   end;
-
-   IWriteOnlyBlockStream = interface
-      function Stream : TWriteOnlyBlockStream;
-
-      procedure WriteString(const utf16String : UnicodeString); overload;
-      procedure WriteChar(utf16Char : WideChar);
-      procedure WriteCRLF;
-
-      function ToString : UnicodeString;
-   end;
-
-   TAutoWriteOnlyBlockStream = class (TInterfacedSelfObject, IWriteOnlyBlockStream)
-      private
-         FStream : TWriteOnlyBlockStream;
-
-      protected
-         function Stream : TWriteOnlyBlockStream;
-
-         procedure WriteString(const utf16String : UnicodeString); overload;
-         procedure WriteChar(utf16Char : WideChar);
-         procedure WriteCRLF;
-
-      public
-         constructor Create;
-         destructor Destroy; override;
-
-         function ToString : UnicodeString; override;
    end;
 
    TSimpleInt64List = class(TSimpleList<Int64>)
@@ -782,7 +744,7 @@ type
 
    TFastCompareStringList = class (TStringList)
       {$ifdef FPC}
-      function DoCompareText(const s1,s2 : string) : PtrInt; override;
+      function DoCompareText(const s1,s2 : String) : PtrInt; override;
       {$else}
       function CompareStrings(const S1, S2: UnicodeString): Integer; override;
       function IndexOfName(const name : UnicodeString): Integer; override;
@@ -791,7 +753,7 @@ type
 
    TFastCompareTextList = class (TStringList)
       {$ifdef FPC}
-      function DoCompareText(const s1,s2 : string) : PtrInt; override;
+      function DoCompareText(const s1,s2 : String) : PtrInt; override;
       {$else}
       function CompareStrings(const S1, S2: UnicodeString): Integer; override;
       function FindName(const name : UnicodeString; var index : Integer) : Boolean;
@@ -823,7 +785,7 @@ type
    TStringIterator = class
       private
          FStr : UnicodeString;
-         FPStr : PChar;
+         FPStr : PWideChar;
          FPosition : Integer;
          FLength : Integer;
 
@@ -939,7 +901,6 @@ function WhichPowerOfTwo(const v : Int64) : Integer;
 
 function SimpleStringHash(const s : UnicodeString) : Cardinal; overload; inline;
 function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload; inline;
-function SimpleLowerCaseStringHash(const s : UnicodeString) : Cardinal;
 function SimpleByteHash(p : PByte; n : Integer) : Cardinal;
 
 function SimpleIntegerHash(x : Cardinal) : Cardinal;
@@ -953,6 +914,9 @@ procedure ScriptStringToRawByteString(const s : UnicodeString; var result : RawB
 
 procedure StringBytesToWords(var buf : UnicodeString; swap : Boolean);
 procedure StringWordsToBytes(var buf : UnicodeString; swap : Boolean);
+
+type
+   EHexEncodingException = class (Exception);
 
 function BinToHex(const data; n : Integer) : UnicodeString; overload;
 function BinToHex(const data : RawByteString) : UnicodeString; overload; inline;
@@ -1000,7 +964,7 @@ function TryISO8601ToDateTime(const v : UnicodeString; var aResult : TDateTime) 
 function ISO8601ToDateTime(const v : UnicodeString) : TDateTime;
 function DateTimeToISO8601(dt : TDateTime; extendedFormat : Boolean) : UnicodeString;
 
-procedure SuppressH2077ValueAssignedToVariableNeverUsed(const X); inline;
+procedure SuppressH2077ValueAssignedToVariableNeverUsed(const {%H-}X); inline;
 
 procedure dwsFreeAndNil(var O); // transitional function, do not use
 
@@ -1076,13 +1040,6 @@ end;
 function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
 begin
    Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(Char));
-end;
-
-// SimpleLowerCaseStringHash
-//
-function SimpleLowerCaseStringHash(const s : UnicodeString) : Cardinal;
-begin
-   Result:=SimpleStringHash(UnicodeLowerCase(s));
 end;
 
 // SimpleByteHash
@@ -1235,7 +1192,7 @@ var
 begin
    n:=Length(data);
    if (n and 1)<>0 then
-      raise Exception.Create('Even hexadecimal character count expected');
+      raise EHexEncodingException.Create('Even hexadecimal character count expected');
 
    n:=n shr 1;
    SetLength(Result, n);
@@ -1248,7 +1205,7 @@ begin
          'A'..'F' : b := (Ord(c) shl 4)+(160-(Ord('A') shl 4));
          'a'..'f' : b := (Ord(c) shl 4)+(160-(Ord('a') shl 4));
       else
-         raise Exception.Create('Invalid characters in hexadecimal');
+         raise EHexEncodingException.CreateFmt('Invalid hexadecimal character at index %d', [2*i-1]);
       end;
       c:=pSrc[1];
       case c of
@@ -1256,7 +1213,7 @@ begin
          'A'..'F' : b := b + Ord(c) + (10-Ord('A'));
          'a'..'f' : b := b + Ord(c) + (10-Ord('a'));
       else
-         raise Exception.Create('Invalid characters in hexadecimal');
+         raise EHexEncodingException.CreateFmt('Invalid hexadecimal character at index %d', [2*i]);
       end;
       pDest^ := b;
       Inc(pDest);
@@ -1267,8 +1224,6 @@ end;
 // DivMod100
 //
 function DivMod100(var dividend : Cardinal) : Cardinal;
-const
-   c100 : Cardinal = 100;
 {$ifndef WIN32_ASM}
 var
    divided : Cardinal;
@@ -1277,6 +1232,8 @@ begin
    Result:=dividend-divided*100;
    dividend:=divided;
 {$else}
+const
+   c100 : Cardinal = 100;
 asm
    mov   ecx, eax
 
@@ -1450,7 +1407,7 @@ begin
    if (Int64Rec(val).Hi=0) and (Int64Rec(val).Lo<=High(vSmallIntegers)) then
       s:=vSmallIntegers[Int64Rec(val).Lo]
    else begin
-      n:=FastInt64ToBuffer(val, buf);
+      n:=FastInt64ToBuffer(val, buf{%H-});
       SetString(s, PWideChar(@buf[n]), (High(buf)+1)-n);
    end;
 end;
@@ -1697,7 +1654,7 @@ begin
       varUnknown :
          Result := not CoalesceableIsFalsey(IUnknown(TVarData(v).VUnknown));
       varUString :
-         Result := TVarData(v).VUString <> nil;
+         Result := TVarData(v).VString <> nil;
       varDouble :
          Result := TVarData(v).VDouble <> 0;
       varNull, varEmpty :
@@ -1735,11 +1692,11 @@ procedure VarClearSafe(var v : Variant);
 begin
    case TVarData(v).VType of
       varEmpty : begin
-         TVarData(v).VUInt64:=0;
+         TVarData(v).VInt64:=0;
       end;
       varBoolean, varInt64, varDouble : begin
          TVarData(v).VType:=varEmpty;
-         TVarData(v).VUInt64:=0;
+         TVarData(v).VInt64:=0;
       end;
       varUnknown : begin
          TVarData(v).VType:=varEmpty;
@@ -1755,7 +1712,7 @@ begin
       end;
    else
       VarClear(v);
-      TVarData(v).VUInt64:=0;
+      TVarData(v).VInt64:=0;
    end;
 end;
 
@@ -1795,13 +1752,13 @@ begin
       varUString : begin
          {$ifdef DEBUG} Assert(TVarData(dest).VUString=nil); {$endif}
          TVarData(dest).VType:=varUString;
-         UnicodeString(TVarData(dest).VUString):=UnicodeString(TVarData(src).VUString);
+         UnicodeString(TVarData(dest).VString):=UnicodeString(TVarData(src).VString);
       end;
       varSmallint..varSingle, varCurrency..varDate, varError, varShortInt..varLongWord, varUInt64 : begin
-         TVarData(dest).RawData[0]:=TVarData(src).RawData[0];
-         TVarData(dest).RawData[1]:=TVarData(src).RawData[1];
-         TVarData(dest).RawData[2]:=TVarData(src).RawData[2];
-         TVarData(dest).RawData[3]:=TVarData(src).RawData[3];
+         TVarData(dest).VType := TVarData(src).VType;
+         TVarData(dest).VLongs[0]:=TVarData(src).VLongs[0];
+         TVarData(dest).VLongs[1]:=TVarData(src).VLongs[1];
+         TVarData(dest).VLongs[2]:=TVarData(src).VLongs[2];
       end;
    else
       dest:=src;
@@ -1870,7 +1827,7 @@ end;
 
 // VarSetDefaultInt64
 //
-procedure VarSetDefaultInt64(var dest : Variant); overload;
+procedure VarSetDefaultInt64(var dest : Variant);
 begin
    VarClearSafe(dest);
 
@@ -1880,12 +1837,12 @@ end;
 
 // VarSetDefaultString
 //
-procedure VarSetDefaultString(var dest : Variant); inline;
+procedure VarSetDefaultString(var dest : Variant);
 begin
    VarClearSafe(dest);
 
    TVarData(dest).VType := varUString;
-   TVarData(dest).VUString := nil;
+   TVarData(dest).VString := nil;
 end;
 
 // WriteVariant
@@ -2196,7 +2153,7 @@ end;
 
 // BytesToScriptString
 //
-procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString); overload;
+procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
 var
    pSrc : PByteArray;
    pDest : PWordArray;
@@ -2389,7 +2346,7 @@ type
 // CompareStrings
 //
 {$ifdef FPC}
-function TFastCompareStringList.DoCompareText(const S1, S2: UnicodeString): Integer;
+function TFastCompareStringList.DoCompareText(const S1, S2: String): Integer;
 begin
    Result:=CompareStr(S1, S2);
 end;
@@ -2965,7 +2922,7 @@ end;
 // CompareStrings
 //
 {$ifdef FPC}
-function TFastCompareTextList.DoCompareText(const S1, S2: UnicodeString): Integer;
+function TFastCompareTextList.DoCompareText(const S1, S2: String): Integer;
 begin
    Result:=UnicodeCompareText(s1, s2);
 end;
@@ -3540,7 +3497,7 @@ end;
 //
 function TSortedList<T>.Add(const anItem : T) : Integer;
 begin
-   Find(anItem, Result);
+   Find(anItem, Result{%H-});
    InsertItem(Result, anItem);
 end;
 
@@ -3548,7 +3505,7 @@ end;
 //
 function TSortedList<T>.AddOrFind(const anItem : T; var added : Boolean) : Integer;
 begin
-   added:=not Find(anItem, Result);
+   added:=not Find(anItem, Result{%H-});
    if added then
       InsertItem(Result, anItem);
 end;
@@ -3557,7 +3514,7 @@ end;
 //
 function TSortedList<T>.Extract(const anItem : T) : Integer;
 begin
-   if Find(anItem, Result) then
+   if Find(anItem, Result{%H-}) then
       ExtractAt(Result)
    else Result:=-1;
 end;
@@ -3580,7 +3537,7 @@ end;
 //
 function TSortedList<T>.IndexOf(const anItem : T) : Integer;
 begin
-   if not Find(anItem, Result) then
+   if not Find(anItem, Result{%H-}) then
       Result:=-1;
 end;
 
@@ -3809,8 +3766,8 @@ procedure TWriteOnlyBlockStream.StoreUTF8Data(destStream : TStream);
 var
    buf : UTF8String;
 begin
-   buf:=UTF8Encode(ToString);
-   if buf<>'' then
+   buf := UTF8Encode(ToUnicodeString);
+   if buf <> '' then
       destStream.Write(buf[1], Length(buf));
 end;
 
@@ -3825,7 +3782,7 @@ end;
 
 // Read
 //
-function TWriteOnlyBlockStream.Read(var Buffer; Count: Longint): Longint;
+function TWriteOnlyBlockStream.{%H-}Read(var Buffer; Count: Longint): Longint;
 begin
    raise EStreamError.Create('not allowed');
 end;
@@ -3962,17 +3919,18 @@ end;
 // WriteString
 //
 procedure TWriteOnlyBlockStream.WriteString(const utf16String : UnicodeString);
+{$ifdef FPC}
+begin
+   if utf16String<>'' then
+      WriteBuf(PByteArray(utf16String), Length(utf16String)*SizeOf(WideChar));
+{$else}
 var
    stringCracker : NativeUInt;
 begin
-   {$ifdef FPC}
-   if utf16String<>'' then
-      WriteBuf(utf16String[1], Length(utf16String)*SizeOf(WideChar));
-   {$else}
    stringCracker:=NativeUInt(utf16String);
    if stringCracker<>0 then
       WriteBuf(Pointer(stringCracker), PInteger(stringCracker-SizeOf(Integer))^*SizeOf(WideChar));
-   {$endif}
+{$endif}
 end;
 
 // WriteString (Int32)
@@ -3982,7 +3940,7 @@ var
    buf : TInt32StringBuffer;
    n : Integer;
 begin
-   n:=FastInt32ToBuffer(i, buf);
+   n:=FastInt32ToBuffer(i, buf{%H-});
    WriteBuf(@buf[n], (High(buf)+1-n)*SizeOf(WideChar));
 end;
 
@@ -3993,7 +3951,7 @@ var
    buf : TInt64StringBuffer;
    n : Integer;
 begin
-   n:=FastInt64ToBuffer(i, buf);
+   n:=FastInt64ToBuffer(i, buf{%H-});
    WriteBuf(@buf[n], (High(buf)+1-n)*SizeOf(WideChar));
 end;
 
@@ -4029,20 +3987,14 @@ end;
 
 // ToString
 //
-function TWriteOnlyBlockStream.ToString : UnicodeString;
-{$ifdef FPC}
-var
-   uniBuf : UnicodeString;
+function TWriteOnlyBlockStream.ToString : String;
 begin
-   if FTotalSize>0 then begin
+   Result := ToUnicodeString;
+end;
 
-      Assert((FTotalSize and 1) = 0);
-      SetLength(uniBuf, FTotalSize div SizeOf(WideChar));
-      StoreData(uniBuf[1]);
-      Result:=UTF8Encode(uniBuf);
-
-   end else Result:='';
-{$else}
+// ToUnicodeString
+//
+function TWriteOnlyBlockStream.ToUnicodeString : UnicodeString;
 begin
    if FTotalSize>0 then begin
 
@@ -4051,14 +4003,13 @@ begin
       StoreData(Result[1]);
 
    end else Result:='';
-   {$endif}
 end;
 
 // ToUTF8String
 //
 function TWriteOnlyBlockStream.ToUTF8String : RawByteString;
 begin
-   Result:=UTF8Encode(ToString);
+   Result := UTF8Encode(ToUnicodeString);
 end;
 
 // ToBytes
@@ -4543,9 +4494,9 @@ end;
 {$ifdef FPC}
 // ToString
 //
-function TInterfacedSelfObject.ToString : UnicodeString
+function TInterfacedSelfObject.ToString : UnicodeString;
 begin
-   Result := UTF8ToString;
+   Result := UTF8Decode(inherited ToString);
 end;
 {$endif}
 
@@ -5450,7 +5401,7 @@ end;
 function TClassCloneConstructor<T>.Create : T;
 begin
    {$ifdef FPC}
-   System.GetMem(Pointer(Result), Size);
+   System.GetMem(Pointer(Result), FSize);
    System.Move(Pointer(FTemplate)^, Pointer(Result)^, FSize);
    {$else}
    GetMemForT(Result, FSize);
@@ -5603,7 +5554,7 @@ end;
 function TSimpleQueue<T>.Pop : T;
 begin
    Assert(Count>0);
-   Pop(Result);
+   Pop(Result{%H-});
 end;
 
 // Insert
@@ -5644,7 +5595,7 @@ end;
 function TSimpleQueue<T>.Pull : T;
 begin
    Assert(Count>0);
-   Pull(Result);
+   Pull(Result{%H-});
 end;
 
 // Clear
@@ -5678,59 +5629,6 @@ begin
 end;
 
 // ------------------
-// ------------------ TAutoWriteOnlyBlockStream ------------------
-// ------------------
-
-// Create
-//
-constructor TAutoWriteOnlyBlockStream.Create;
-begin
-   FStream:=TWriteOnlyBlockStream.AllocFromPool;
-end;
-
-// Destroy
-//
-destructor TAutoWriteOnlyBlockStream.Destroy;
-begin
-   FStream.ReturnToPool;
-end;
-
-// Stream
-//
-function TAutoWriteOnlyBlockStream.Stream : TWriteOnlyBlockStream;
-begin
-   Result:=FStream;
-end;
-
-// WriteString
-//
-procedure TAutoWriteOnlyBlockStream.WriteString(const utf16String : UnicodeString);
-begin
-   FStream.WriteString(utf16String);
-end;
-
-// WriteChar
-//
-procedure TAutoWriteOnlyBlockStream.WriteChar(utf16Char : WideChar);
-begin
-   FStream.WriteChar(utf16Char);
-end;
-
-// WriteCRLF
-//
-procedure TAutoWriteOnlyBlockStream.WriteCRLF;
-begin
-   FStream.WriteCRLF;
-end;
-
-// ToString
-//
-function TAutoWriteOnlyBlockStream.ToString : UnicodeString;
-begin
-   Result:=FStream.ToString;
-end;
-
-// ------------------
 // ------------------ TStringIterator ------------------
 // ------------------
 
@@ -5739,7 +5637,7 @@ end;
 constructor TStringIterator.Create(const s : UnicodeString);
 begin
    FStr:=s;
-   FPStr:=PChar(Pointer(s));
+   FPStr:=PWideChar(Pointer(s));
    FLength:=System.Length(s);
    FPosition:=0;
 end;
@@ -5779,7 +5677,7 @@ end;
 //
 function TStringIterator.CollectQuotedString : UnicodeString;
 var
-   quoteChar : Char;
+   quoteChar : WideChar;
 begin
    quoteChar:=Current;
    Inc(FPosition);
@@ -5789,7 +5687,7 @@ begin
          if EOF or (FPstr[FPosition]<>quoteChar) then Exit;
          Result:=Result+quoteChar;
       end else begin
-         Result:=Result+FPstr[FPosition];
+         Result:=Result+FPStr[FPosition];
          Inc(FPosition);
       end;
    end;
@@ -5841,24 +5739,6 @@ begin
 end;
 
 // ------------------
-// ------------------ TCaseInsensitiveNameValueHash<T> ------------------
-// ------------------
-
-// SameItem
-//
-function TCaseInsensitiveNameValueHash<T>.SameItem(const item1, item2 : TNameValueHashBucket<T>) : Boolean;
-begin
-   Result:=UnicodeSameText(item1.Name, item2.Name);
-end;
-
-// GetItemHashCode
-//
-function TCaseInsensitiveNameValueHash<T>.GetItemHashCode(const item1 : TNameValueHashBucket<T>) : Integer;
-begin
-   Result:=SimpleLowerCaseStringHash(item1.Name);
-end;
-
-// ------------------
 // ------------------ TSimpleStringHash ------------------
 // ------------------
 
@@ -5873,7 +5753,7 @@ end;
 //
 function TSimpleStringHash.GetItemHashCode(const item1 : UnicodeString) : Integer;
 begin
-   Result:=SimpleLowerCaseStringHash(item1);
+   Result:=SimpleStringHash(UnicodeLowerCase(item1));
 end;
 
 // ------------------
