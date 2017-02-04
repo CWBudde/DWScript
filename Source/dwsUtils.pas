@@ -241,6 +241,45 @@ type
          property Count : Integer read FCount;
    end;
 
+   // TSimpleStringList
+   //
+   // this list is really tailored for the needs of names lists by the compiler
+   // so essentially short-lived short lists, holding limited data
+   TSimpleStringList = class
+      private
+         FItems : TStringDynArray;
+         FCapacity : Integer;
+         FCount : Integer;
+
+      protected
+         function GetItems(i : Integer) : String; inline;
+         procedure SetItems(i : Integer; const s : String); inline;
+
+      public
+         procedure Add(const s : UnicodeString);
+         function IndexOf(const s : UnicodeString) : Integer;
+         procedure Clear;
+
+         property Items[i : Integer] : String read GetItems write SetItems; default;
+         property Count : Integer read FCount;
+   end;
+
+   // TSimpleStringListPool
+   //
+   TSimpleStringListPool = record
+      private
+         FPool : array [0..7] of TSimpleStringList;
+         FCount : Integer;
+
+      public
+         procedure Initialize; inline;
+         procedure Finalize; inline;
+
+         function  Acquire : TSimpleStringList;
+         procedure Release(sl : TSimpleStringList);
+         procedure Flush;
+   end;
+
    // TObjectList
    //
    {: A simple generic object list, owns objects }
@@ -375,7 +414,7 @@ type
    {: Minimalistic open-addressing hash, subclasses must override SameItem and GetItemHashCode.
       HashCodes *MUST* be non zero }
    TSimpleHash<T> = class
-      private
+      protected
          {$IFDEF DELPHI_XE3}
          // workaround for XE3 compiler bug
          FBuckets : array of TSimpleHashBucket<T>;
@@ -386,7 +425,6 @@ type
          FGrowth : Integer;
          FCapacity : Integer;
 
-      protected
          procedure Grow(capacityPreAdjusted : Boolean);
          function LinearFind(const item : T; var index : Integer) : Boolean;
          function SameItem(const item1, item2 : T) : Boolean; virtual; abstract;
@@ -401,7 +439,10 @@ type
          procedure Enumerate(callBack : TSimpleHashFunc<T>);
          procedure Clear;
 
+         function HashBucketValue(index : Integer; var anItem : T) : Boolean; inline;
+
          property Count : Integer read FCount;
+         property Capacity : Integer read FCapacity;
    end;
 
    TSimpleObjectHash<T{$IFNDEF FPC}: TRefCountedObject{$ENDIF}> = class(TSimpleHash<T>)
@@ -904,6 +945,7 @@ function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload
 function SimpleByteHash(p : PByte; n : Integer) : Cardinal;
 
 function SimpleIntegerHash(x : Cardinal) : Cardinal;
+function SimplePointerHash(x : Pointer) : Cardinal;
 function SimpleInt64Hash(x : Int64) : Cardinal;
 
 function RawByteStringToScriptString(const s : RawByteString) : UnicodeString; overload; inline;
@@ -964,8 +1006,6 @@ function TryISO8601ToDateTime(const v : UnicodeString; var aResult : TDateTime) 
 function ISO8601ToDateTime(const v : UnicodeString) : TDateTime;
 function DateTimeToISO8601(dt : TDateTime; extendedFormat : Boolean) : UnicodeString;
 
-procedure SuppressH2077ValueAssignedToVariableNeverUsed(const {%H-}X); inline;
-
 procedure dwsFreeAndNil(var O); // transitional function, do not use
 
 function CoalesceableIsFalsey(const unk : IUnknown) : Boolean;
@@ -1007,12 +1047,6 @@ begin
    Result :=    (unk=nil)
              or (    (unk.QueryInterface(ICoalesceable, c)=S_OK)
                  and c.IsFalsey);
-end;
-
-// SuppressH2077ValueAssignedToVariableNeverUsed
-//
-procedure SuppressH2077ValueAssignedToVariableNeverUsed(const X); inline;
-begin
 end;
 
 // dwsFreeAndNil
@@ -1061,6 +1095,24 @@ begin
    Result := x * $cc9e2d51;
    Result := (Result shl 15) or (Result shr 17);
    Result := Result * $1b873593 + $e6546b64;
+end;
+
+// SimplePointerHash
+//
+function SimplePointerHash(x : Pointer) : Cardinal;
+var
+   mix : NativeUInt;
+begin
+   // based on xxHash finalizers
+   {$ifdef CPU64}
+   mix := (mix xor (mix shr 33)) * 14029467366897019727;
+   mix := (mix xor (mix shr 29)) * 1609587929392839161;
+   mix := mix xor (mix shr 32);
+   {$else}
+   mix := (NativeUInt(x) shr 2) * Cardinal(2246822519);
+   mix := (mix xor (mix shr 15)) * Cardinal(3266489917);
+   Result := (mix xor (mix shr 16));
+   {$endif}
 end;
 
 // SimpleInt64Hash
@@ -4338,6 +4390,16 @@ begin
    FBuckets:=nil;
 end;
 
+// HashBucketValue
+//
+function TSimpleHash<T>.HashBucketValue(index : Integer; var anItem : T) : Boolean;
+begin
+   if FBuckets[index].HashCode <> 0 then begin
+      anItem := FBuckets[index].Value;
+      Result := True;
+   end else Result := False;
+end;
+
 // ------------------
 // ------------------ TSimpleObjectHash<T> ------------------
 // ------------------
@@ -6014,6 +6076,105 @@ begin
    end;
    if obj<>nil then
       obj.Destroy;
+end;
+
+// ------------------
+// ------------------ TSimpleStringList ------------------
+// ------------------
+
+// Add
+//
+procedure TSimpleStringList.Add(const s : UnicodeString);
+begin
+   if FCount = FCapacity then begin
+      Inc(FCapacity, 8);
+      SetLength(FItems, FCapacity);
+   end;
+   FItems[FCount] := s;
+   Inc(FCount);
+end;
+
+// IndexOf
+//
+function TSimpleStringList.IndexOf(const s : UnicodeString) : Integer;
+begin
+   for Result := 0 to FCount-1 do
+      if FItems[Result] = s then Exit;
+   Result := -1;
+end;
+
+// Clear
+//
+procedure TSimpleStringList.Clear;
+begin
+   FCount := 0;
+end;
+
+// GetItems
+//
+function TSimpleStringList.GetItems(i : Integer) : String;
+begin
+   Result := FItems[i];
+end;
+
+// SetItems
+//
+procedure TSimpleStringList.SetItems(i : Integer; const s : String);
+begin
+   FItems[i] := s;
+end;
+
+// ------------------
+// ------------------ TSimpleStringListPool ------------------
+// ------------------
+
+// Initialize
+//
+procedure TSimpleStringListPool.Initialize;
+begin
+   FCount := 0;
+end;
+
+// Finalize
+//
+procedure TSimpleStringListPool.Finalize;
+begin
+   Flush;
+end;
+
+// Acquire
+//
+function TSimpleStringListPool.Acquire : TSimpleStringList;
+begin
+   if FCount > 0 then begin
+      Result := FPool[FCount-1];
+      Dec(FCount);
+   end else begin
+      Result := TSimpleStringList.Create;
+   end;
+end;
+
+// Release
+//
+procedure TSimpleStringListPool.Release(sl : TSimpleStringList);
+begin
+   if FCount < Length(FPool) then begin
+      sl.Clear;
+      FPool[FCount] := sl;
+      Inc(FCount);
+   end else begin
+      sl.Free;
+   end;
+end;
+
+// Flush
+//
+procedure TSimpleStringListPool.Flush;
+begin
+   while FCount > 0 do begin
+      Dec(FCount);
+      FPool[FCount].Free;
+   end;
 end;
 
 // ------------------------------------------------------------------
