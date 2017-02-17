@@ -35,6 +35,7 @@ type
    TGenericTypeSymbol = class (TTypeSymbol)
       public
          procedure InitData(const data : TData; offset : Integer); override;
+         function IsGeneric : Boolean; override;
    end;
 
    TGenericTypeParameterSymbol = class (TGenericTypeSymbol)
@@ -59,6 +60,8 @@ type
       function  GetParameter(index : Integer) : TGenericTypeParameterSymbol;
       property  Parameters[index : Integer] : TGenericTypeParameterSymbol read GetParameter; default;
       function  Count : Integer;
+      function  Find(const name : String) : TGenericTypeParameterSymbol;
+      function  Caption : String;
    end;
 
    TGenericParameters = class (TInterfacedObject, IGenericParameters)
@@ -76,8 +79,11 @@ type
 
          procedure Add(param : TGenericTypeParameterSymbol);
          function  GetParameter(index : Integer) : TGenericTypeParameterSymbol;
+         function  Find(const name : String) : TGenericTypeParameterSymbol;
 
          function Count : Integer;
+
+         function  Caption : String;
    end;
 
    TGenericSymbolSpecialization = record
@@ -85,7 +91,7 @@ type
       Specialization : TTypeSymbol;
    end;
 
-   TGenericSymbol = class (TGenericTypeSymbol)
+   TGenericSymbol = class sealed (TGenericTypeSymbol)
       private
          FParameters : IGenericParameters;
          FGenericType : TTypeSymbol;
@@ -94,15 +100,21 @@ type
       protected
          class function Signature(params : TUnSortedSymbolTable) : String; static;
 
-         function CreateSpecializationContext(values : TUnSortedSymbolTable) : TSpecializationContext;
+         function CreateSpecializationContext(values : TUnSortedSymbolTable;
+                                              const aScriptPos : TScriptPos; aUnit : TSymbol;
+                                              aMsgs : TdwsCompileMessageList) : TSpecializationContext;
+
+         function GetCaption : UnicodeString; override;
 
       public
          constructor Create(const name : String; const params : IGenericParameters);
          destructor Destroy; override;
 
-         function Specialize(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
 
-         function SpecializationFor(values : TUnSortedSymbolTable) : TTypeSymbol;
+         function SpecializationFor(values : TUnSortedSymbolTable;
+                                    const aScriptPos : TScriptPos; aUnit : TSymbol;
+                                    aMsgs : TdwsCompileMessageList) : TTypeSymbol;
 
          property Parameters : IGenericParameters read FParameters;
          property GenericType : TTypeSymbol read FGenericType write FGenericType;
@@ -152,9 +164,9 @@ begin
    inherited;
 end;
 
-// Specialize
+// SpecializeType
 //
-function TGenericSymbol.Specialize(context : TSpecializationContext) : TTypeSymbol;
+function TGenericSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
 var
    sig : String;
    i : Integer;
@@ -167,7 +179,9 @@ begin
       end;
    end;
 
-   Result := FGenericType.Specialize(context);
+   if FGenericType <> nil then
+      Result := FGenericType.SpecializeType(context)
+   else Result := nil;
 
    i := Length(FSpecializations);
    SetLength(FSpecializations, i+1);
@@ -177,7 +191,10 @@ end;
 
 // SpecializationFor
 //
-function TGenericSymbol.SpecializationFor(values : TUnSortedSymbolTable) : TTypeSymbol;
+function TGenericSymbol.SpecializationFor(
+      values : TUnSortedSymbolTable;
+      const aScriptPos : TScriptPos; aUnit : TSymbol;
+      aMsgs : TdwsCompileMessageList) : TTypeSymbol;
 var
    context : TSpecializationContext;
    sig : String;
@@ -190,9 +207,9 @@ begin
       end;
    end;
 
-   context := CreateSpecializationContext(values);
+   context := CreateSpecializationContext(values, aScriptPos, aUnit, aMsgs);
    try
-      Result := Specialize(context);
+      Result := SpecializeType(context);
    finally
       context.Free;
    end;
@@ -200,7 +217,10 @@ end;
 
 // CreateSpecializationContext
 //
-function TGenericSymbol.CreateSpecializationContext(values : TUnSortedSymbolTable) : TSpecializationContext;
+function TGenericSymbol.CreateSpecializationContext(
+      values : TUnSortedSymbolTable;
+      const aScriptPos : TScriptPos; aUnit : TSymbol;
+      aMsgs : TdwsCompileMessageList) : TSpecializationContext;
 var
    i : Integer;
    n : String;
@@ -212,7 +232,14 @@ begin
       n := n + values.Symbols[i].Name;
    end;
    n := n + '>';
-   Result := TSpecializationContext.Create(n, Parameters.List, values);
+   Result := TSpecializationContext.Create(n, Parameters.List, values, aScriptPos, aUnit, aMsgs);
+end;
+
+// GetCaption
+//
+function TGenericSymbol.GetCaption : UnicodeString;
+begin
+   Result := Name + FParameters.Caption;
 end;
 
 // Signature
@@ -237,6 +264,7 @@ end;
 constructor TGenericTypeParameterSymbol.Create(const name : String);
 begin
    inherited Create(name, nil);
+   FSize := 1; // fake size
 end;
 
 // Destroy
@@ -314,11 +342,37 @@ begin
    Result := TGenericTypeParameterSymbol(FList.Symbols[index]);
 end;
 
+// Find
+//
+function TGenericParameters.Find(const name : String) : TGenericTypeParameterSymbol;
+begin
+   Result := TGenericTypeParameterSymbol(FList.FindLocal(name));
+end;
+
 // Count
 //
 function TGenericParameters.Count : Integer;
 begin
    Result := FList.Count;
+end;
+
+// Caption
+//
+function TGenericParameters.Caption : String;
+var
+   i : Integer;
+   p : TGenericTypeParameterSymbol;
+begin
+   Result := '<';
+   for i := 0 to FList.Count-1 do begin
+      if i > 0 then
+         Result := Result + ',';
+      p := TGenericTypeParameterSymbol(FList.Symbols[i]);
+      if p.Name = '' then
+         Result := Result + p.Caption
+      else Result := Result + p.Name;
+   end;
+   Result := Result + '>';
 end;
 
 // ------------------
@@ -330,6 +384,13 @@ end;
 procedure TGenericTypeSymbol.InitData(const data : TData; offset : Integer);
 begin
    // nothing
+end;
+
+// IsGeneric
+//
+function TGenericTypeSymbol.IsGeneric : Boolean;
+begin
+   Result := True;
 end;
 
 // ------------------
