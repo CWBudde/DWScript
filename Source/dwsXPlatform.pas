@@ -36,7 +36,7 @@ unit dwsXPlatform;
 interface
 
 uses
-   Classes, SysUtils, Types, Masks, Registry, SyncObjs,
+   Classes, SysUtils, Types, SyncObjs, Masks,
    {$IFDEF FPC}
       {$IFDEF Windows}
          Windows
@@ -44,7 +44,14 @@ uses
          LCLIntf
       {$ENDIF}
    {$ELSE}
+      {$IFDEF POSIX}
+      Posix.Time, Posix.SysTime, DateUtils
+      {$IFDEF MACOS}
+      , Macapi.CoreFoundation, Macapi.Foundation
+      {$ENDIF}
+      {$ELSE}
       Windows
+      {$ENDIF}
       {$IFNDEF VER200}, IOUtils{$ENDIF}
    {$ENDIF}
    ;
@@ -60,13 +67,12 @@ const
    INVALID_HANDLE_VALUE = DWORD(-1);
 
 type
-
    // see http://delphitools.info/2011/11/30/fixing-tcriticalsection/
    {$HINTS OFF}
-   {$ifdef UNIX}
-   TdwsCriticalSection = class (TCriticalSection);
-   {$else}
-   TdwsCriticalSection = class
+   {$IFDEF MACOS}
+   TFixedCriticalSection = TCriticalSection;
+   {$ELSE}
+   TFixedCriticalSection = class
       private
          FDummy : array [0..95-SizeOf(TRTLCRiticalSection)-2*SizeOf(Pointer)] of Byte;
          FCS : TRTLCriticalSection;
@@ -80,7 +86,7 @@ type
 
          function TryEnter : Boolean;
    end;
-   {$endif}
+   {$ENDIF}
 
    IMultiReadSingleWrite = interface
       procedure BeginRead;
@@ -94,35 +100,23 @@ type
 
    TMultiReadSingleWriteState = (mrswUnlocked, mrswReadLock, mrswWriteLock);
 
-   {$ifdef UNIX}{$define SRW_FALLBACK}{$endif}
-
    TMultiReadSingleWrite = class (TInterfacedObject, IMultiReadSingleWrite)
       private
-         {$ifndef SRW_FALLBACK}
          FSRWLock : Pointer;
          FDummy : array [0..95-4*SizeOf(Pointer)] of Byte; // padding
-         {$else}
-         FLock : TdwsCriticalSection;
-         {$endif}
 
       public
-         {$ifdef SRW_FALLBACK}
-         constructor Create;
-         destructor Destroy; override;
-         {$endif}
+         procedure BeginRead;
+         function  TryBeginRead : Boolean;
+         procedure EndRead;
 
-         procedure BeginRead; inline;
-         function  TryBeginRead : Boolean; inline;
-         procedure EndRead; inline;
-
-         procedure BeginWrite; inline;
-         function  TryBeginWrite : Boolean; inline;
-         procedure EndWrite; inline;
+         procedure BeginWrite;
+         function  TryBeginWrite : Boolean;
+         procedure EndWrite;
 
          // use for diagnostic only
          function State : TMultiReadSingleWriteState;
    end;
-
    {$HINTS ON}
 
 procedure SetDecimalSeparator(c : Char);
@@ -204,13 +198,14 @@ function ASCIICompareText(const s1, s2 : UnicodeString) : Integer; inline;
 function ASCIISameText(const s1, s2 : UnicodeString) : Boolean; inline;
 
 function NormalizeString(const s, form : UnicodeString) : UnicodeString;
-function StripAccents(const s : UnicodeString) : UnicodeString;
 
 function InterlockedIncrement(var val : Integer) : Integer; overload; {$IFDEF PUREPASCAL} inline; {$endif}
 function InterlockedDecrement(var val : Integer) : Integer; {$IFDEF PUREPASCAL} inline; {$endif}
 
 procedure FastInterlockedIncrement(var val : Integer); {$IFDEF PUREPASCAL} inline; {$endif}
 procedure FastInterlockedDecrement(var val : Integer); {$IFDEF PUREPASCAL} inline; {$endif}
+
+function InterlockedIncrement64(var val : Int64) : Int64;
 
 function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Pointer; {$IFDEF PUREPASCAL} inline; {$endif}
 
@@ -254,7 +249,6 @@ function OpenFileForSequentialReadOnly(const fileName : UnicodeString) : THandle
 function OpenFileForSequentialWriteOnly(const fileName : UnicodeString) : THandle;
 procedure CloseFileHandle(hFile : THandle);
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
-function FileFlushBuffers(hFile : THandle) : Boolean;
 function FileCopy(const existing, new : UnicodeString; failIfExists : Boolean) : Boolean;
 function FileMove(const existing, new : UnicodeString) : Boolean;
 function FileDelete(const fileName : UnicodeString) : Boolean;
@@ -309,19 +303,6 @@ type
          procedure Cancel;
    end;
 
-{$ifndef SRW_FALLBACK}
-type
-   SRWLOCK = Pointer;
-
-procedure AcquireSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-function TryAcquireSRWLockExclusive(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
-procedure ReleaseSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-
-procedure AcquireSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-function TryAcquireSRWLockShared(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
-procedure ReleaseSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-{$endif}
-
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -342,14 +323,19 @@ type
 // GetSystemTimeMilliseconds
 //
 function GetSystemTimeMilliseconds : Int64; stdcall;
+{$IFDEF WINDOWS}
 var
    fileTime : TFileTime;
 begin
-{$IFDEF WINDOWS}
    GetSystemTimeAsFileTime(fileTime);
    Result:=Round(PInt64(@fileTime)^*1e-4); // 181
-{$ELSE}
-   Not yet implemented!
+{$ENDIF}
+{$IFDEF POSIX}
+var
+   fileTime : timeval;
+begin
+   gettimeofday(fileTime, nil);
+   Result := 1000 * fileTime.tv_sec + fileTime.tv_usec;
 {$ENDIF}
 end;
 
@@ -384,17 +370,24 @@ end;
 // UTCDateTime
 //
 function UTCDateTime : TDateTime;
+{$IFDEF Windows}
 var
    systemTime : TSystemTime;
 begin
-{$IFDEF Windows}
    FillChar(systemTime, SizeOf(systemTime), 0);
    GetSystemTime(systemTime);
    with systemTime do
-      Result:= EncodeDate(wYear, wMonth, wDay)
-              +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
-{$ELSE}
-   Not yet implemented!
+      Result := EncodeDate(wYear, wMonth, wDay)
+               +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
+{$ENDIF}
+{$IFDEF MACOS}
+var
+   systemTime : CFGregorianDate;
+begin
+   systemTime := CFAbsoluteTimeGetGregorianDate(CFAbsoluteTimeGetCurrent, nil);
+   with systemTime do
+      Result := EncodeDate(year, month, day)
+               +EncodeTime(hour, minute, Trunc(second), Round((second - Trunc(second)) * MSecsPerSec));
 {$ENDIF}
 end;
 
@@ -405,30 +398,15 @@ begin
    Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
 end;
 
-type
-   TDynamicTimeZoneInformation = record
-      Bias : Longint;
-      StandardName : array[0..31] of WCHAR;
-      StandardDate : TSystemTime;
-      StandardBias : Longint;
-      DaylightName : array[0..31] of WCHAR;
-      DaylightDate : TSystemTime;
-      DaylightBias : Longint;
-      TimeZoneKeyName : array[0..127] of WCHAR;
-      DynamicDaylightTimeDisabled : Boolean;
-   end;
-   PDynamicTimeZoneInformation = ^TDynamicTimeZoneInformation;
-
-function GetDynamicTimeZoneInformation(
-      var pTimeZoneInformation: TDynamicTimeZoneInformation): DWORD; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
-function GetTimeZoneInformationForYear(wYear: USHORT; lpDynamicTimeZoneInformation: PDynamicTimeZoneInformation;
-      var lpTimeZoneInformation: TTimeZoneInformation): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
+{$IFDEF MSWINDOWS}
 function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInformation;
-      var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
+   var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall; external 'kernel32';
+{$ENDIF}
 
 // LocalDateTimeToUTCDateTime
 //
 function LocalDateTimeToUTCDateTime(t : TDateTime) : TDateTime;
+{$IFDEF MSWINDOWS}
 var
    localSystemTime, universalSystemTime : TSystemTime;
    tzDynInfo : TDynamicTimeZoneInformation;
@@ -442,11 +420,16 @@ begin
    if not TzSpecificLocalTimeToSystemTime(@tzInfo, localSystemTime, universalSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(universalSystemTime);
+{$ELSE}
+begin
+   Result := TTimeZone.Local.ToUniversalTime(t);
+{$ENDIF}
 end;
 
 // UTCDateTimeToLocalDateTime
 //
 function UTCDateTimeToLocalDateTime(t : TDateTime) : TDateTime;
+{$IFDEF MSWINDOWS}
 var
    tzDynInfo : TDynamicTimeZoneInformation;
    tzInfo : TTimeZoneInformation;
@@ -460,6 +443,10 @@ begin
    if not SystemTimeToTzSpecificLocalTime(@tzInfo, universalSystemTime, localSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(localSystemTime);
+{$ELSE}
+begin
+   Result := TTimeZone.Local.ToLocalTime(t);
+{$ENDIF}
 end;
 
 // SystemMillisecondsToUnixTime
@@ -479,9 +466,18 @@ end;
 // SystemSleep
 //
 procedure SystemSleep(msec : Integer);
+{$IFDEF MSWINDOWS}
 begin
    if msec>=0 then
       Windows.Sleep(msec);
+{$ENDIF}
+{$IFDEF POSIX}
+var
+  tim: timespec;
+begin
+   tim.tv_nsec := msec * 1000000;
+   nanosleep(tim, nil);
+{$ENDIF}
 end;
 
 {$ifndef FPC}
@@ -530,7 +526,7 @@ function UnicodeComparePChars(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 :
 const
    CSTR_EQUAL = 2;
 begin
-   Result:=CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
 end;
 
 // UnicodeComparePChars
@@ -588,9 +584,12 @@ end;
 
 // NormalizeString
 //
+{$IFDEF MSWINDOWS}
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
+{$ENDIF}
+
 function NormalizeString(const s, form : UnicodeString) : UnicodeString;
 var
    nf, len : Integer;
@@ -611,28 +610,6 @@ begin
    if len <= 0 then
       RaiseLastOSError;
    SetLength(Result, len);
-end;
-
-// StripAccents
-//
-function StripAccents(const s : UnicodeString) : UnicodeString;
-var
-   i : Integer;
-   pSrc, pDest : PWideChar;
-begin
-   Result := NormalizeString(s, 'NFD');
-   pSrc := Pointer(Result);
-   pDest := pSrc;
-   for i := 1 to Length(Result) do begin
-      case Ord(pSrc^) of
-         $300..$36F : ; // diacritic range
-      else
-         pDest^ := pSrc^;
-         Inc(pDest);
-      end;
-      Inc(pSrc);
-   end;
-   SetLength(Result, (NativeUInt(pDest)-NativeUInt(Pointer(Result))) div 2);
 end;
 
 // InterlockedIncrement
@@ -689,6 +666,13 @@ asm
 {$endif}
 end;
 
+// InterlockedIncrement64
+//
+function InterlockedIncrement64(var val : Int64) : Int64;
+begin
+   Result := TInterlocked.Increment(val);
+end;
+
 // InterlockedExchangePointer
 //
 function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Pointer;
@@ -713,13 +697,19 @@ begin
    {$ifdef FPC}
    Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
    {$else}
+   {$ifdef MSWINDOWS}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
+   {$else}
+   Not implemented yet
+   {$endif}
    {$endif}
 end;
 
 // SetThreadName
 //
+{$IFDEF MSWINDOWS}
 function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPresent';
+{$ENDIF}
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
 type
@@ -1106,6 +1096,7 @@ end;
 function LoadRawBytesFromFile(const fileName : UnicodeString) : RawByteString;
 const
    INVALID_FILE_SIZE = DWORD($FFFFFFFF);
+   CHUNK_SIZE = 16384;
 var
    hFile : THandle;
    n, nRead : Cardinal;
@@ -1254,14 +1245,6 @@ begin
       RaiseLastOSError;
 end;
 
-// FileFlushBuffers
-//
-function FlushFileBuffers(hFile : THandle) : BOOL; stdcall; external 'kernel32.dll';
-function FileFlushBuffers(hFile : THandle) : Boolean;
-begin
-   Result := FlushFileBuffers(hFile);
-end;
-
 // FileCopy
 //
 function FileCopy(const existing, new : UnicodeString; failIfExists : Boolean) : Boolean;
@@ -1392,16 +1375,26 @@ begin
 {$endif}
 end;
 
+{$IFDEF MACOS}
+function NSUserName: Pointer; cdecl; external '/System/Library/Frameworks/Foundation.framework/Foundation' name '_NSUserName';
+{$ENDIF}
+
 // GetCurrentUserName
 //
 function GetCurrentUserName : UnicodeString;
+{$IFDEF MSWINDOWS}
 var
-	len : Cardinal;
+   len : Cardinal;
 begin
-	len:=255;
-	SetLength(Result, len);
-	Windows.GetUserName(PChar(Result), len);
-	SetLength(Result, len-1);
+   len:=255;
+   SetLength(Result, len);
+   Windows.GetUserName(PChar(Result), len);
+   SetLength(Result, len-1);
+{$ENDIF}
+{$IFDEF MACOS}
+begin
+   Result := UnicodeString(TNSString.Wrap(NSUserName).UTF8String);
+{$ENDIF}
 end;
 
 {$ifndef FPC}
@@ -1456,43 +1449,45 @@ end;
 {$endif}
 
 // ------------------
-// ------------------ TdwsCriticalSection ------------------
+// ------------------ TFixedCriticalSection ------------------
 // ------------------
 
+{$IFNDEF MACOS}
 // Create
 //
-constructor TdwsCriticalSection.Create;
+constructor TFixedCriticalSection.Create;
 begin
    InitializeCriticalSection(FCS);
 end;
 
 // Destroy
 //
-destructor TdwsCriticalSection.Destroy;
+destructor TFixedCriticalSection.Destroy;
 begin
    DeleteCriticalSection(FCS);
 end;
 
 // Enter
 //
-procedure TdwsCriticalSection.Enter;
+procedure TFixedCriticalSection.Enter;
 begin
    EnterCriticalSection(FCS);
 end;
 
 // Leave
 //
-procedure TdwsCriticalSection.Leave;
+procedure TFixedCriticalSection.Leave;
 begin
    LeaveCriticalSection(FCS);
 end;
 
 // TryEnter
 //
-function TdwsCriticalSection.TryEnter : Boolean;
+function TFixedCriticalSection.TryEnter : Boolean;
 begin
    Result:=TryEnterCriticalSection(FCS);
 end;
+{$ENDIF}
 
 // ------------------
 // ------------------ TPath ------------------
@@ -1501,7 +1496,7 @@ end;
 // GetTempPath
 //
 class function TPath.GetTempPath : UnicodeString;
-{$IFDEF WINDOWS}
+{$IFDEF VER200} // Delphi 2009
 var
    tempPath : array [0..MAX_PATH] of WideChar; // Buf sizes are MAX_PATH+1
 begin
@@ -1519,7 +1514,7 @@ end;
 // GetTempFileName
 //
 class function TPath.GetTempFileName : UnicodeString;
-{$IFDEF WINDOWS}
+{$IFDEF VER200} // Delphi 2009
 var
    tempPath, tempFileName : array [0..MAX_PATH] of WideChar; // Buf sizes are MAX_PATH+1
 begin
@@ -1584,37 +1579,63 @@ end;
 // ------------------ TMultiReadSingleWrite ------------------
 // ------------------
 
-{$ifndef SRW_FALLBACK}
+type
+   SRWLOCK = Pointer;
+
+{$IFDEF MSWINDOWS}
+procedure AcquireSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
+function TryAcquireSRWLockExclusive(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
+procedure ReleaseSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
+
+procedure AcquireSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
+function TryAcquireSRWLockShared(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
+procedure ReleaseSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
+{$ENDIF}
+
+// BeginRead
+//
 procedure TMultiReadSingleWrite.BeginRead;
 begin
    AcquireSRWLockShared(FSRWLock);
 end;
 
+// TryBeginRead
+//
 function TMultiReadSingleWrite.TryBeginRead : Boolean;
 begin
    Result:=TryAcquireSRWLockShared(FSRWLock);
 end;
 
+// EndRead
+//
 procedure TMultiReadSingleWrite.EndRead;
 begin
    ReleaseSRWLockShared(FSRWLock)
 end;
 
+// BeginWrite
+//
 procedure TMultiReadSingleWrite.BeginWrite;
 begin
    AcquireSRWLockExclusive(FSRWLock);
 end;
 
+// TryBeginWrite
+//
 function TMultiReadSingleWrite.TryBeginWrite : Boolean;
 begin
    Result:=TryAcquireSRWLockExclusive(FSRWLock);
 end;
 
+// EndWrite
+//
 procedure TMultiReadSingleWrite.EndWrite;
 begin
    ReleaseSRWLockExclusive(FSRWLock)
 end;
 
+// State
+//
 function TMultiReadSingleWrite.State : TMultiReadSingleWriteState;
 begin
    // Attempt to guess the state of the lock without making assumptions
@@ -1630,56 +1651,6 @@ begin
       Result:=mrswWriteLock;
    end;
 end;
-{$else} // SRW_FALLBACK
-constructor TMultiReadSingleWrite.Create;
-begin
-   FLock := TdwsCriticalSection.Create;
-end;
-
-destructor TMultiReadSingleWrite.Destroy;
-begin
-   FLock.Free;
-end;
-
-procedure TMultiReadSingleWrite.BeginRead;
-begin
-   FLock.Enter;
-end;
-
-function TMultiReadSingleWrite.TryBeginRead : Boolean;
-begin
-   Result:=FLock.TryEnter;
-end;
-
-procedure TMultiReadSingleWrite.EndRead;
-begin
-   FLock.Leave;
-end;
-
-procedure TMultiReadSingleWrite.BeginWrite;
-begin
-   FLock.Enter;
-end;
-
-function TMultiReadSingleWrite.TryBeginWrite : Boolean;
-begin
-   Result:=FLock.TryEnter;
-end;
-
-procedure TMultiReadSingleWrite.EndWrite;
-begin
-   FLock.Leave;
-end;
-
-function TMultiReadSingleWrite.State : TMultiReadSingleWriteState;
-begin
-   if FLock.TryEnter then begin
-      FLock.Leave;
-      Result := mrswUnlocked;
-   end else Result := mrswWriteLock;
-end;
-
-{$endif}
 
 // ------------------
 // ------------------ TTimerTimeout ------------------
@@ -1757,5 +1728,10 @@ initialization
 // ------------------------------------------------------------------
 
    InitializeGetSystemMilliseconds;
+//   vTimeZoneLock := TMultiReadSingleWrite.Create;
+
+finalization
+
+//   FreeAndNil(vTimeZoneLock);
 
 end.
