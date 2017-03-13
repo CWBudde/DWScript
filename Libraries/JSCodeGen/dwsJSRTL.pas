@@ -458,7 +458,7 @@ const
       (Name : '$Div';
        Code : 'function $Div(a,b) { var r=a/b; return (r>=0)?Math.floor(r):Math.ceil(r) }'),
       (Name : '$Sign';
-       Code : 'function $Sign(v) { return v<0?-1:v>0?1:0 }'),
+       Code : 'function $Sign(v) { return v>0?1:v<0?-1:v===v?0:NaN }'),
       (Name : '$GetName';
        Code : 'function $GetName(obj) {'#13#10
               +#9'if (obj && obj.constructor && obj.constructor.toString) {'#13#10
@@ -1249,7 +1249,8 @@ begin
    FMagicCodeGens.AddObject('Copy', TJSStrCopyFuncExpr.Create);
    FMagicCodeGens.AddObject('MidStr', TJSStrCopyFuncExpr.Create);
    FMagicCodeGens.AddObject('Exp', TdwsExprGenericCodeGen.Create(['Math.exp', '(', 0, ')']));
-   FMagicCodeGens.AddObject('FloatToStr', TJSFloatToStrExpr.Create);
+   FMagicCodeGens.AddObject('FloatToStr$_Float_', TJSFloatToStrExpr.Create);
+   FMagicCodeGens.AddObject('FloatToStr$_Float_Integer_', TJSFloatToStrExpr.Create);
    FMagicCodeGens.AddObject('Floor', TdwsExprGenericCodeGen.Create(['Math.floor', '(', 0, ')']));
    FMagicCodeGens.AddObject('Format', TJSFormatExpr.Create);
    FMagicCodeGens.AddObject('HexToInt', TdwsExprGenericCodeGen.Create(['parseInt', '(', 0, ',','16)']));
@@ -1289,6 +1290,7 @@ begin
    FMagicCodeGens.AddObject('StrFind', TJSStrFindExpr.Create);
    FMagicCodeGens.AddObject('StrJoin', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.join', '(', 1, ')']));
    FMagicCodeGens.AddObject('StrMatches', TJSStrMatchesFuncExpr.Create);
+   FMagicCodeGens.AddObject('StrReplace', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.replace', '(', 1, ',', 2, ')']));
    FMagicCodeGens.AddObject('StrSplit', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.split', '(', 1, ')']));
    FMagicCodeGens.AddObject('StrToFloat', TdwsExprGenericCodeGen.Create(['parseFloat', '(', 0, ')']));
    FMagicCodeGens.AddObject('StrToInt', TdwsExprGenericCodeGen.Create(['parseInt', '(', 0, ',', '10)']));
@@ -1415,9 +1417,8 @@ begin
 
    if e.Args.Count=1 then begin
 
-      codeGen.WriteString('(');
-      codeGen.CompileNoWrap(e.Args[0] as TTypedExpr);
-      codeGen.WriteString(').toString()');
+      codeGen.Compile(e.Args[0] as TTypedExpr);
+      codeGen.WriteString('.toString()');
 
    end else if e.Args[1] is TConstIntExpr then begin
 
