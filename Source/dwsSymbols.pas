@@ -34,6 +34,7 @@ type
    IScriptObjInterface = interface;
    IScriptDynArray = interface;
    IScriptAssociativeArray = interface;
+   IExecutable = interface;
 
    PIScriptObj = ^IScriptObj;
 
@@ -57,6 +58,7 @@ type
    TdwsRuntimeMessageList = class;
    EScriptError = class;
    EScriptErrorClass = class of EScriptError;
+   TFuncSymbol = class;
 
    TdwsExprLocation = record
       Expr : TExprBase;
@@ -104,6 +106,44 @@ type
       property Debugger : IDebugger read GetDebugger write SetDebugger;
       property ExecutionObject : TdwsExecution read GetExecutionObject;
       property UserObject : TObject read GetUserObject write SetUserObject;
+   end;
+
+   ISpecializationContext = interface (IGetSelf)
+      ['{88E5D42F-5E6E-4DFC-B32E-258333B5A6E7}']
+      function Specialize(sym : TSymbol) : TSymbol;
+      function SpecializeType(typ : TTypeSymbol) : TTypeSymbol;
+      function SpecializeDataSymbol(ds : TDataSymbol) : TDataSymbol;
+      function SpecializeField(fld : TFieldSymbol) : TFieldSymbol;
+      procedure SpecializeTable(source, destination : TSymbolTable);
+      function SpecializeExecutable(const exec : IExecutable) : IExecutable;
+
+      procedure RegisterSpecialization(generic, specialized : TSymbol);
+
+      function  SpecializedObject(obj : TRefCountedObject) : TRefCountedObject;
+      procedure RegisterSpecializedObject(generic, specialized : TRefCountedObject);
+
+      procedure RegisterInternalType(sym : TSymbol);
+
+      procedure AddCompilerHint(const msg : String);
+      procedure AddCompilerError(const msg : String);
+      procedure AddCompilerErrorFmt(const msgFmt : String; const params : array of const); overload;
+      procedure AddCompilerErrorFmt(const aScriptPos : TScriptPos; const msgFmt : String;
+                                    const params : array of const); overload;
+
+      function Name : String;
+      function Parameters : TUnSortedSymbolTable;
+      function Values : TUnSortedSymbolTable;
+      function UnitSymbol : TSymbol;
+      function Msgs : TdwsCompileMessageList;
+      function Optimize : Boolean;
+
+      procedure EnterComposite(sym : TCompositeTypeSymbol);
+      procedure LeaveComposite;
+      function  CompositeSymbol : TCompositeTypeSymbol;
+
+      procedure EnterFunction(funcSym : TFuncSymbol);
+      procedure LeaveFunction;
+      function  FuncSymbol : TFuncSymbol;
    end;
 
    TRuntimeErrorMessage = class(TErrorMessage)
@@ -209,6 +249,8 @@ type
 
          procedure RaiseObjectNotInstantiated(exec : TdwsExecution);
          procedure RaiseObjectAlreadyDestroyed(exec : TdwsExecution);
+
+         function  Specialize(const context : ISpecializationContext) : TExprBase; virtual;
    end;
 
    // All functions callable from the script implement this interface
@@ -218,6 +260,7 @@ type
       procedure InitExpression(expr : TExprBase);
       function SubExpr(i : Integer) : TExprBase;
       function SubExprCount : Integer;
+      function Specialize(const context : ISpecializationContext) : IExecutable;
    end;
 
    IBooleanEvalable = interface (IExecutable)
@@ -254,55 +297,6 @@ type
    TdwsVisibility = (cvMagic, cvPrivate, cvProtected, cvPublic, cvPublished);
    TdwsVisibilities = set of TdwsVisibility;
 
-   TFuncSymbol = class;
-
-   TSpecializedSymbol = record
-      Generic : TSymbol;
-      Specialized : TSymbol;
-   end;
-
-   // TSpecializationContext
-   //
-   TSpecializationContext = class
-      private
-         FName : String;
-         FParameters, FValues : TUnSortedSymbolTable; // referred
-         FUnitSymbol : TSymbol;
-         FMsgs : TdwsCompileMessageList;
-         FScriptPos : TScriptPos;
-         FCompositeSymbol : TCompositeTypeSymbol;
-         FCompositeStack : TTightList;
-         FSpecializedSymbols : array of TSpecializedSymbol;
-
-      protected
-
-      public
-         constructor Create(const aName : String; aParams, aValues : TUnSortedSymbolTable;
-                            const aScriptPos : TScriptPos; aUnit : TSymbol; aMsgs : TdwsCompileMessageList);
-         destructor Destroy; override;
-
-         function Specialize(sym : TSymbol) : TSymbol;
-         function SpecializeType(typ : TTypeSymbol) : TTypeSymbol;
-
-         procedure RegisterSpecialization(generic, specialized : TSymbol);
-
-         procedure AddCompilerError(const msg : String);
-         procedure AddCompilerErrorFmt(const msgFmt : String; const params : array of const);
-
-         property Name : String read FName;
-         property Parameters : TUnSortedSymbolTable read FParameters;
-         property Values : TUnSortedSymbolTable read FValues;
-         property UnitSymbol : TSymbol read FUnitSymbol;
-         property Msgs : TdwsCompileMessageList read FMsgs;
-         property ScriptPos : TScriptPos read FScriptPos;
-
-         procedure EnterComposite(sym : TCompositeTypeSymbol);
-         procedure LeaveComposite;
-         property CompositeSymbol : TCompositeTypeSymbol read FCompositeSymbol;
-   end;
-
-   TSpecializationMethod = function (context : TSpecializationContext) : TTypeSymbol of object;
-
    // TSymbol
    //
    // Named item in the script
@@ -318,26 +312,27 @@ type
          function GetCaption : UnicodeString; virtual;
          function GetDescription : UnicodeString; virtual;
          function GetAsFuncSymbol : TFuncSymbol; virtual;
+         function GetIsGeneric : Boolean; virtual;
 
       public
          constructor Create(const aName : UnicodeString; aType : TTypeSymbol);
 
          procedure Initialize(const msgs : TdwsCompileMessageList); virtual;
          function  BaseType : TTypeSymbol; virtual;
-         procedure SetName(const newName : UnicodeString);
+         procedure SetName(const newName : UnicodeString; force : Boolean = False);
 
          class function IsBaseType : Boolean; virtual;
          function IsType : Boolean; virtual;
          function IsPointerType : Boolean; virtual;
          function AsFuncSymbol : TFuncSymbol; overload;
          function AsFuncSymbol(var funcSym : TFuncSymbol) : Boolean; overload;
-         function IsGeneric : Boolean; virtual;
+         function IsGeneric : Boolean;
 
          function QualifiedName : UnicodeString; virtual;
 
          function IsVisibleFor(const aVisibility : TdwsVisibility) : Boolean; virtual;
 
-         function Specialize(context : TSpecializationContext) : TSymbol; virtual;
+         function Specialize(const context : ISpecializationContext) : TSymbol; virtual;
 
          property Caption : UnicodeString read SafeGetCaption;
          property Description : UnicodeString read GetDescription;
@@ -458,6 +453,7 @@ type
    TUnSortedSymbolTable = class (TSymbolTable)
       public
          function FindLocal(const aName : UnicodeString; ofClass : TSymbolClass = nil) : TSymbol; override;
+         function IndexOf(sym : TSymbol) : Integer;
    end;
 
    // TConditionsSymbolTable
@@ -550,6 +546,8 @@ type
          function HasExternalName : Boolean;
          function IsWritable : Boolean; virtual;
 
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
+
          property ExternalName : UnicodeString read GetExternalName write FExternalName;
          property Level : SmallInt read FLevel write FLevel;
          property StackAddr: Integer read FStackAddr write FStackAddr;
@@ -568,7 +566,7 @@ type
 
       public
          function Clone : TParamSymbol; virtual;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function SameParam(other : TParamSymbol) : Boolean; virtual;
          function GetDescriptionPrefix : UnicodeString; virtual;
          function Semantics : TParamSymbolSemantics; virtual;
@@ -589,7 +587,7 @@ type
                             const data : TData);
 
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function SameParam(other : TParamSymbol) : Boolean; override;
 
          property DefaultValue : TData read FDefaultValue;
@@ -600,14 +598,14 @@ type
       public
          constructor Create(const Name: UnicodeString; Typ: TTypeSymbol);
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
    end;
 
    // lazy parameter: procedure P(lazy x: Integer)
    TLazyParamSymbol = class sealed (TParamSymbol)
       public
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function GetDescriptionPrefix : UnicodeString; override;
          function Semantics : TParamSymbolSemantics; override;
    end;
@@ -616,7 +614,7 @@ type
    TConstByRefParamSymbol = class sealed (TByRefParamSymbol)
       public
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function IsWritable : Boolean; override;
          function GetDescriptionPrefix : UnicodeString; override;
          function Semantics : TParamSymbolSemantics; override;
@@ -626,7 +624,7 @@ type
    TConstByValueParamSymbol = class (TParamSymbol)
       public
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function IsWritable : Boolean; override;
          function GetDescriptionPrefix : UnicodeString; override;
          function Semantics : TParamSymbolSemantics; override;
@@ -636,7 +634,7 @@ type
    TVarParamSymbol = class sealed (TByRefParamSymbol)
       public
          function Clone : TParamSymbol; override;
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
          function GetDescriptionPrefix : UnicodeString; override;
          function Semantics : TParamSymbolSemantics; override;
    end;
@@ -672,8 +670,8 @@ type
          function HasMetaSymbol : Boolean; virtual;
          function IsForwarded : Boolean; virtual;
 
-         function Specialize(context : TSpecializationContext) : TSymbol; override; final;
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; virtual;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override; final;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; virtual;
 
          property DeprecatedMessage : UnicodeString read FDeprecatedMessage write FDeprecatedMessage;
          property IsDeprecated : Boolean read GetIsDeprecated;
@@ -793,7 +791,7 @@ type
 
          function  DoIsOfType(typSym : TTypeSymbol) : Boolean; override;
 
-         procedure InternalSpecialize(destination : TFuncSymbol; context : TSpecializationContext);
+         procedure InternalSpecialize(destination : TFuncSymbol; const context : ISpecializationContext);
 
       public
          constructor Create(const name : UnicodeString; funcKind : TFuncKind; funcLevel : SmallInt);
@@ -869,7 +867,7 @@ type
          procedure SetSourcePosition(const val : TScriptPos); override;
 
       public
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          property SubExpr;
          property SubExprCount;
@@ -940,6 +938,8 @@ type
          function IsVisibleFor(const aVisibility : TdwsVisibility) : Boolean; override;
          function IsSameOverloadOf(other : TFuncSymbol) : Boolean; override;
 
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
+
          property StructSymbol : TCompositeTypeSymbol read FStructSymbol;
          property VMTIndex : Integer read FVMTIndex;
          property IsDefault : Boolean read GetIsDefault write SetIsDefault;
@@ -957,6 +957,8 @@ type
          property Visibility : TdwsVisibility read FVisibility;
    end;
 
+   TMethodSymbolClass = class of TMethodSymbol;
+
    TMethodSymbolArray = array of TMethodSymbol;
 
    TSourceMethodSymbol = class (TMethodSymbol)
@@ -969,8 +971,6 @@ type
          procedure SetSourcePosition(const val : TScriptPos); override;
 
       public
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
-
          property DeclarationPos : TScriptPos read FDeclarationPos write FDeclarationPos;
 
          property SubExpr;
@@ -989,7 +989,7 @@ type
 
          function ParamsDescription : UnicodeString; override;
 
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          property Alias : TFuncSymbol read FAlias write FAlias;
    end;
@@ -1039,6 +1039,8 @@ type
 
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          class function IsBaseType : Boolean; override;
+
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
    end;
 
    TBaseIntegerSymbol = class (TBaseSymbol)
@@ -1137,7 +1139,7 @@ type
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          function IsPointerType : Boolean; override;
          function SameType(typSym : TTypeSymbol) : Boolean; override;
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          class procedure SetInitDynamicArrayProc(const aProc : TInitDataProc);
    end;
@@ -1271,8 +1273,10 @@ type
 
          function GetMetaSymbol : TStructuredTypeMetaSymbol; virtual; abstract;
 
+         function GetIsGeneric : Boolean; override;
+
          procedure SpecializeMembers(destination : TCompositeTypeSymbol;
-                                     context : TSpecializationContext);
+                                     const context : ISpecializationContext);
 
       public
          constructor Create(const name : UnicodeString; aUnit : TSymbol);
@@ -1434,7 +1438,7 @@ type
          procedure InitData(const data : TData; offset : Integer); override;
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
 
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          property IsDynamic : Boolean read GetIsDynamic write SetIsDynamic;
          property IsImmutable : Boolean read GetIsImmutable write SetIsImmutable;
@@ -1463,7 +1467,7 @@ type
          function  IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          function  IsPointerType : Boolean; override;
 
-         function  SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function  SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          function CreateSelfParameter(methSym : TMethodSymbol) : TDataSymbol; override;
          function CreateAnonymousMethod(aFuncKind : TFuncKind; aVisibility : TdwsVisibility;
@@ -1506,7 +1510,7 @@ type
          function IsVisibleFor(const aVisibility : TdwsVisibility) : Boolean; override;
          function HasArrayIndices : Boolean;
 
-         function Specialize(context : TSpecializationContext) : TSymbol; override;
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
 
          property OwnerSymbol : TCompositeTypeSymbol read FOwnerSymbol;
          property Visibility : TdwsVisibility read FVisibility write FVisibility;
@@ -1656,7 +1660,7 @@ type
 
          class function VisibilityToString(visibility : TdwsVisibility) : UnicodeString; static;
 
-         function SpecializeType(context : TSpecializationContext) : TTypeSymbol; override;
+         function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
          function Parent : TClassSymbol; inline;
          property ScriptInstanceSize : Integer read FScriptInstanceSize;
@@ -2243,6 +2247,14 @@ begin
    RaiseScriptError(exec, EScriptError, RTE_ObjectAlreadyDestroyed);
 end;
 
+// Specialize
+//
+function TExprBase.Specialize(const context : ISpecializationContext) : TExprBase;
+begin
+   context.AddCompilerErrorFmt('Specialization of %s is not supported yet.', [Self.ClassName]);
+   Result := nil;
+end;
+
 // FuncSymQualifiedName
 //
 function TExprBase.FuncSymQualifiedName : UnicodeString;
@@ -2313,6 +2325,15 @@ begin
    Result:=nil;
 end;
 
+// GetIsGeneric
+//
+function TSymbol.GetIsGeneric : Boolean;
+begin
+   if FTyp <> nil then
+      Result := FTyp.IsGeneric
+   else Result := False;
+end;
+
 // AsFuncSymbol
 //
 function TSymbol.AsFuncSymbol : TFuncSymbol;
@@ -2326,7 +2347,9 @@ end;
 //
 function TSymbol.IsGeneric : Boolean;
 begin
-   Result := False;
+   if Self <> nil then
+      Result := GetIsGeneric
+   else Result := False;
 end;
 
 // AsFuncSymbol
@@ -2355,9 +2378,10 @@ end;
 
 // Specialize
 //
-function TSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
-   raise ECompileException.CreateFmt(CPE_SpecializationNotSupportedYet, [ClassName]);
+   context.AddCompilerErrorFmt(CPE_SpecializationNotSupportedYet, [ClassName]);
+   Result := nil;
 end;
 
 function TSymbol.BaseType: TTypeSymbol;
@@ -2367,9 +2391,9 @@ end;
 
 // SetName
 //
-procedure TSymbol.SetName(const newName : UnicodeString);
+procedure TSymbol.SetName(const newName : UnicodeString; force : Boolean = False);
 begin
-   Assert(FName='');
+   Assert(force or (FName=''));
    FName:=newName;
 end;
 
@@ -2566,17 +2590,22 @@ begin
             if Assigned(methSym.FExecutable) then
                methSym.FExecutable.InitSymbol(FMembers[i], msgs)
             else if not methSym.IsExternal then begin
-               msg:=msgs.AddCompilerErrorFmt((methSym as TSourceMethodSymbol).DeclarationPos, CPE_MethodNotImplemented,
-                                             [methSym.Name, methSym.StructSymbol.Caption]);
-               afa:=TdwsAFAAddImplementation.Create(msg, AFA_AddImplementation);
-               buf:=methSym.GetDescription;
-               FastStringReplace(buf, '()', ' ');
-               afa.Text:= #13#10
-                         +TrimRight(buf)
-                         +';'#13#10'begin'#13#10#9'|'#13#10'end;'#13#10;
-               k:=Pos(methSym.Name, afa.Text);
-               afa.Text:=Copy(afa.Text, 1, k-1)+methSym.StructSymbol.Name+'.'
-                        +Copy(afa.Text, k, MaxInt);
+               if methSym is TSourceMethodSymbol then begin
+                  msg:=msgs.AddCompilerErrorFmt(TSourceMethodSymbol(methSym).DeclarationPos, CPE_MethodNotImplemented,
+                                                [methSym.Name, methSym.StructSymbol.Caption]);
+                  afa:=TdwsAFAAddImplementation.Create(msg, AFA_AddImplementation);
+                  buf:=methSym.GetDescription;
+                  FastStringReplace(buf, '()', ' ');
+                  afa.Text:= #13#10
+                            +TrimRight(buf)
+                            +';'#13#10'begin'#13#10#9'|'#13#10'end;'#13#10;
+                  k:=Pos(methSym.Name, afa.Text);
+                  afa.Text:=Copy(afa.Text, 1, k-1)+methSym.StructSymbol.Name+'.'
+                           +Copy(afa.Text, k, MaxInt);
+               end else begin
+                  msgs.AddCompilerErrorFmt(cNullPos, CPE_MethodNotImplemented,
+                                           [methSym.Name, methSym.StructSymbol.Caption]);
+               end;
             end;
          end;
       end;
@@ -2636,12 +2665,13 @@ end;
 // SpecializeMembers
 //
 procedure TCompositeTypeSymbol.SpecializeMembers(destination : TCompositeTypeSymbol;
-                                                 context : TSpecializationContext);
+                                                 const context : ISpecializationContext);
 var
    i : Integer;
    member : TSymbol;
    specialized : TSymbol;
    field, specializedField : TFieldSymbol;
+   fieldType : TTypeSymbol;
    specializedProp : TPropertySymbol;
    firstPropertyIndex : Integer;
 begin
@@ -2650,14 +2680,16 @@ begin
       member := Members[i];
       if member is TFieldSymbol then begin
          field := TFieldSymbol(member);
-         specializedField := TFieldSymbol.Create(field.Name, context.SpecializeType(field.Typ), field.Visibility);
+         fieldType := context.SpecializeType(field.Typ);
+         specializedField := TFieldSymbol.Create(field.Name, fieldType, field.Visibility);
          destination.AddField(specializedField);
          context.RegisterSpecialization(field, specializedField);
       end else if member is TMethodSymbol then begin
-         specialized := member.Specialize(context);
+         specialized := TMethodSymbol(member).SpecializeType(context);
          if specialized <> nil then begin
             destination.AddMethod(specialized as TMethodSymbol);
             context.RegisterSpecialization(member, specialized);
+            specialized.IncRefCount;
          end;
       end else if member is TPropertySymbol then begin
          // specialize properties in a separate pass as they refer other members
@@ -2674,6 +2706,13 @@ begin
          destination.AddProperty(specializedProp);
       end;
    end;
+end;
+
+// GetIsGeneric
+//
+function TCompositeTypeSymbol.GetIsGeneric : Boolean;
+begin
+   Result := False; // TODO
 end;
 
 // ------------------
@@ -2952,13 +2991,14 @@ end;
 
 // SpecializeType
 //
-function TRecordSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TRecordSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 var
    specializedRecord : TRecordSymbol;
 begin
    Assert(rsfFullyDefined in FFlags);
 
    specializedRecord := TRecordSymbol.Create(context.Name, context.UnitSymbol);
+
    context.EnterComposite(specializedRecord);
    try
       SpecializeMembers(specializedRecord, context);
@@ -3127,7 +3167,7 @@ end;
 
 // SpecializeType
 //
-function TInterfaceSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TInterfaceSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 var
    specializedInterface : TInterfaceSymbol;
 begin
@@ -3744,12 +3784,12 @@ end;
 
 // InternalSpecialize
 //
-procedure TFuncSymbol.InternalSpecialize(destination : TFuncSymbol; context : TSpecializationContext);
+procedure TFuncSymbol.InternalSpecialize(destination : TFuncSymbol; const context : ISpecializationContext);
 var
-   i : Integer;
+   i, skip : Integer;
+   specializedParam : TSymbol;
+   param : TParamSymbol;
 begin
-   if FExecutable <> nil then
-      context.AddCompilerError('Executable functions cannot be specialized yet');
    if FConditions <> nil then
       context.AddCompilerError('Functions with conditions cannot be specialized yet');
 
@@ -3762,10 +3802,36 @@ begin
 
    destination.FExternalConvention := FExternalConvention;
 
+   // internal paramps are all pre-specialized
+   // but Result is handled separately
+   if Self.Result <> nil then
+      skip := 1
+   else skip := 0;
+   Assert(destination.InternalParams.Count = InternalParams.Count-skip);
+   for i := 0 to InternalParams.Count-1-skip do begin
+      specializedParam := destination.InternalParams[i];
+      context.RegisterSpecialization(InternalParams[i], specializedParam);
+   end;
+
+   // some params can be pre-specialized
+   Assert(destination.Params.Count <= Params.Count);
+   for i := 0 to destination.Params.Count-1 do begin
+      specializedParam := destination.Params[i];
+      context.RegisterSpecialization(Params[i], specializedParam);
+   end;
+
+   // specialize reamining parameters
+   for i := destination.Params.Count to Params.Count-1 do begin
+      param := Params[i];
+      specializedParam := param.Specialize(context);
+      destination.Params.AddSymbol(specializedParam);
+      context.RegisterSpecialization(param, specializedParam);
+   end;
+
    destination.Typ := context.SpecializeType(typ);
-   Assert(destination.InternalParams.Count = InternalParams.Count);
-   for i := 0 to Params.Count-1 do
-      destination.Params.AddSymbol(Params[i].Specialize(context));
+   context.RegisterSpecialization(Self.Result, destination.Result);
+
+   destination.Executable := context.SpecializeExecutable(FExecutable);
 end;
 
 // IsType
@@ -3920,14 +3986,17 @@ end;
 
 // SpecializeType
 //
-function TSourceFuncSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TSourceFuncSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 var
    specializedFunc : TSourceFuncSymbol;
 begin
    specializedFunc := TSourceFuncSymbol.Create(context.Name, Kind, Level);
+
    specializedFunc.FSourcePosition := FSourcePosition;
    InternalSpecialize(specializedFunc, context);
    Result := specializedFunc;
+
+   context.RegisterInternalType(Result);
 end;
 
 // ------------------
@@ -4261,6 +4330,27 @@ begin
            and (IsClassMethod=TMethodSymbol(other).IsClassMethod);
 end;
 
+// SpecializeType
+//
+function TMethodSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
+var
+   specializedMethod : TMethodSymbol;
+begin
+   specializedMethod := TMethodSymbolClass(ClassType).Create(
+      Name, Kind, context.CompositeSymbol,
+      Visibility, IsClassMethod, Level
+   );
+
+   if IsStatic then
+      specializedMethod.SetIsStatic;
+   if IsStateless then
+      specializedMethod.SetIsStateless(True);
+   InternalSpecialize(specializedMethod, context);
+   Result := specializedMethod;
+
+   context.RegisterInternalType(Result);
+end;
+
 // SetOverride
 //
 procedure TMethodSymbol.SetOverride(meth: TMethodSymbol);
@@ -4297,21 +4387,6 @@ end;
 procedure TSourceMethodSymbol.SetSourcePosition(const val : TScriptPos);
 begin
    FSourcePosition:=val;
-end;
-
-// SpecializeType
-//
-function TSourceMethodSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
-var
-   specializedMethod : TSourceMethodSymbol;
-begin
-   if not (IsExternal or IsAbstract or (FStructSymbol is TInterfaceSymbol)) then
-      context.AddCompilerError('Only external or abstract methods can be specialized right now');
-
-   specializedMethod := TSourceMethodSymbol.Create(Name, Kind, context.CompositeSymbol,
-                                                   Visibility, IsClassMethod, Level);
-   InternalSpecialize(specializedMethod, context);
-   Result := specializedMethod;
 end;
 
 // ------------------
@@ -4420,7 +4495,7 @@ end;
 
 // Specialize
 //
-function TPropertySymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TPropertySymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 var
    i : Integer;
    specializedArrayIndices : TParamsSymbolTable;
@@ -5146,7 +5221,7 @@ end;
 
 // SpecializeType
 //
-function TClassSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TClassSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 var
    specializedClass : TClassSymbol;
 begin
@@ -5157,8 +5232,6 @@ begin
    if not (csfExternal in FFlags) then begin
       if Parent.IsGeneric then
          context.AddCompilerError('Subclasses of a generic class connt be specialized right now')
-      else if csfHasOwnMethods in FFlags then
-         context.AddCompilerError('Classes with methods cannot be specialized right now')
       else if FOperators.Count > 0 then
          context.AddCompilerError('Classes with operators cannot be specialized right now');
    end;
@@ -5170,6 +5243,7 @@ begin
       context.AddCompilerError('Specialization of classes with custom destructor not yet supported');
 
    specializedClass := TClassSymbol.Create(context.Name, context.UnitSymbol);
+
    context.EnterComposite(specializedClass);
    try
       specializedClass.FFlags := FFlags - [csfInitialized];
@@ -5180,7 +5254,8 @@ begin
       else specializedClass.FExternalName := FExternalName;
 
       if Parent <> nil then
-         specializedClass.InheritFrom( context.Specialize(Parent) as TClassSymbol );
+         specializedClass.InheritFrom( Parent );
+//         specializedClass.InheritFrom( context.Specialize(Parent) as TClassSymbol );  TODO
 
       SpecializeMembers(specializedClass, context);
       specializedClass.Initialize(context.Msgs);
@@ -5334,6 +5409,13 @@ end;
 class function TBaseSymbol.IsBaseType : Boolean;
 begin
    Result:=True;
+end;
+
+// SpecializeType
+//
+function TBaseSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
+begin
+   Result := Self;
 end;
 
 // ------------------
@@ -5594,6 +5676,16 @@ begin
    Result := True;
 end;
 
+// Specialize
+//
+function TDataSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
+begin
+   if ClassType <> TDataSymbol then
+      Exit(inherited Specialize(context));
+
+   Result := TDataSymbol.Create(Name, context.SpecializeType(Typ));
+end;
+
 // ------------------
 // ------------------ TParamSymbol ------------------
 // ------------------
@@ -5632,7 +5724,7 @@ end;
 
 // Specialize
 //
-function TParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -5671,7 +5763,7 @@ end;
 
 // Specialize
 //
-function TParamSymbolWithDefaultValue.Specialize(context : TSpecializationContext) : TSymbol;
+function TParamSymbolWithDefaultValue.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TParamSymbolWithDefaultValue.Create(Name, context.SpecializeType(Typ), FDefaultValue);
 end;
@@ -5720,7 +5812,7 @@ end;
 
 // Specialize
 //
-function TByRefParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TByRefParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TByRefParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -5738,7 +5830,7 @@ end;
 
 // Specialize
 //
-function TLazyParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TLazyParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TLazyParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -5770,7 +5862,7 @@ end;
 
 // Specialize
 //
-function TConstByRefParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TConstByRefParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TConstByRefParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -5809,7 +5901,7 @@ end;
 
 // Specialize
 //
-function TConstByValueParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TConstByValueParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TConstByValueParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -5848,7 +5940,7 @@ end;
 
 // Specialize
 //
-function TVarParamSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TVarParamSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := TVarParamSymbol.Create(Name, context.SpecializeType(Typ));
 end;
@@ -6562,6 +6654,13 @@ begin
       Result:=nil;
 end;
 
+// IndexOf
+//
+function TUnSortedSymbolTable.IndexOf(sym : TSymbol) : Integer;
+begin
+   Result := FSymbols.IndexOf(sym);
+end;
+
 // ------------------
 // ------------------ TExternalVarSymbol ------------------
 // ------------------
@@ -6807,9 +6906,10 @@ end;
 
 // SpecializeType
 //
-function TDynamicArraySymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TDynamicArraySymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 begin
-   Result := TDynamicArraySymbol.Create(context.Name, context.SpecializeType(Typ), context.SpecializeType(IndexType));
+   Result := TDynamicArraySymbol.Create(Name, context.SpecializeType(Typ), context.SpecializeType(IndexType));
+   context.RegisterInternalType(Result);
 end;
 
 // SetInitDynamicArrayProc
@@ -7326,16 +7426,17 @@ end;
 
 // Specialize
 //
-function TTypeSymbol.Specialize(context : TSpecializationContext) : TSymbol;
+function TTypeSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
    Result := SpecializeType(context);
 end;
 
 // SpecializeType
 //
-function TTypeSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TTypeSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 begin
-   Result := inherited Specialize(context) as TTypeSymbol;
+   context.AddCompilerErrorFmt(CPE_SpecializationNotSupportedYet, [ClassName]);
+   Result := Self;
 end;
 
 // IsType
@@ -8094,7 +8195,7 @@ end;
 
 // SpecializeType
 //
-function TAliasMethodSymbol.SpecializeType(context : TSpecializationContext) : TTypeSymbol;
+function TAliasMethodSymbol.SpecializeType(const context : ISpecializationContext) : TTypeSymbol;
 begin
    context.AddCompilerErrorFmt(CPE_SpecializationNotSupportedYet, [ClassName]);
    Result := Self;
@@ -8120,109 +8221,6 @@ begin
       end;
    end;
    Result:=False;
-end;
-
-// ------------------
-// ------------------ TSpecializationContext ------------------
-// ------------------
-
-// Create
-//
-constructor TSpecializationContext.Create(
-      const aName : String; aParams, aValues : TUnSortedSymbolTable;
-      const aScriptPos : TScriptPos; aUnit : TSymbol; aMsgs : TdwsCompileMessageList);
-begin
-   inherited Create;
-   FName := aName;
-   Assert(aParams.Count = aValues.Count);
-   FParameters := aParams;
-   FValues := aValues;
-   FUnitSymbol := aUnit;
-   FMsgs := aMsgs;
-end;
-
-// Destroy
-//
-destructor TSpecializationContext.Destroy;
-begin
-   Assert(FCompositeStack.Count=0);
-   inherited;
-end;
-
-// Specialize
-//
-function TSpecializationContext.Specialize(sym : TSymbol) : TSymbol;
-var
-   i : Integer;
-begin
-   if sym = nil then Exit(nil);
-   for i := 0 to FParameters.Count-1 do
-      if FParameters.Symbols[i] = sym then
-         Exit(FValues.Symbols[i] as TTypeSymbol);
-   for i := 0 to High(FSpecializedSymbols) do
-      if FSpecializedSymbols[i].Generic = sym then
-         Exit(FSpecializedSymbols[i].Specialized);
-   if sym.IsGeneric then
-      AddCompilerErrorFmt(CPE_SpecializationNotSupportedYet, [sym.ClassName]);
-   Result := sym;
-end;
-
-// SpecializeType
-//
-function TSpecializationContext.SpecializeType(typ : TTypeSymbol) : TTypeSymbol;
-var
-   sym : TSymbol;
-begin
-   sym := Specialize(typ);
-   if sym <> nil then
-      Result := sym as TTypeSymbol
-   else Result := nil;
-end;
-
-// RegisterSpecialization
-//
-procedure TSpecializationContext.RegisterSpecialization(generic, specialized : TSymbol);
-var
-   n : Integer;
-begin
-   n := Length(FSpecializedSymbols);
-   SetLength(FSpecializedSymbols, n+1);
-   FSpecializedSymbols[n].Generic := generic;
-   FSpecializedSymbols[n].Specialized := specialized;
-end;
-
-// AddCompilerError
-//
-procedure TSpecializationContext.AddCompilerError(const msg : String);
-begin
-   FMsgs.AddCompilerError(ScriptPos, msg);
-end;
-
-// AddCompilerErrorFmt
-//
-procedure TSpecializationContext.AddCompilerErrorFmt(const msgFmt : String; const params : array of const);
-begin
-   FMsgs.AddCompilerErrorFmt(ScriptPos, msgFmt, params);
-end;
-
-// EnterComposite
-//
-procedure TSpecializationContext.EnterComposite(sym : TCompositeTypeSymbol);
-begin
-   FCompositeStack.Add(FCompositeSymbol);
-   FCompositeSymbol := sym;
-end;
-
-// LeaveComposite
-//
-procedure TSpecializationContext.LeaveComposite;
-var
-   n : Integer;
-begin
-   n := FCompositeStack.Count-1;
-   Assert(n >= 0);
-   FCompositeSymbol := TCompositeTypeSymbol(FCompositeStack.List[n]);
-   FCompositeStack.Delete(n);
 end;
 
 end.

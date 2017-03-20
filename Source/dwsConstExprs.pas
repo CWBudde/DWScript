@@ -58,6 +58,8 @@ type
          function SameValueAs(otherConst : TConstExpr) : Boolean;
          function SameDataExpr(expr : TTypedExpr) : Boolean; override;
 
+         function  SpecializeDataExpr(const context : ISpecializationContext) : TDataExpr; override;
+
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
          property Data : TData read FData;
 
@@ -185,7 +187,7 @@ type
          procedure EvalToTData(exec : TdwsExecution; var result : TData; offset : Integer);
          function EvalAsVarRecArray(exec : TdwsExecution) : TVarRecArrayContainer;
 
-         function Optimize(context : TdwsCompilerContext; exec : TdwsExecution) : TProgramExpr; override;
+         function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
          function IsWritable : Boolean; override;
    end;
 
@@ -197,7 +199,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsConvExprs;
+uses dwsConvExprs, dwsSpecializationContext;
 
 // ------------------
 // ------------------ TConstExpr ------------------
@@ -322,6 +324,14 @@ end;
 function TConstExpr.SameDataExpr(expr : TTypedExpr) : Boolean;
 begin
    Result:=(ClassType=expr.ClassType) and SameValueAs(TConstExpr(expr));
+end;
+
+// SpecializeDataExpr
+//
+function TConstExpr.SpecializeDataExpr(const context : ISpecializationContext) : TDataExpr;
+begin
+   Result := CreateTyped(CompilerContextFromSpecialization(context),
+                         context.SpecializeType(Typ), Data, 0);
 end;
 
 // GetDataPtr
@@ -791,7 +801,7 @@ end;
 
 // Optimize
 //
-function TArrayConstantExpr.Optimize(context : TdwsCompilerContext; exec : TdwsExecution) : TProgramExpr;
+function TArrayConstantExpr.Optimize(context : TdwsCompilerContext) : TProgramExpr;
 var
    i : Integer;
    expr : TTypedExpr;
@@ -799,7 +809,7 @@ begin
    Result:=Self;
    for i:=0 to FElementExprs.Count-1 do begin
       expr:=TTypedExpr(FElementExprs.List[i]);
-      FElementExprs.List[i]:=expr.Optimize(context, exec);
+      FElementExprs.List[i]:=expr.Optimize(context);
    end;
 end;
 

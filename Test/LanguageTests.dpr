@@ -72,7 +72,10 @@ uses
   dwsContextMap in '..\Source\dwsContextMap.pas',
   dwsUnifiedConstants in '..\Source\dwsUnifiedConstants.pas',
   USymbolDictionaryTests in 'USymbolDictionaryTests.pas',
-  dwsGenericSymbols in '..\Source\dwsGenericSymbols.pas';
+  dwsGenericSymbols in '..\Source\dwsGenericSymbols.pas',
+  dwsSpecializationContext in '..\Source\dwsSpecializationContext.pas',
+  dwsGenericExprs in '..\Source\dwsGenericExprs.pas',
+  dwsSpecializationMap in '..\Source\dwsSpecializationMap.pas';
 
 {$R *.res}
 
@@ -83,11 +86,11 @@ var
    procAffinity, systAffinity : DWORD;
 {$IFEND}
 begin
+   ReportMemoryLeaksOnShutdown:=True;
    DirectSet8087CW($133F);
    GetProcessAffinityMask(GetCurrentProcess, procAffinity, systAffinity);
    SetProcessAffinityMask(GetCurrentProcess, systAffinity);
    SetDecimalSeparator('.');
-   ReportMemoryLeaksOnShutdown:=True;
    Application.Initialize;
    GUITestRunner.RunRegisteredTests;
 end.

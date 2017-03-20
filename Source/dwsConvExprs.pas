@@ -35,7 +35,6 @@ type
    TConvExpr = class(TUnaryOpExpr)
       public
          class function WrapWithConvCast(context : TdwsCompilerContext; const scriptPos : TScriptPos;
-                                         exec : TdwsExecution;
                                          toTyp : TTypeSymbol; expr : TTypedExpr;
                                          const reportError : UnicodeString) : TTypedExpr; static;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
@@ -67,7 +66,7 @@ type
    // Integer(ordinal x)
    TConvOrdToIntegerExpr = class (TUnaryOpIntExpr)
      function EvalAsInteger(exec : TdwsExecution) : Int64; override;
-     function Optimize(context : TdwsCompilerContext; exec : TdwsExecution) : TProgramExpr; override;
+     function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
    end;
 
    // String(variant x)
@@ -222,7 +221,6 @@ uses dwsCoreExprs;
 // WrapWithConvCast
 //
 class function TConvExpr.WrapWithConvCast(context : TdwsCompilerContext; const scriptPos : TScriptPos;
-                                          exec : TdwsExecution;
                                           toTyp : TTypeSymbol; expr : TTypedExpr;
                                           const reportError : UnicodeString) : TTypedExpr;
 
@@ -273,7 +271,7 @@ begin
          end else if arrayConst.Typ.Typ.IsOfType(toTyp.Typ) then begin
             staticArrayToSetOf:=TConvStaticArrayToSetOfExpr.Create(scriptPos, arrayConst, TSetOfSymbol(toTyp));
             Assert(staticArrayToSetOf.IsConstant);
-            Result:=staticArrayToSetOf.ToConstExpr(exec);
+            Result:=staticArrayToSetOf.ToConstExpr(context.Execution);
             staticArrayToSetOf.Free;
          end;
       end;
@@ -311,7 +309,8 @@ begin
    end;
    // Look if Types are compatible
    if not toTyp.IsCompatible(Result.Typ) then
-      ReportIncompatibleTypes;
+      if not (toTyp.IsGeneric or Result.Typ.IsGeneric) then
+         ReportIncompatibleTypes;
 end;
 
 // EvalAsVariant
@@ -392,7 +391,7 @@ end;
 
 // Optimize
 //
-function TConvOrdToIntegerExpr.Optimize(context : TdwsCompilerContext; exec : TdwsExecution) : TProgramExpr;
+function TConvOrdToIntegerExpr.Optimize(context : TdwsCompilerContext) : TProgramExpr;
 begin
    // this can happen when an integer was qualifed as a type
    if Expr.ClassType=TConstIntExpr then begin
