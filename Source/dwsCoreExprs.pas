@@ -141,16 +141,19 @@ type
 
    TVarParentExpr = class(TVarExpr)
       protected
+         FScriptPos : TScriptPos;
          FLevel: Integer;
 
       public
-         constructor Create(dataSym : TDataSymbol);
+         constructor Create(const aScriptPos: TScriptPos; dataSym : TDataSymbol);
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
          procedure GetRelativeDataPtr(exec : TdwsExecution; var result : IDataContext); override;
 
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function EvalAsFloat(exec : TdwsExecution) : Double; override;
+
+         function ScriptPos : TScriptPos; override;
 
          property Level : Integer read FLevel;
    end;
@@ -2081,9 +2084,13 @@ type
 
          procedure EvalNoResult(exec : TdwsExecution); override;
 
+         function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+
          property CondExpr : TTypedExpr read FCondExpr write FCondExpr;
          property LoopExpr : TProgramExpr read FLoopExpr write FLoopExpr;
    end;
+
+   TLoopExprClass = class of TLoopExpr;
 
    // while FCondExpr do FLoopExpr
    TWhileExpr = class(TLoopExpr)
@@ -2796,10 +2803,11 @@ end;
 
 // Create
 //
-constructor TVarParentExpr.Create(dataSym : TDataSymbol);
+constructor TVarParentExpr.Create(const aScriptPos: TScriptPos; dataSym : TDataSymbol);
 begin
-   inherited;
-   FLevel:=dataSym.Level;
+   inherited Create(dataSym);
+   FLevel := dataSym.Level;
+   FScriptPos := aScriptPos;
 end;
 
 // GetDataPtr
@@ -2835,6 +2843,13 @@ end;
 function TVarParentExpr.EvalAsFloat(exec : TdwsExecution) : Double;
 begin
    Result:=exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr];
+end;
+
+// ScriptPos
+//
+function TVarParentExpr.ScriptPos : TScriptPos;
+begin
+   Result := FScriptPos;
 end;
 
 // ------------------
@@ -8168,6 +8183,18 @@ begin
          end;
       end;
    until False;
+end;
+
+// SpecializeProgramExpr
+//
+function TLoopExpr.SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr;
+var
+   specialized : TLoopExpr;
+begin
+   specialized := TLoopExprClass(ClassType).Create(ScriptPos);
+   specialized.CondExpr := CondExpr.SpecializeTypedExpr(context);
+   specialized.LoopExpr := LoopExpr.SpecializeProgramExpr(context);
+   Result := specialized;
 end;
 
 // GetSubExpr
