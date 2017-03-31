@@ -476,6 +476,7 @@ type
          function ReadExpr(expecting : TTypeSymbol = nil) : TTypedExpr;
          function ReadExprAdd(expecting : TTypeSymbol = nil; leftExpr : TTypedExpr = nil) : TTypedExpr;
          function ReadExprMult(expecting : TTypeSymbol = nil; leftExpr : TTypedExpr = nil) : TTypedExpr;
+         function ReadBooleanExpr : TTypedExpr;
          function ReadExprIn(var left : TTypedExpr) : TTypedExpr;
          function ReadExprInConditions(var left : TTypedExpr) : TInOpExpr;
          function ReadExternalVar(sym : TExternalVarSymbol; isWrite : Boolean) : TFuncExpr;
@@ -756,7 +757,7 @@ type
                                           aLeft, aRight : TTypedExpr) : TTypedExpr;
          function CreateAssignOperatorExpr(token : TTokenType; const scriptPos : TScriptPos;
                                            exec : TdwsExecution;
-                                           aLeft, aRight : TTypedExpr) : TAssignExpr;
+                                           aLeft : TDataExpr; aRight : TTypedExpr) : TProgramExpr;
 
          procedure DoSectionChanged;
          procedure DoTokenizerEndSourceFile(sourceFile : TSourceFile);
@@ -1395,20 +1396,10 @@ end;
 // GetFuncExpr
 //
 function TdwsCompiler.GetFuncExpr(funcSym : TFuncSymbol; codeExpr : TTypedExpr = nil) : TFuncExprBase;
-var
-   magicFuncSym : TMagicFuncSymbol;
 begin
-   if (codeExpr=nil) and funcSym.IsType then
-      FMsgs.AddCompilerError(FTok.HotPos, CPE_FunctionMethodExpected);
-
    if codeExpr=nil then begin
 
-      if funcSym.InheritsFrom(TMagicFuncSymbol) then begin
-
-         magicFuncSym:=TMagicFuncSymbol(funcSym);
-         Result := TMagicFuncExpr.CreateMagicFuncExpr(FCompilerContext, FTok.HotPos, magicFuncSym);
-
-      end else Result:=TFuncSimpleExpr.Create(FCompilerContext, FTok.HotPos, funcSym);
+      Result := CreateSimpleFuncExpr(FCompilerContext, FTok.HotPos, funcSym);
 
    end else begin
 
@@ -1425,16 +1416,7 @@ end;
 function TdwsCompiler.GetMethodExpr(meth: TMethodSymbol; Expr: TTypedExpr; RefKind: TRefKind;
                                     const scriptPos : TScriptPos; options : TCreateFunctionOptions) : TFuncExprBase;
 begin
-   if meth is TAliasMethodSymbol then begin
-
-      Result:=GetFuncExpr(TAliasMethodSymbol(meth).Alias);
-      Result.AddArg(expr);
-
-   end else begin
-
-      Result:=CreateMethodExpr(FCompilerContext, meth, Expr, RefKind, scriptPos, options);
-
-   end;
+   Result:=CreateMethodExpr(FCompilerContext, meth, Expr, RefKind, scriptPos, options);
 end;
 
 
@@ -2203,7 +2185,7 @@ end;
 //
 function TdwsCompiler.Optimize : Boolean;
 begin
-   Result:=(coOptimize in FOptions) and (not FMsgs.HasErrors);
+   Result := FCompilerContext.Optimize;
 end;
 
 // ReadRootBlock
@@ -4158,10 +4140,13 @@ var
    usesSym : TFuncSymbol;
    fromTable : TSymbolTable;
    typ : TTypeSymbol;
+   expectedNbParams : Integer;
 begin
    opPos:=FTok.HotPos;
    tt:=FTok.TestDeleteAny([ttPLUS, ttMINUS, ttTIMES, ttDIVIDE, ttMOD, ttDIV,
-                           ttOR, ttAND, ttXOR, ttIN, ttIMPLIES, ttSHL, ttSHR, ttSAR,
+                           ttOR, ttAND, ttXOR,
+                           ttIN, ttIMPLIES, ttIMPLICIT,
+                           ttSHL, ttSHR, ttSAR,
                            ttEQ, ttNOTEQ, ttGTR, ttGTREQ, ttLESS, ttLESSEQ,
                            ttLESSLESS, ttGTRGTR, ttCARET]);
    if tt=ttNone then
@@ -4180,9 +4165,15 @@ begin
       if not FTok.TestDelete(ttBRIGHT) then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_BrackRightExpected);
 
-      if Length(Result.Params)<>2 then begin
-         FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_BadNumberOfParameters, [2, Length(Result.Params)]);
-         Result.Token:=ttNone;  // nerf the operator
+      case tt of
+         ttIMPLICIT : expectedNbParams := 1;
+      else
+         expectedNbParams := 2;
+      end;
+      if Length(Result.Params) <> expectedNbParams then begin
+         FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_BadNumberOfParameters,
+                                   [expectedNbParams, Length(Result.Params)]);
+         Result.Token := ttNone;  // nerf the operator
       end;
 
       if not FTok.TestDelete(ttCOLON) then
@@ -4224,15 +4215,15 @@ begin
 
          if (usesSym.typ=nil) or not usesSym.Typ.IsOfType(Result.Typ) then
             FMsgs.AddCompilerErrorFmt(usesPos, CPE_BadResultType, [Result.Typ.Caption])
-         else if usesSym.Params.Count<>2 then
-            FMsgs.AddCompilerErrorFmt(usesPos, CPE_BadNumberOfParameters, [2, usesSym.Params.Count])
+         else if usesSym.Params.Count <> expectedNbParams then
+            FMsgs.AddCompilerErrorFmt(usesPos, CPE_BadNumberOfParameters, [expectedNbParams, usesSym.Params.Count])
          else if not usesSym.Params[0].Typ.IsOfType(Result.Params[0]) then
             FMsgs.AddCompilerErrorFmt(usesPos, CPE_BadParameterType, [0, Result.Params[0].Caption, usesSym.Params[0].Typ.Caption])
          else if usesSym.Params[0].ClassType=TVarParamSymbol then
             FMsgs.AddCompilerErrorFmt(usesPos, CPE_VarParameterForbidden, [0])
-         else if not usesSym.Params[1].Typ.IsOfType(Result.Params[1]) then
+         else if (expectedNbParams > 1) and not usesSym.Params[1].Typ.IsOfType(Result.Params[1]) then
             FMsgs.AddCompilerErrorFmt(usesPos, CPE_BadParameterType, [1, Result.Params[1].Caption, usesSym.Params[1].Typ.Caption])
-         else if usesSym.Params[1].ClassType=TVarParamSymbol then
+         else if (expectedNbParams > 1) and (usesSym.Params[1].ClassType=TVarParamSymbol) then
             FMsgs.AddCompilerErrorFmt(usesPos, CPE_VarParameterForbidden, [1])
          else Result.UsesSym:=usesSym;
       end;
@@ -5576,14 +5567,12 @@ begin
                if FTok.TestDelete(ttASSIGN) then begin
                   hotPos:=FTok.HotPos;
                   valueExpr:=ReadExpr(baseType.Typ);
+                  if valueExpr.Typ <> baseType.Typ then
+                     FCompilerContext.WrapWithImplicitCast(baseType.Typ, hotPos, valueExpr);
+
                   if not baseType.Typ.IsCompatible(valueExpr.Typ) then begin
-                     if     valueExpr.Typ.IsOfType(FCompilerContext.TypInteger)
-                        and baseType.Typ.IsOfType(FCompilerContext.TypFloat) then begin
-                        valueExpr:=TConvIntToFloatExpr.Create(FCompilerContext, valueExpr)
-                     end else begin
-                        IncompatibleTypes(hotPos, CPE_AssignIncompatibleTypes,
-                                          valueExpr.Typ, baseType.Typ);
-                     end;
+                     IncompatibleTypes(hotPos, CPE_AssignIncompatibleTypes,
+                                       valueExpr.Typ, baseType.Typ);
                   end;
 
                   if baseType.Typ.Size=1 then
@@ -5648,6 +5637,9 @@ begin
       hotPos := FTok.HotPos;
       keyExpr := ReadExpr;
 
+      if keyExpr.Typ <> baseType.KeyType then
+         FCompilerContext.WrapWithImplicitCast(baseType.KeyType, hotPos, keyExpr);
+
       if    (keyExpr.Typ=nil)
          or not (   (keyExpr.Typ.IsCompatible(baseType.KeyType))
                  or keyExpr.Typ.IsOfType(FCompilerContext.TypVariant)) then
@@ -5659,15 +5651,14 @@ begin
 
       if FTok.TestDelete(ttASSIGN) then begin
 
-         valueExpr:=ReadExpr(baseType.Typ);
+         hotPos := FTok.HotPos;
+         valueExpr := ReadExpr(baseType.Typ);
+         if valueExpr.Typ <> baseType.Typ then
+            FCompilerContext.WrapWithImplicitCast(baseType.Typ, hotPos, valueExpr);
+
          if not baseType.Typ.IsCompatible(valueExpr.Typ) then begin
-            if     valueExpr.Typ.IsOfType(FCompilerContext.TypInteger)
-               and baseType.Typ.IsOfType(FCompilerContext.TypFloat) then begin
-               valueExpr:=TConvIntToFloatExpr.Create(FCompilerContext, valueExpr)
-            end else begin
-               IncompatibleTypes(hotPos, CPE_AssignIncompatibleTypes,
-                                 valueExpr.Typ, baseType.Typ);
-            end;
+            IncompatibleTypes(hotPos, CPE_AssignIncompatibleTypes,
+                              valueExpr.Typ, baseType.Typ);
          end;
 
          Result := TAssociativeArraySetExpr.Create(FTok.HotPos, baseExpr, keyExpr, valueExpr);
@@ -6487,10 +6478,7 @@ begin
    thenExpr:=nil;
    elseExpr:=nil;
    try
-      condExpr:=ReadExpr;
-      if not (condExpr.IsOfType(FCompilerContext.TypBoolean) or condExpr.IsOfType(FCompilerContext.TypVariant)) then
-         if not condExpr.Typ.IsGeneric then
-            FMsgs.AddCompilerError(hotPos, CPE_BooleanExpected);
+      condExpr:=ReadBooleanExpr;
 
       if not FTok.TestDelete(ttTHEN) then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_ThenExpected);
@@ -6636,10 +6624,8 @@ begin
    Result:=TWhileExpr.Create(FTok.HotPos);
    EnterLoop(Result);
    try
-      condExpr:=ReadExpr;
+      condExpr:=ReadBooleanExpr;
       TWhileExpr(Result).CondExpr:=condExpr;
-      if not (condExpr.IsOfType(FCompilerContext.TypBoolean) or condExpr.IsOfType(FCompilerContext.TypVariant)) then
-         FMsgs.AddCompilerError(Result.ScriptPos, CPE_BooleanExpected);
 
       if not FTok.TestDelete(ttDO) then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_DoExpected);
@@ -6723,11 +6709,9 @@ begin
    try
       TRepeatExpr(Result).LoopExpr:=ReadBlocks([ttUNTIL], tt);
       TRepeatExpr(Result).SetScriptPos(FTok.HotPos);
-      condExpr:=ReadExpr;
+      condExpr:=ReadBooleanExpr;
       TRepeatExpr(Result).CondExpr:=condExpr;
-      if not (condExpr.IsOfType(FCompilerContext.TypBoolean) or condExpr.IsOfType(FCompilerContext.TypVariant)) then
-         FMsgs.AddCompilerError(Result.ScriptPos, CPE_BooleanExpected)
-      else if (not condExpr.IsConstant) or condExpr.EvalAsBoolean(FExec) then
+      if (not condExpr.IsConstant) or condExpr.EvalAsBoolean(FExec) then
          MarkLoopExitable(leBreak);
    except
       OrphanAndNil(Result);
@@ -7731,7 +7715,7 @@ begin
    argSymTable:=nil;
    argList:=TTypedExprList.Create;
    try
-      arraySym:=baseExpr.Typ as TArraySymbol;
+      arraySym := baseExpr.Typ.UnAliasedType as TArraySymbol;
 
       methodKind:=NameToArrayMethod(name, FMsgs, namePos);
 
@@ -7999,6 +7983,7 @@ var
    argList : TTypedExprList;
    argPosArray : TScriptPosArray;
    argSymTable : TUnSortedSymbolTable;
+   arraySym : TAssociativeArraySymbol;
    methodKind : TArrayMethodKind;
 
    function CheckArguments(expectedMin, expectedMax : Integer) : Boolean;
@@ -8018,7 +8003,9 @@ begin
    argSymTable:=nil;
    argList:=TTypedExprList.Create;
    try
-      methodKind:=NameToArrayMethod(name, FMsgs, namePos);
+      arraySym := baseExpr.Typ.UnAliasedType as TAssociativeArraySymbol;
+
+      methodKind := NameToArrayMethod(name, FMsgs, namePos);
 
       ReadArguments(argList.AddExpr, ttBLEFT, ttBRIGHT, argPosArray, argList.ExpectedArg);
 
@@ -8033,6 +8020,21 @@ begin
             amkClear : begin
                CheckArguments(0, 0);
                Result:=TAssociativeArrayClearExpr.Create(namePos, baseExpr);
+            end;
+
+            amkDelete : begin
+               if CheckArguments(1, 1) then begin
+                  if (argList[0].Typ=nil) or not arraySym.KeyType.IsCompatible(argList[0].Typ) then
+                     IncompatibleTypes(argPosArray[0], CPE_IncompatibleParameterTypes,
+                                       arraySym.Typ, argList[0].Typ);
+                  Result := TAssociativeArrayDeleteExpr.Create(FCompilerContext, baseExpr, argList[0]);
+                  argList.Clear;
+               end else Result := TAssociativeArrayDeleteExpr.Create(FCompilerContext, baseExpr, nil);
+            end;
+
+            amkKeys : begin
+               CheckArguments(0, 0);
+               Result := TAssociativeArrayKeysExpr.Create(FCompilerContext, baseExpr);
             end;
 
          else
@@ -9145,6 +9147,15 @@ begin
 
    RecordSymbolUse(propSym, propNamePos, [suDeclaration]);
 
+   if FTok.TestDelete(ttEXTERNAL) then begin
+      if not FTok.Test(ttStrVal) then
+         FMsgs.AddCompilerError(FTok.HotPos, CPE_StringExpected)
+      else begin
+         propSym.ExternalName := FTok.GetToken.AsString;
+         FTok.KillToken;
+      end;
+   end;
+
    if FTok.TestDelete(ttINDEX) then begin
       indexExpr:=ReadExpr;
       indexTyp:=indexExpr.Typ;
@@ -9907,7 +9918,7 @@ begin
       end;
       if Result.Find(name) <> nil then
          FMsgs.AddCompilerErrorFmt(hotPos, CPE_NameAlreadyExists, [name]);
-      param := TGenericTypeParameterSymbol.Create(name);
+      param := TGenericTypeParameterSymbol.Create(nil, name);
       Result.Add(param);
       RecordSymbolUse(param, hotPos, [suDeclaration]);
       if FTok.TestDelete(ttCOLON) then begin
@@ -10404,7 +10415,7 @@ begin
                      else if not (   TClassSymbol(rightTyp.Typ).IsOfType(Result.Typ)
                                   or TClassSymbol(Result.Typ).IsOfType(rightTyp.Typ)) then
                         IncompatibleTypesWarn(hotPos, CPE_IncompatibleTypes, Result.Typ, rightTyp.Typ);
-                     Result:=TIsOpExpr.Create(FCompilerContext, hotPos, Result, right)
+                     Result:=TIsOpExpr.Create(FCompilerContext, hotPos, tt, Result, right)
 
                   end;
                   ttIMPLEMENTS : begin
@@ -10412,11 +10423,11 @@ begin
                      if not (rightTyp is TInterfaceSymbol) then
                         FMsgs.AddCompilerError(hotPos, CPE_InterfaceExpected);
                      if Result.Typ is TClassOfSymbol then
-                        Result:=TClassImplementsIntfOpExpr.Create(FCompilerContext, hotPos, Result, right)
+                        Result:=TClassImplementsIntfOpExpr.Create(FCompilerContext, hotPos, tt, Result, right)
                      else begin
                         if not (Result.Typ is TClassSymbol) then
                            FMsgs.AddCompilerError(hotPos, CPE_ObjectExpected);
-                        Result:=TImplementsIntfOpExpr.Create(FCompilerContext, hotPos, Result, right);
+                        Result:=TImplementsIntfOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                      end;
 
                   end;
@@ -10440,15 +10451,15 @@ begin
                         end;
                         if Result.Typ is TClassSymbol then
                            if tt=ttNOTEQ then
-                              Result:=TObjCmpNotEqualExpr.Create(FCompilerContext, hotPos, Result, right)
-                           else Result:=TObjCmpEqualExpr.Create(FCompilerContext, hotPos, Result, right)
+                              Result:=TObjCmpNotEqualExpr.Create(FCompilerContext, hotPos, tt, Result, right)
+                           else Result:=TObjCmpEqualExpr.Create(FCompilerContext, hotPos, tt, Result, right)
                         else if Result.Typ is TClassOfSymbol then begin
                            Result:=TAssignedMetaClassExpr.Create(FCompilerContext, Result);
                            if tt=ttEQ then
                               Result:=TNotBoolExpr.Create(FCompilerContext, Result);
                            OrphanAndNil(right);
                         end else begin
-                           Result:=TIntfCmpExpr.Create(FCompilerContext, hotPos, Result, right);
+                           Result:=TIntfCmpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                            if tt=ttNOTEQ then
                               Result:=TNotBoolExpr.Create(FCompilerContext, Result);
                         end;
@@ -10459,11 +10470,14 @@ begin
                            Result:=TRelVarEqualNilExpr.Create(FCompilerContext, Result)
                         else Result:=TRelVarNotEqualNilExpr.Create(FCompilerContext, Result);
                         OrphanAndNil(right);
-                     end else if FGenericSymbol.Count > 0 then begin
-                        Result := TGenericBinaryOpExpr.Create(hotPos, FGenericSymbol.Peek, tt, Result, right);
+                     end else if (Result<>nil) and (right<>nil) and (Result.IsGeneric or right.IsGeneric) then begin
+                        Result := TGenericBinaryOpExpr.Create(
+                           FCompilerContext, hotPos,
+                           tt, Result, right
+                        );
                      end else begin
                         FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
-                        Result:=TRelOpExpr.Create(FCompilerContext, hotPos, Result, right); // keep going
+                        Result:=TRelOpExpr.Create(FCompilerContext, hotPos, tt, Result, right); // keep going
                      end;
                   end else Result:=opExpr;
                end;
@@ -10526,7 +10540,7 @@ begin
                         and right.Typ.UnAliasedTypeIs(TArraySymbol) then begin
                         opExpr:=CompilerUtils.ArrayConcat(FCompilerContext, hotPos, Result, right);
                      end else if FGenericSymbol.Count > 0 then begin
-                        opExpr := TGenericBinaryOpExpr.Create(hotPos, FGenericSymbol.Peek, tt, Result, right);
+                        opExpr := TGenericBinaryOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                      end else begin
                         FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
                      end;
@@ -10534,7 +10548,7 @@ begin
                end;
                if opExpr=nil then begin
                   // fake result to keep compiler going and report further issues
-                  Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, Result, right);
+                  Result := TBinaryOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   Result.Typ:=FCompilerContext.TypVariant;
                end else Result:=opExpr;
             except
@@ -10619,7 +10633,7 @@ begin
                   rightTyp:=right.Typ;
                   if not Result.Typ.IsCompatible(rightTyp) then begin
                      if Result.Typ.UnAliasedTypeIs(TClassSymbol) and right.Typ.UnAliasedTypeIs(TClassSymbol) then begin
-                        Result := TCoalesceClassExpr.Create(FCompilerContext, hotPos, Result, right);
+                        Result := TCoalesceClassExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                         Result.Typ := (Result.Typ.UnAliasedType as TClassSymbol).CommonAncestor(rightTyp.UnAliasedType);
                         if Result.Typ = nil then begin
                            FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
@@ -10629,22 +10643,24 @@ begin
                      end else begin
                         IncompatibleTypes(hotPos, CPE_IncompatibleTypes, Result.Typ, rightTyp);
                         // fake result to keep compiler going and report further issues
-                        Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, Result, right);
+                        Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                         Result.Typ:=TBinaryOpExpr(Result).Left.Typ;
                      end;
                   end else if Result.Typ.IsOfType(FCompilerContext.TypVariant) then begin
-                     Result:=TCoalesceExpr.Create(FCompilerContext, hotPos, Result, right);
+                     Result:=TCoalesceExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                      Result.Typ:=FCompilerContext.TypVariant;
                   end else if Result.Typ.IsOfType(FCompilerContext.TypString) then begin
-                     Result:=TCoalesceStrExpr.Create(FCompilerContext, hotPos, Result, right);
+                     Result:=TCoalesceStrExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else if Result.Typ.UnAliasedType.ClassType=TClassSymbol then begin
-                     Result:=TCoalesceClassExpr.Create(FCompilerContext, hotPos, Result, right);
+                     Result:=TCoalesceClassExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else if Result.Typ.UnAliasedType.ClassType=TDynamicArraySymbol then begin
-                     Result:=TCoalesceDynArrayExpr.Create(FCompilerContext, hotPos, Result, right);
+                     Result:=TCoalesceDynArrayExpr.Create(FCompilerContext, hotPos, tt, Result, right);
+                  end else if Result.Typ.IsOfType(FCompilerContext.TypInteger) then begin
+                     Result:=TCoalesceIntExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else begin
                      FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
                      // fake result to keep compiler going and report further issues
-                     Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, Result, right);
+                     Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                      Result.Typ:=TBinaryOpExpr(Result).Left.Typ;
                   end;
                end;
@@ -10653,7 +10669,7 @@ begin
                if opExpr=nil then begin
                   FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
                   // fake result to keep compiler going and report further issues
-                  Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, Result, right);
+                  Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   Result.Typ:=right.Typ;
                end else Result:=opExpr;
             end;
@@ -10669,6 +10685,25 @@ begin
    except
       OrphanAndNil(Result);
       raise;
+   end;
+end;
+
+// ReadBooleanExpr
+//
+function TdwsCompiler.ReadBooleanExpr : TTypedExpr;
+var
+   hotPos : TScriptPos;
+begin
+   hotPos := FTok.HotPos;
+   Result := ReadExpr;
+   if Result <> nil then begin
+      if not (Result.IsOfType(FCompilerContext.TypBoolean) or Result.IsOfType(FCompilerContext.TypVariant)) then begin
+         if not Result.IsGeneric then begin
+            if Result.ScriptPos.Defined then
+               hotPos := Result.ScriptPos;
+            FMsgs.AddCompilerError(hotPos, CPE_BooleanExpected)
+         end;
+      end;
    end;
 end;
 
@@ -10717,7 +10752,7 @@ begin
             end;
 
             Result:=TArrayIndexOfExpr.Create(FCompilerContext, hotPos, setExpr, left, nil);
-            Result:=TRelGreaterEqualIntExpr.Create(FCompilerContext, hotPos, Result,
+            Result:=TRelGreaterEqualIntExpr.Create(FCompilerContext, hotPos, ttIN, Result,
                                                    FUnifiedConstants.CreateInteger(0));
 
          end else if setExpr.Typ is TSetOfSymbol then begin
@@ -10727,6 +10762,23 @@ begin
                IncompatibleTypes(hotPos, CPE_IncompatibleTypes,
                                  left.Typ, elementType);
             Result:=TSetOfInExpr.CreateOptimal(FCompilerContext, hotPos, left, setExpr as TDataExpr);
+
+         end else if setExpr.Typ is TAssociativeArraySymbol then begin
+
+            elementType := TAssociativeArraySymbol(setExpr.Typ).KeyType;
+            if (left.Typ=nil) or not left.Typ.IsOfType(elementType) then begin
+               // attempt cast & typecheck harder
+               if (left is TFuncExpr) and (TFuncExpr(left).Args.Count=0) then begin
+                  if left is TFuncPtrExpr then
+                     left := TFuncPtrExpr(left).Extract
+                  else left := TFuncRefExpr.Create(FCompilerContext, TFuncExpr(left));
+               end else begin
+                  left := TConvExpr.WrapWithConvCast(FCompilerContext, hotPos, elementType,
+                                                     left, CPE_IncompatibleTypes);
+               end;
+            end;
+
+            Result := TAssociativeArrayContainsKeyExpr.Create(FCompilerContext, hotPos, ttIN, left, setExpr);
 
          end else if not (setExpr is TDataExpr) then begin
 
@@ -10761,7 +10813,7 @@ begin
             if Result=nil then begin
                FMsgs.AddCompilerError(hotPos, CPE_IncompatibleOperands);
                // fake result to keep compiler going and report further issues
-               Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, left, setExpr);
+               Result:=TBinaryOpExpr.Create(FCompilerContext, hotPos, ttIN, left, setExpr);
                Result.Typ:=FCompilerContext.TypVariant;
             end;
             left:=nil;
@@ -11209,9 +11261,7 @@ var
    typ : TTypeSymbol;
 begin
    hotPos:=FTok.HotPos;
-   boolExpr:=ReadExpr;
-   if not (boolExpr.IsOfType(FCompilerContext.TypBoolean) or boolExpr.IsOfType(FCompilerContext.TypVariant)) then
-      FMsgs.AddCompilerError(hotPos, CPE_BooleanExpected);
+   boolExpr:=ReadBooleanExpr;
    trueExpr:=nil;
    falseExpr:=nil;
    try
@@ -12948,142 +12998,8 @@ end;
 //
 function TdwsCompiler.CreateAssign(const scriptPos : TScriptPos; token : TTokenType;
                                    left : TDataExpr; right : TTypedExpr) : TProgramExpr;
-var
-   classOpSymbol : TClassOperatorSymbol;
-   classOpExpr : TFuncExprBase;
-   assignOpExpr : TAssignExpr;
-   classSymbol : TClassSymbol;
-   intfSymbol : TInterfaceSymbol;
-   leftTyp : TTypeSymbol;
 begin
-   if (right<>nil) and (right.Typ<>nil) then begin
-
-      case token of
-         ttASSIGN : begin
-            leftTyp:=left.Typ;
-            if leftTyp=nil then begin
-               // error assumed to have already been reported
-               OrphanAndNil(left);
-               OrphanAndNil(right);
-               Result:=TNullExpr.Create(scriptPos);
-            end else begin
-               leftTyp:=leftTyp.UnAliasedType;
-               if leftTyp.ClassType=TClassOfSymbol then begin
-                  Result:=TAssignClassOfExpr.Create(FCompilerContext, scriptPos, left, right);
-               end else if leftTyp.ClassType=TInterfaceSymbol then begin
-                  if right.Typ is TClassSymbol then begin
-                     classSymbol:=TClassSymbol(right.Typ);
-                     intfSymbol:=TInterfaceSymbol(left.Typ);
-                     if not classSymbol.ImplementsInterface(intfSymbol) then
-                        FMsgs.AddCompilerErrorFmt(scriptPos, RTE_ObjCastToIntfFailed,
-                                                  [classSymbol.Name, intfSymbol.Name]);
-                     Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left,
-                                                TObjAsIntfExpr.Create(FCompilerContext, scriptPos, right, intfSymbol));
-                  end else Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-               end else if leftTyp.ClassType=TDynamicArraySymbol then begin
-                  if right.ClassType=TConstNilExpr then begin
-                     OrphanAndNil(right);
-                     Result:=TAssignNilAsResetExpr.CreateVal(FCompilerContext, scriptPos, left);
-                  end else if right.ClassType = TArrayConstantExpr then begin
-                     if TArrayConstantExpr(right).ElementCount = 0 then begin
-                        OrphanAndNil(right);
-                        Result := TAssignNilAsResetExpr.CreateVal(FCompilerContext, scriptPos, left);
-                     end else begin
-                        Result := TAssignArrayConstantExpr.Create(FCompilerContext, scriptPos, left, TArrayConstantExpr(right));
-                     end
-                  end else begin
-                     Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-                  end;
-               end else if leftTyp is TAssociativeArraySymbol then begin
-                  if right.ClassType=TConstNilExpr then begin
-                     OrphanAndNil(right);
-                     Result:=TAssignNilAsResetExpr.CreateVal(FCompilerContext, scriptPos, left);
-                  end else begin
-                     Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-                  end;
-               end else if     right.InheritsFrom(TDataExpr)
-                           and (   (right.Typ.Size<>1)
-                                or (right.Typ is TArraySymbol)
-                                or (right.Typ is TSetOfSymbol)) then begin
-                  if right.InheritsFrom(TFuncExpr) then
-                     TFuncExpr(right).SetResultAddr(CurrentProg, nil);
-                  if right.InheritsFrom(TArrayConstantExpr) and (left.Typ is TArraySymbol) then
-                     Result:=TAssignArrayConstantExpr.Create(FCompilerContext, scriptPos, left, TArrayConstantExpr(right))
-                  else Result:=TAssignDataExpr.Create(FCompilerContext, scriptPos, left, right)
-               end else if leftTyp.AsFuncSymbol<>nil then begin
-                  if (right.Typ.AsFuncSymbol<>nil) or (right.Typ is TNilSymbol) then begin
-                     if right is TFuncRefExpr then begin
-                        right:=TFuncRefExpr(right).Extract;
-                        if right is TFuncPtrExpr then begin
-                           right:=TFuncPtrExpr(right).Extract;
-                           Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-                        end else begin
-                           Assert(right is TFuncExprBase);
-                           Result:=TAssignFuncExpr.Create(FCompilerContext, scriptPos, left, right);
-                        end;
-                     end else begin
-                        Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-                     end;
-                  end else begin
-                     FMsgs.AddCompilerError(scriptPos, CPE_IncompatibleOperands);
-                     Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right); // keep going
-                  end;
-               end else if leftTyp is TConnectorSymbol then begin
-                  Result:=TConnectorSymbol(leftTyp).CreateAssignExpr(FCompilerContext, scriptPos, left, right);
-               end else begin
-                  if left.IsExternal then
-                     Result:=TAssignExternalExpr.Create(FCompilerContext, scriptPos, left, right)
-                  else Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-               end;
-            end;
-         end;
-         ttPLUS_ASSIGN, ttMINUS_ASSIGN, ttTIMES_ASSIGN, ttDIVIDE_ASSIGN, ttCARET_ASSIGN : begin
-            if left.Typ is TClassSymbol then begin
-
-               classOpSymbol:=(left.Typ as TClassSymbol).FindClassOperator(token, right.Typ);
-               if classOpSymbol=nil then
-                  FMsgs.AddCompilerStop(scriptPos, CPE_IncompatibleOperands);
-               classOpExpr:=GetMethodExpr(classOpSymbol.UsesSym, left, rkObjRef, scriptPos, []);
-               classOpExpr.AddArg(right);
-               TypeCheckArguments(FCompilerContext, classOpExpr, nil);
-               Result:=classOpExpr;
-
-            end else begin
-
-               assignOpExpr:=CreateAssignOperatorExpr(token, scriptPos, FExec, left, right);
-               if assignOpExpr<>nil then
-
-                  Result:=assignOpExpr
-
-               else if left.Typ is TDynamicArraySymbol then begin
-
-                  Result:=CompilerUtils.DynamicArrayAdd(FCompilerContext, left, scriptPos, right);
-
-               end else begin
-
-                  FMsgs.AddCompilerError(scriptPos, CPE_IncompatibleOperands);
-                  Result:=TAssignExpr.Create(FCompilerContext, scriptPos, left, right);
-
-               end;
-
-            end;
-         end;
-      else
-         Result:=nil;
-         Assert(False);
-      end;
-
-      if Optimize then
-         Result:=Result.Optimize(FCompilerContext);
-
-   end else begin
-
-      OrphanAndNil(left);
-      OrphanAndNil(right);
-      FMsgs.AddCompilerError(scriptPos, CPE_RightSideNeedsReturnType);
-      Result:=TNullExpr.Create(scriptPos);
-
-   end;
+   Result := CreateAssignExpr(FCompilerContext, scriptPos, token, left, right);
 end;
 
 // CreateArrayLow
@@ -13203,7 +13119,7 @@ begin
    if opSym=nil then Exit;
 
    if opSym.OperatorExprClass <> nil then begin
-      Result := TBinaryOpExprClass(opSym.OperatorExprClass).Create(FCompilerContext, scriptPos, aLeft, aRight);
+      Result := TBinaryOpExprClass(opSym.OperatorExprClass).Create(FCompilerContext, scriptPos, token, aLeft, aRight);
    end else if opSym.UsesSym<>nil then begin
       if opSym.UsesSym is TMethodSymbol then
          funcExpr:=CreateMethodExpr(FCompilerContext, TMethodSymbol(opSym.UsesSym), aLeft, rkObjRef, scriptPos, [])
@@ -13223,17 +13139,12 @@ end;
 //
 function TdwsCompiler.CreateAssignOperatorExpr(token : TTokenType; const scriptPos : TScriptPos;
                                                exec : TdwsExecution;
-                                               aLeft, aRight : TTypedExpr) : TAssignExpr;
-var
-   opSym : TOperatorSymbol;
+                                               aLeft : TDataExpr; aRight : TTypedExpr) : TProgramExpr;
 begin
-   Result:=nil;
-   if (aLeft=nil) or (aRight=nil) then Exit;
-   opSym:=ResolveOperatorFor(CurrentProg, token, aLeft.Typ, aRight.Typ);
-   if opSym<>nil then begin
-      if opSym.AssignExprClass<>nil then
-         Result:=TAssignExprClass(opSym.AssignExprClass).Create(FCompilerContext, scriptPos, aLeft as TDataExpr, aRight);
-   end;
+   Result := dwsCompilerUtils.CreateAssignExpr(
+      FCompilerContext, scriptPos,
+      token, aLeft, aRight
+   );
 end;
 
 // DoSectionChanged
@@ -13736,9 +13647,7 @@ begin
       end else if typeSym = FCompilerContext.TypFloat then begin
 
          // Cast Float(...)
-         if argExpr.IsOfType(FCompilerContext.TypInteger) then
-            Result := TConvIntToFloatExpr.Create(FCompilerContext, argExpr)
-         else if argExpr.IsOfType(FCompilerContext.TypFloat) then
+         if argExpr.IsOfType(FCompilerContext.TypFloat) then
             Result := argExpr
          else begin
             if not argExpr.IsOfType(FCompilerContext.TypVariant) then

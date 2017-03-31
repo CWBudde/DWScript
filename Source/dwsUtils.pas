@@ -408,7 +408,7 @@ type
       Value : T;
    end;
    TSimpleHashBucketArray<T> = array of TSimpleHashBucket<T>;
-   TSimpleHashAction = (shaNone, shaRemove);
+   TSimpleHashAction = (shaNone, shaRemove, shaAbort);
    TSimpleHashFunc<T> = function (const item : T) : TSimpleHashAction of object;
 
    {: Minimalistic open-addressing hash, subclasses must override SameItem and GetItemHashCode.
@@ -431,15 +431,19 @@ type
          // hashCode must be non-null
          function GetItemHashCode(const item1 : T) : Integer; virtual; abstract;
 
+         const cSimpleHashMinCapacity = 32;
+
       public
          function Add(const anItem : T) : Boolean; // true if added
          function Replace(const anItem : T) : Boolean; // true if added
          function Contains(const anItem : T) : Boolean;
          function Match(var anItem : T) : Boolean;
+         function Remove(const anItem : T) : Boolean; // true if removed
          procedure Enumerate(callBack : TSimpleHashFunc<T>);
          procedure Clear(resetCapacity : Boolean = True);
 
          function HashBucketValue(index : Integer; var anItem : T) : Boolean; inline;
+         procedure Delete(index : Integer);
 
          property Count : Integer read FCount;
 
@@ -782,15 +786,6 @@ type
       protected
          function SameItem(const item1, item2 : UnicodeString) : Boolean; override;
          function GetItemHashCode(const item1 : UnicodeString) : Integer; override;
-   end;
-
-   TFastCompareStringList = class (TStringList)
-      {$ifdef FPC}
-      function DoCompareText(const s1,s2 : String) : PtrInt; override;
-      {$else}
-      function CompareStrings(const S1, S2: UnicodeString): Integer; override;
-      function IndexOfName(const name : UnicodeString): Integer; override;
-      {$endif}
    end;
 
    TFastCompareTextList = class (TStringList)
@@ -2395,40 +2390,6 @@ type
          FList : TStringListList;
    end;
    {$endif}
-
-// CompareStrings
-//
-{$ifdef FPC}
-function TFastCompareStringList.DoCompareText(const S1, S2: String): Integer;
-begin
-   Result:=CompareStr(S1, S2);
-end;
-{$else}
-function TFastCompareStringList.CompareStrings(const S1, S2: UnicodeString): Integer;
-begin
-   Result:=CompareStr(S1, S2);
-end;
-
-// IndexOfName
-//
-function TFastCompareStringList.IndexOfName(const name : UnicodeString): Integer;
-var
-   n, nc : Integer;
-   nvs : WideChar;
-   list : TStringListList;
-begin
-   nvs:=NameValueSeparator;
-   n:=Length(name);
-   list:=TStringListCracker(Self).FList;
-   for Result:=0 to Count-1 do begin
-      nc:=Length(list[Result].FString);
-      if     (nc>n) and (list[Result].FString[n+1]=nvs)
-         and CompareMem(PWideChar(Pointer(name)),
-                        PWideChar(Pointer(list[Result].FString)), n) then Exit;
-   end;
-   Result:=-1;
-end;
-{$endif}
 
 // InitializeStringsUnifier
 //
@@ -4226,9 +4187,6 @@ end;
 // ------------------ TSimpleHash<T> ------------------
 // ------------------
 
-const
-   cSimpleHashMinCapacity = 32;
-
 // Grow
 //
 procedure TSimpleHash<T>.Grow(capacityPreAdjusted : Boolean);
@@ -4345,6 +4303,48 @@ begin
       anItem:=FBuckets[i].Value;
 end;
 
+// Remove
+//
+function TSimpleHash<T>.Remove(const anItem : T) : Boolean;
+var
+   i : Integer;
+begin
+   if FCount=0 then Exit(False);
+   i := (GetItemHashCode(anItem) and (FCapacity-1));
+   Result := LinearFind(anItem, i);
+   if Result then Delete(i);
+end;
+
+// Delete
+//
+procedure TSimpleHash<T>.Delete(index : Integer);
+var
+   k, gap : Integer;
+begin
+   if FBuckets[index].HashCode = 0 then Exit;
+
+   gap := index;
+   repeat
+      index := (index+1) and (FCapacity-1);
+
+      if FBuckets[index].HashCode = 0 then
+         Break;
+
+      k := FBuckets[index].HashCode and (FCapacity - 1);
+
+      if ((gap >= k) or (k > index)) and ((index >= gap) or (k <= gap)) and ((index >= gap) or (k > index)) then begin
+         FBuckets[gap] := FBuckets[index];
+         FBuckets[index].HashCode := 0;
+         gap := index;
+      end;
+   until False;
+
+   FBuckets[gap].HashCode := 0;
+   FBuckets[gap].Value := Default(T);
+   Dec(FCount);
+end;
+
+
 // Enumerate
 //
 procedure TSimpleHash<T>.Enumerate(callBack : TSimpleHashFunc<T>);
@@ -4355,10 +4355,13 @@ begin
    initialCount := FCount;
    for i:=0 to High(FBuckets) do begin
       if FBuckets[i].HashCode<>0 then begin
-         if callBack(FBuckets[i].Value)=shaRemove then begin
-            FBuckets[i].HashCode:=0;
-            FBuckets[i].Value:=Default(T);
-            Dec(FCount);
+         case callBack(FBuckets[i].Value) of
+            shaRemove : begin
+               FBuckets[i].HashCode:=0;
+               FBuckets[i].Value:=Default(T);
+               Dec(FCount);
+            end;
+            shaAbort : break;
          end;
       end;
    end;

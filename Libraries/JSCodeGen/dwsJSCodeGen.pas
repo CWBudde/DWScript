@@ -24,7 +24,8 @@ uses
    dwsExprs, dwsRelExprs, dwsJSON, dwsMagicExprs, dwsStrings, dwsMethodExprs,
    dwsConnectorExprs, dwsConvExprs, dwsSetOfExprs, dwsCompilerUtils,
    dwsJSLibModule, dwsJSMin, dwsFunctions, dwsGlobalVarsFunctions, dwsErrors,
-   dwsRTTIFunctions, dwsConstExprs, dwsInfo, dwsScriptSource, dwsSymbolDictionary;
+   dwsRTTIFunctions, dwsConstExprs, dwsInfo, dwsScriptSource, dwsSymbolDictionary,
+   dwsUnicode;
 
 type
 
@@ -54,8 +55,8 @@ type
          FMainBodyName : String;
          FSelfSymbolName : String;
          FResultSymbolName : String;
-         FUniqueGlobalVar : TFastCompareStringList;
-         FCustomDependency : TFastCompareStringList;
+         FUniqueGlobalVar : TUnicodeStringList;
+         FCustomDependency : TUnicodeStringList;
 
       protected
          procedure CollectLocalVars(proc : TdwsProgram);
@@ -470,6 +471,11 @@ type
    end;
 
    TJSAssociativeArraySetExpr = class (TJSExprCodeGen)
+      public
+         procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
+   end;
+
+   TJSAssociativeArrayContainsKeyExpr = class (TJSExprCodeGen)
       public
          procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
@@ -939,8 +945,8 @@ begin
    FDeclaredLocalVars:=TDataSymbolList.Create;
    FDeclaredLocalVarsStack:=TSimpleStack<TDataSymbolList>.Create;
 
-   FUniqueGlobalVar:=TFastCompareStringList.Create;
-   FCustomDependency:=TFastCompareStringList.Create;
+   FUniqueGlobalVar := TUnicodeStringList.Create;
+   FCustomDependency := TUnicodeStringList.Create;
 
    FMainBodyName:='$dws';
    FSelfSymbolName:='Self';
@@ -1061,6 +1067,7 @@ begin
 
    RegisterCodeGen(TCoalesceExpr,         TJSCoalesceExpr.Create);
    RegisterCodeGen(TCoalesceStrExpr,      TJSCoalesceExpr.Create);
+   RegisterCodeGen(TCoalesceIntExpr,      TJSCoalesceExpr.Create);
    RegisterCodeGen(TCoalesceClassExpr,    TJSCoalesceExpr.Create);
    RegisterCodeGen(TCoalesceDynArrayExpr, TJSCoalesceExpr.Create);
 
@@ -1277,10 +1284,11 @@ begin
 
    RegisterCodeGen(TAssociativeArrayGetExpr, TJSAssociativeArrayGetExpr.Create);
    RegisterCodeGen(TAssociativeArraySetExpr, TJSAssociativeArraySetExpr.Create);
-   RegisterCodeGen(TAssociativeArrayLengthExpr,
-      TdwsExprGenericCodeGen.Create(['Object.keys', '(', 0, ')', '.length']));
-   RegisterCodeGen(TAssociativeArrayClearExpr,
-      TdwsExprGenericCodeGen.Create(['$Delete', '(', 0, ')'], gcgStatement, '$Delete'));
+   RegisterCodeGen(TAssociativeArrayLengthExpr, TdwsExprGenericCodeGen.Create(['Object.keys', '(', 0, ')', '.length']));
+   RegisterCodeGen(TAssociativeArrayClearExpr,  TdwsExprGenericCodeGen.Create(['$Delete', '(', 0, ')'], gcgStatement, '$Delete'));
+   RegisterCodeGen(TAssociativeArrayDeleteExpr, TdwsExprGenericCodeGen.Create(['(delete ', 0, '[', 1, ']', ')']));
+   RegisterCodeGen(TAssociativeArrayKeysExpr,   TdwsExprGenericCodeGen.Create(['Object.keys', '(', 0, ')']));
+   RegisterCodeGen(TAssociativeArrayContainsKeyExpr, TJSAssociativeArrayContainsKeyExpr.Create);
 
    RegisterCodeGen(TStringLengthExpr,
       TdwsExprGenericCodeGen.Create([0, '.length']));
@@ -5472,6 +5480,30 @@ begin
    codeGen.WriteString(']=');
    codeGen.CompileNoWrap(e.ValueExpr);
    codeGen.WriteStatementEnd;
+end;
+
+// ------------------
+// ------------------ TJSAssociativeArrayContainsKeyExpr ------------------
+// ------------------
+
+// CodeGen
+//
+procedure TJSAssociativeArrayContainsKeyExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+var
+   e : TAssociativeArrayContainsKeyExpr;
+   keyTyp : TTypeSymbol;
+begin
+   e := TAssociativeArrayContainsKeyExpr(expr);
+
+   keyTyp := e.Left.Typ;
+   Assert(keyTyp.UnAliasedTypeIs(TBaseStringSymbol) or keyTyp.UnAliasedTypeIs(TBaseIntegerSymbol),
+          'Only String or Integer keys supported');
+   Assert(e.Typ.UnAliasedTypeIs(TBaseSymbol), 'Base type value required');
+
+   codeGen.Compile(e.Right);
+   codeGen.WriteString('.hasOwnProperty(');
+   codeGen.CompileNoWrap(e.Left);
+   codeGen.WriteString(')');
 end;
 
 // ------------------

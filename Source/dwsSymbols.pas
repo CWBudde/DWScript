@@ -416,6 +416,7 @@ type
                                              const callback : TOperatorSymbolEnumerationCallback) : Boolean; virtual;
          function EnumerateOperatorsFor(aToken : TTokenType; aLeftType, aRightType : TTypeSymbol;
                                         const callback : TOperatorSymbolEnumerationCallback) : Boolean; virtual;
+         function FindImplicitCastOperatorFor(fromType, toType : TTypeSymbol) : TOperatorSymbol; virtual;
          function HasSameLocalOperator(anOpSym : TOperatorSymbol) : Boolean; virtual;
          function HasOperators : Boolean; inline;
 
@@ -1184,9 +1185,11 @@ type
    TAssociativeArraySymbol = class sealed (TTypeSymbol)
       private
          FKeyType : TTypeSymbol;
+         FKeyArrayType : TDynamicArraySymbol;
 
       public
          constructor Create(const name : UnicodeString; elementType, keyType : TTypeSymbol);
+         destructor Destroy; override;
 
          procedure InitData(const Data: TData; Offset: Integer); override;
          class function DynamicInitialization : Boolean; override;
@@ -1194,6 +1197,8 @@ type
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          function IsPointerType : Boolean; override;
          function SameType(typSym : TTypeSymbol) : Boolean; override;
+
+         function KeysArrayType(integerType : TTypeSymbol) : TDynamicArraySymbol; virtual;
 
          property KeyType : TTypeSymbol read FKeyType;
 
@@ -1489,6 +1494,7 @@ type
          FDefaultSym : TConstSymbol;
          FVisibility : TdwsVisibility;
          FDeprecatedMessage : UnicodeString;
+         FExternalName : UnicodeString;
 
       protected
          function GetCaption : UnicodeString; override;
@@ -1497,6 +1503,7 @@ type
          function GetArrayIndices : TParamsSymbolTable;
          procedure AddParam(Param : TParamSymbol);
          function GetIsDeprecated : Boolean; inline;
+         function GetExternalName : String;
 
       public
          constructor Create(const name : UnicodeString; typ : TTypeSymbol; aVisibility : TdwsVisibility;
@@ -1523,6 +1530,7 @@ type
          property DefaultSym : TConstSymbol read FDefaultSym write FDefaultSym;
          property DeprecatedMessage : UnicodeString read FDeprecatedMessage write FDeprecatedMessage;
          property IsDeprecated : Boolean read GetIsDeprecated;
+         property ExternalName : UnicodeString read GetExternalName write FExternalName;
    end;
 
    // class operator X (params) uses method;
@@ -4434,6 +4442,15 @@ begin
    Result:=(FDeprecatedMessage<>'');
 end;
 
+// GetExternalName
+//
+function TPropertySymbol.GetExternalName : String;
+begin
+   if FExternalName <> '' then
+      Result := FExternalName
+   else Result := Name;
+end;
+
 procedure TPropertySymbol.GenerateParams(Table: TSymbolTable; const FuncParams: TParamArray);
 begin
    dwsSymbols.GenerateParams(Table, FuncParams, AddParam);
@@ -6298,6 +6315,35 @@ begin
    Result:=False;
 end;
 
+// FindImplicitCastOperatorFor
+//
+function TSymbolTable.FindImplicitCastOperatorFor(fromType, toType : TTypeSymbol) : TOperatorSymbol;
+var
+   i : Integer;
+   sym : TSymbol;
+   list : PObjectTightList;
+begin
+   if stfHasLocalOperators in FFlags then begin
+      list := FSymbols.List;
+      for i := 0 to FSymbols.Count-1 do begin
+         sym := TSymbol(list[i]);
+         if sym.ClassType = TOperatorSymbol then begin
+            Result := TOperatorSymbol(sym);
+            if     (Result.Token = ttIMPLICIT)
+               and (Result.Typ = toType)
+               and (Result.Params[0] = fromType) then Exit;
+         end;
+      end;
+   end;
+   if stfHasParentOperators in FFlags then begin
+      for i:=0 to ParentCount-1 do begin
+         Result := Parents[i].FindImplicitCastOperatorFor(fromType, toType);
+         if Result <> nil then Exit;
+      end;
+   end;
+   Result := nil;
+end;
+
 // HasSameLocalOperator
 //
 function TSymbolTable.HasSameLocalOperator(anOpSym : TOperatorSymbol) : Boolean;
@@ -7052,6 +7098,14 @@ begin
    FKeyType:=keyType;
 end;
 
+// Destroy
+//
+destructor TAssociativeArraySymbol.Destroy;
+begin
+   inherited;
+   FKeyArrayType.Free;
+end;
+
 // InitData
 //
 procedure TAssociativeArraySymbol.InitData(const Data: TData; Offset: Integer);
@@ -7095,6 +7149,15 @@ begin
    Result:=    (typSym<>nil)
            and (typSym.ClassType=ClassType)
            and Typ.SameType(typSym.Typ);
+end;
+
+// KeysArrayType
+//
+function TAssociativeArraySymbol.KeysArrayType(integerType : TTypeSymbol) : TDynamicArraySymbol;
+begin
+   if FKeyArrayType = nil then
+      FKeyArrayType := TDynamicArraySymbol.Create('', KeyType, integerType);
+   Result := FKeyArrayType;
 end;
 
 // ------------------
