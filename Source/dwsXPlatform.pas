@@ -193,9 +193,10 @@ function UnixTimeToSystemMilliseconds(ut : Int64) : Int64;
 
 procedure SystemSleep(msec : Integer);
 
-{$ifndef FPC}
 function UnicodeFormat(const fmt : UnicodeString; const args : array of const) : UnicodeString;
+{$ifndef FPC}
 function UnicodeCompareStr(const S1, S2 : UnicodeString) : Integer; inline;
+function UnicodeStringReplace(const s, oldPattern, newPattern: String; flags: TReplaceFlags) : String; inline;
 {$endif}
 
 function AnsiCompareText(const S1, S2 : UnicodeString) : Integer;
@@ -237,6 +238,10 @@ function TryTextToFloat(const s : PWideChar; var value : Extended;
 procedure VarCopy(out dest : Variant; const src : Variant); inline;
 {$else}
 function VarToUnicodeStr(const v : Variant) : UnicodeString; inline;
+{$endif}
+
+{$ifdef FPC}
+function Utf8ToUnicodeString(const buf : RawByteString) : UnicodeString; inline;
 {$endif}
 
 function RawByteStringToBytes(const buf : RawByteString) : TBytes;
@@ -523,8 +528,6 @@ begin
 {$ENDIF}
 end;
 
-{$ifndef FPC}
-
 // UnicodeFormat
 //
 function UnicodeFormat(const fmt : UnicodeString; const args : array of const) : UnicodeString;
@@ -534,12 +537,19 @@ end;
 
 // UnicodeCompareStr
 //
+{$ifndef FPC}
 function UnicodeCompareStr(const S1, S2 : UnicodeString) : Integer;
 begin
    Result:=CompareStr(S1, S2);
 end;
+{$endif}
 
-{$endif} // FPC
+// UnicodeStringReplace
+//
+function UnicodeStringReplace(const s, oldPattern, newPattern: String; flags: TReplaceFlags) : String;
+begin
+   Result := SysUtils.StringReplace(s, oldPattern, newPattern, flags);
+end;
 
 // AnsiCompareText
 //
@@ -890,9 +900,9 @@ begin
    end;
 
    fileName:=directory+'*';
-   searchRec.Handle:=FindFirstFileEx(PChar(Pointer(fileName)), infoLevel,
-                                     @searchRec.Data, FINDEX_SEARCH_OPS.FindExSearchNameMatch,
-                                     nil, 0);
+   searchRec.Handle:=FindFirstFileExW(PWideChar(Pointer(fileName)), infoLevel,
+                                      @searchRec.Data, FINDEX_SEARCH_OPS.FindExSearchNameMatch,
+                                      nil, 0);
    if searchRec.Handle<>INVALID_HANDLE_VALUE then begin
       repeat
          if (searchRec.Data.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY)=0 then begin
@@ -953,6 +963,15 @@ begin
    Result:=VarToStr(v);
 end;
 {$endif FPC}
+
+{$ifdef FPC}
+// Utf8ToUnicodeString
+//
+function Utf8ToUnicodeString(const buf : RawByteString) : UnicodeString; inline;
+begin
+   Result := UTF8Decode(buf);
+end;
+{$endif}
 
 // RawByteStringToBytes
 //
@@ -1344,7 +1363,7 @@ function FileSize(const name : UnicodeString) : Int64;
 var
    info : TWin32FileAttributeData;
 begin
-   if GetFileAttributesEx(PChar(Pointer(name)), GetFileExInfoStandard, @info) then
+   if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then
       Result:=info.nFileSizeLow or (Int64(info.nFileSizeHigh) shl 32)
    else Result:=-1;
 end;
@@ -1357,7 +1376,7 @@ var
    localTime : TFileTime;
    systemTime : TSystemTime;
 begin
-   if GetFileAttributesEx(PChar(Pointer(name)), GetFileExInfoStandard, @info) then begin
+   if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then begin
       FileTimeToLocalFileTime(info.ftLastWriteTime, localTime);
       FileTimeToSystemTime(localTime, systemTime);
       Result:=SystemTimeToDateTime(systemTime);
@@ -1451,10 +1470,6 @@ function GetCurrentUserName : UnicodeString;
 var
    len : Cardinal;
 begin
-   len:=255;
-   SetLength(Result, len);
-   Windows.GetUserName(PChar(Result), len);
-   SetLength(Result, len-1);
 {$ENDIF}
 {$IFDEF MACOS}
 begin

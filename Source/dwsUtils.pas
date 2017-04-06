@@ -49,6 +49,9 @@ type
          function  DecRefCount : Integer;
          property  RefCount : Integer read GetRefCount write SetRefCount;
          procedure Free;
+
+         function ToString : String; override; deprecated 'Use ToUnicodeString'; final;
+         function ToUnicodeString : UnicodeString; virtual;
    end;
    PRefCountedObject = ^TRefCountedObject;
 
@@ -57,7 +60,7 @@ type
    IGetSelf = interface
       ['{77D8EA0B-311C-422B-B8DE-AA5BDE726E41}']
       function GetSelf : TObject;
-      function ToString : UnicodeString;
+      function ToUnicodeString : UnicodeString;
    end;
 
    // TInterfacedSelfObject
@@ -68,9 +71,6 @@ type
          function QueryInterface({$IFDEF FPC_HAS_CONSTREF}constref{$ELSE}const{$ENDIF} IID: TGUID; out Obj): HResult; stdcall;
          function _AddRef : Integer; stdcall;
          function _Release : Integer; stdcall;
-         {$ifdef FPC}
-         function ToString : UnicodeString; reintroduce;
-         {$endif}
 
       public
          class function NewInstance: TObject; override;
@@ -252,15 +252,15 @@ type
          FCount : Integer;
 
       protected
-         function GetItems(i : Integer) : String; inline;
-         procedure SetItems(i : Integer; const s : String); inline;
+         function GetItems(i : Integer) : UnicodeString; inline;
+         procedure SetItems(i : Integer; const s : UnicodeString); inline;
 
       public
          procedure Add(const s : UnicodeString);
          function IndexOf(const s : UnicodeString) : Integer;
          procedure Clear;
 
-         property Items[i : Integer] : String read GetItems write SetItems; default;
+         property Items[i : Integer] : UnicodeString read GetItems write SetItems; default;
          property Count : Integer read FCount;
    end;
 
@@ -618,7 +618,7 @@ type
          constructor Create;
 
          procedure UnifyAssign(const aString : UnicodeString; var unifiedString : UnicodeString); inline;
-         procedure UnifyAssignPChar(p : PChar; size : Integer; var unifiedString : UnicodeString);
+         procedure UnifyAssignP(p : PWideChar; size : Integer; var unifiedString : UnicodeString);
 
          property Count : Integer read FCount;
          procedure Clear;
@@ -749,7 +749,7 @@ type
          procedure WriteChar(utf16Char : WideChar); inline;
          procedure WriteDigits(value : Int64; digits : Integer);
 
-         function ToString : String; override; deprecated 'use ToUnicodeString'; final;
+         {$ifndef FPC}function ToString : String; override; deprecated 'use ToUnicodeString'; final;{$endif}
          function ToUnicodeString : UnicodeString;
          function ToUTF8String : RawByteString;
          function ToBytes : TBytes;
@@ -889,14 +889,15 @@ function AcquireUnifier : TStringUnifier;
 procedure ReleaseUnifier(unifier : TStringUnifier);
 
 procedure UnifyAssignString(const fromStr : UnicodeString; var toStr : UnicodeString); inline;
-procedure UnifyAssignPChar(p : PChar; size : Integer; var toStr : UnicodeString);
-procedure UnifyAssignChar(p : PChar; var toStr : UnicodeString);
+procedure UnifyAssignP(p : PWideChar; size : Integer; var toStr : UnicodeString);
+procedure UnifyAssignChar(p : PWideChar; var toStr : UnicodeString);
 function  UnifiedString(const fromStr : UnicodeString) : UnicodeString; inline;
 function  TidyStringsUnifier : Integer;
 
 function UnicodeCompareLen(p1, p2 : PWideChar; n : Integer) : Integer;
 function UnicodeCompareText(const s1, s2 : UnicodeString) : Integer;
 function UnicodeSameText(const s1, s2 : UnicodeString) : Boolean;
+
 function AsciiCompareLen(p1, p2 : PAnsiChar; n : Integer) : Integer; overload;
 function AsciiCompareText(p : PAnsiChar; const s : RawByteString) : Integer;
 function AsciiSameText(p : PAnsiChar; const s : RawByteString) : Boolean;
@@ -937,7 +938,7 @@ function Min(a, b : Integer) : Integer; inline;
 function WhichPowerOfTwo(const v : Int64) : Integer;
 
 function SimpleStringHash(const s : UnicodeString) : Cardinal; overload; inline;
-function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload; inline;
+function SimpleStringHash(p : PWideChar; sizeInChars : Integer) : Cardinal; overload; inline;
 function SimpleByteHash(p : PByte; n : Integer) : Cardinal;
 
 function SimpleIntegerHash(x : Cardinal) : Cardinal;
@@ -967,7 +968,8 @@ type
 
 function FastInt32ToBuffer(const val : Int32; var buf : TInt32StringBuffer) : Integer;
 function FastInt64ToBuffer(const val : Int64; var buf : TInt64StringBuffer) : Integer;
-procedure FastInt64ToStr(const val : Int64; var s : UnicodeString);
+procedure FastInt64ToStr(const val : Int64; var s : UnicodeString); overload;
+function  FastInt64ToStr(const val : Int64) : UnicodeString; overload; inline;
 procedure FastInt64ToHex(val : Int64; digits : Integer; var s : UnicodeString);
 function Int64ToHex(val : Int64; digits : Integer) : UnicodeString; inline;
 
@@ -975,7 +977,8 @@ function DivMod100(var dividend : Cardinal) : Cardinal;
 
 procedure FastStringReplace(var str : UnicodeString; const sub, newSub : UnicodeString);
 
-procedure VariantToString(const v : Variant; var s : UnicodeString);
+procedure VariantToString(const v : Variant; var s : UnicodeString); overload;
+function VariantToString(const v : Variant) : UnicodeString; overload; inline;
 procedure VariantToInt64(const v : Variant; var r : Int64);
 function VariantToBool(const v : Variant) : Boolean;
 function VariantToFloat(const v : Variant) : Double;
@@ -1006,8 +1009,8 @@ procedure dwsFreeAndNil(var O); // transitional function, do not use
 
 function CoalesceableIsFalsey(const unk : IUnknown) : Boolean;
 
-function ApplyStringVariables(const str : UnicodeString; const variables : TStrings;
-                              const delimiter : UnicodeString = '%') : UnicodeString;
+function ApplyStringVariables(const str : TFilename; const variables : TStrings;
+                              const delimiter : String = '%') : TFilename;
 
 type
    TTwoChars = packed array [0..1] of WideChar;
@@ -1060,16 +1063,16 @@ end;
 
 // SimpleStringHash
 //
-function SimpleStringHash(p : PChar; sizeInChars : Integer) : Cardinal; overload; inline;
+function SimpleStringHash(p : PWideChar; sizeInChars : Integer) : Cardinal; overload; inline;
 begin
-   Result := xxHash32.Full(p, sizeInChars*SizeOf(Char));
+   Result := xxHash32.Full(p, sizeInChars*SizeOf(WideChar));
 end;
 
 // SimpleStringHash
 //
 function SimpleStringHash(const s : UnicodeString) : Cardinal; inline;
 begin
-   Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(Char));
+   Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(WideChar));
 end;
 
 // SimpleByteHash
@@ -1442,7 +1445,7 @@ begin
    // we can't use a constant array here, as obtaining a string from a constant
    // array implies a memory allocations, which would defeat the whole purpose
    for i := 0 to High(vSmallIntegers) do
-      vSmallIntegers[i] := IntToStr(i);
+      vSmallIntegers[i] := UnicodeString(IntToStr(i));
 end;
 
 // FastInt64ToStr
@@ -1458,6 +1461,13 @@ begin
       n:=FastInt64ToBuffer(val, buf{%H-});
       SetString(s, PWideChar(@buf[n]), (High(buf)+1)-n);
    end;
+end;
+
+// FastInt64ToStr
+//
+function FastInt64ToStr(const val : Int64) : UnicodeString;
+begin
+   FastInt64ToStr(val, Result);
 end;
 
 // FastInt64ToHex
@@ -1516,7 +1526,7 @@ procedure FastStringReplace(var str : UnicodeString; const sub, newSub : Unicode
 
    procedure FallBack;
    begin
-      str:=SysUtils.StringReplace(str, sub, newSub, [rfReplaceAll]);
+      str := UnicodeStringReplace(str, sub, newSub, [rfReplaceAll]);
    end;
 
    procedure ReplaceChars(pStr : PWideChar; oldChar, newChar : WideChar; n : Integer);
@@ -1616,13 +1626,13 @@ procedure VariantToString(const v : Variant; var s : UnicodeString);
       if unknown=nil then
          Result:='nil'
       else if unknown.QueryInterface(IGetSelf, intf)=0 then
-         Result:=intf.ToString
+         Result:=intf.ToUnicodeString
       else Result:='[IUnknown]';
    end;
 
    procedure FloatAsString(var v : Double; var Result : UnicodeString);
    begin
-      Result:=FloatToStr(v);
+      Result := UnicodeString(FloatToStr(v));
    end;
 
 var
@@ -1654,6 +1664,13 @@ begin
    else
       s:=v;
    end;
+end;
+
+// VariantToString
+//
+function VariantToString(const v : Variant) : UnicodeString;
+begin
+   VariantToString(v, Result);
 end;
 
 // VariantToInt64
@@ -1908,7 +1925,7 @@ begin
          writer.WriteInteger(PVarData(@value).VInt64);
       varUString :
          {$ifdef FPC}
-         writer.WriteString(UnicodeString(PVarData(@value).VString));
+         writer.WriteUnicodeString(UnicodeString(PVarData(@value).VString));
          {$else}
          writer.WriteString(UnicodeString(PVarData(@value).VUString));
          {$endif}
@@ -2266,7 +2283,7 @@ end;
 
 var
    vUnifiedStrings : array [0..1] of Pointer;
-   vUnifiedCharacters : array [0..Ord(TStringUnifier.HighestUnifiedChar)] of String;
+   vUnifiedCharacters : array [0..Ord(TStringUnifier.HighestUnifiedChar)] of UnicodeString;
 
 // ------------------
 // ------------------ TStringUnifier ------------------
@@ -2284,12 +2301,12 @@ end;
 //
 procedure TStringUnifier.UnifyAssign(const aString : UnicodeString; var unifiedString : UnicodeString);
 begin
-   UnifyAssignPChar(Pointer(aString), Length(aString), unifiedString);
+   UnifyAssignP(Pointer(aString), Length(aString), unifiedString);
 end;
 
-// UnifyAssignPChar
+// UnifyAssignP
 //
-procedure TStringUnifier.UnifyAssignPChar(p : PChar; size : Integer; var unifiedString : UnicodeString);
+procedure TStringUnifier.UnifyAssignP(p : PWideChar; size : Integer; var unifiedString : UnicodeString);
 var
    i : Integer;
    h : Cardinal;
@@ -2403,7 +2420,7 @@ begin
    end;
 
    for i := Low(vUnifiedCharacters) to High(vUnifiedCharacters) do
-      vUnifiedCharacters[i] := Char(Ord(i));
+      vUnifiedCharacters[i] := WideChar(Ord(i));
 end;
 
 // FinalizeStringsUnifier
@@ -2442,12 +2459,12 @@ end;
 //
 procedure UnifyAssignString(const fromStr : UnicodeString; var toStr : UnicodeString);
 begin
-   UnifyAssignPChar(Pointer(fromStr), Length(fromStr), toStr);
+   UnifyAssignP(Pointer(fromStr), Length(fromStr), toStr);
 end;
 
 // UnifyAssignPChar
 //
-procedure UnifyAssignPChar(p : PChar; size : Integer; var toStr : UnicodeString);
+procedure UnifyAssignP(p : PWideChar; size : Integer; var toStr : UnicodeString);
 var
    su : TStringUnifier;
 begin
@@ -2464,17 +2481,17 @@ begin
       end;
    end;
    su := AcquireUnifier;
-   su.UnifyAssignPChar(p, size, toStr);
+   su.UnifyAssignP(p, size, toStr);
    ReleaseUnifier(su);
 end;
 
 // UnifyAssignChar
 //
-procedure UnifyAssignChar(p : PChar; var toStr : UnicodeString);
+procedure UnifyAssignChar(p : PWideChar; var toStr : UnicodeString);
 begin
    if Cardinal(Ord(p^)) <= Cardinal(High(vUnifiedCharacters)) then
       toStr := vUnifiedCharacters[Ord(p^)]
-   else UnifyAssignPChar(p, 1, toStr);
+   else UnifyAssignP(p, 1, toStr);
 end;
 
 // UnifiedString
@@ -2910,8 +2927,8 @@ end;
 
 // ApplyStringVariables
 //
-function ApplyStringVariables(const str : UnicodeString; const variables : TStrings;
-                              const delimiter : UnicodeString = '%') : UnicodeString;
+function ApplyStringVariables(const str : TFilename; const variables : TStrings;
+                              const delimiter : String = '%') : TFilename;
 var
    p1, p2 : Integer;
 begin
@@ -2936,7 +2953,7 @@ end;
 // CompareStrings
 //
 {$ifdef FPC}
-function TFastCompareTextList.DoCompareText(const S1, S2: String): Integer;
+function TFastCompareTextList.DoCompareText(const S1, S2: String): PtrInt;
 begin
    Result:=UnicodeCompareText(s1, s2);
 end;
@@ -4001,10 +4018,12 @@ end;
 
 // ToString
 //
+{$ifndef FPC}
 function TWriteOnlyBlockStream.ToString : String;
 begin
    Result := ToUnicodeString;
 end;
+{$endif}
 
 // ToUnicodeString
 //
@@ -4568,15 +4587,6 @@ begin
    if Result=0 then Destroy;
 end;
 
-{$ifdef FPC}
-// ToString
-//
-function TInterfacedSelfObject.ToString : UnicodeString;
-begin
-   Result := UTF8Decode(inherited ToString);
-end;
-{$endif}
-
 // NewInstance
 //
 class function TInterfacedSelfObject.NewInstance: TObject;
@@ -4994,21 +5004,21 @@ end;
 //
 function TSimpleNameObjectHash<T>.GetIndex(const aName : UnicodeString) : Integer;
 begin
-   Result:=FHash.GetIndex(aName);
+   Result := FHash.BucketIndex[aName];
 end;
 
 // GetObjects
 //
 function TSimpleNameObjectHash<T>.GetObjects(const aName : UnicodeString) : T;
 begin
-   Result:=T(FHash.GetObjects(aName));
+   Result:=T(FHash.Objects[aName]);
 end;
 
 // SetObjects
 //
 procedure TSimpleNameObjectHash<T>.SetObjects(const aName : UnicodeString; obj : T);
 begin
-   FHash.SetObjects(aName, obj);
+   FHash.Objects[aName] := obj;
 end;
 
 // AddObject
@@ -5037,21 +5047,21 @@ end;
 //
 function TSimpleNameObjectHash<T>.GetBucketName(index : Integer) : UnicodeString;
 begin
-   Result:=FHash.GetBucketName(index);
+   Result := FHash.BucketName[index];
 end;
 
 // GetBucketObject
 //
 function TSimpleNameObjectHash<T>.GetBucketObject(index : Integer) : T;
 begin
-   Result:=T(FHash.GetBucketObject(index));
+   Result:=T(FHash.BucketObject[index]);
 end;
 
 // SetBucketObject
 //
 procedure TSimpleNameObjectHash<T>.SetBucketObject(index : Integer; obj : T);
 begin
-   FHash.SetBucketObject(index, obj);
+   FHash.BucketObject[index] := obj;
 end;
 
 // Count
@@ -5078,6 +5088,20 @@ procedure TRefCountedObject.Free;
 begin
    if Self <> nil then
       DecRefCount;
+end;
+
+// ToString
+//
+function TRefCountedObject.ToString : String;
+begin
+   Result := String(ToUnicodeString);
+end;
+
+// ToUnicodeString
+//
+function TRefCountedObject.ToUnicodeString : UnicodeString;
+begin
+   Result := UnicodeString(ClassName);
 end;
 
 // IncRefCount
@@ -6127,14 +6151,14 @@ end;
 
 // GetItems
 //
-function TSimpleStringList.GetItems(i : Integer) : String;
+function TSimpleStringList.GetItems(i : Integer) : UnicodeString;
 begin
    Result := FItems[i];
 end;
 
 // SetItems
 //
-procedure TSimpleStringList.SetItems(i : Integer; const s : String);
+procedure TSimpleStringList.SetItems(i : Integer; const s : UnicodeString);
 begin
    FItems[i] := s;
 end;

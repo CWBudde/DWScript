@@ -130,7 +130,7 @@ type
       procedure AddCompilerErrorFmt(const aScriptPos : TScriptPos; const msgFmt : String;
                                     const params : array of const); overload;
 
-      function Name : String;
+      function Name : UnicodeString;
       function Parameters : TUnSortedSymbolTable;
       function Values : TUnSortedSymbolTable;
       function UnitSymbol : TSymbol;
@@ -178,7 +178,7 @@ type
          FScriptCallStack : TdwsExprLocationArray;
 
       public
-         constructor Create(const msgString : UnicodeString; const anExceptionObj : IScriptObj;
+         constructor Create(const msgString : String; const anExceptionObj : IScriptObj;
                             const aScriptPos: TScriptPos); overload;
 
          property ExceptionObj : IScriptObj read FExceptObj;
@@ -242,9 +242,9 @@ type
 
          procedure RaiseScriptError(exec : TdwsExecution; e : EScriptError); overload;
          procedure RaiseScriptError(exec : TdwsExecution); overload;
-         procedure RaiseScriptError(exec : TdwsExecution; const msg : UnicodeString); overload;
-         procedure RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : UnicodeString); overload;
-         procedure RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : UnicodeString;
+         procedure RaiseScriptError(exec : TdwsExecution; const msg : String); overload;
+         procedure RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : String); overload;
+         procedure RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : String;
                                     const args : array of const); overload;
 
          procedure RaiseObjectNotInstantiated(exec : TdwsExecution);
@@ -1503,7 +1503,7 @@ type
          function GetArrayIndices : TParamsSymbolTable;
          procedure AddParam(Param : TParamSymbol);
          function GetIsDeprecated : Boolean; inline;
-         function GetExternalName : String;
+         function GetExternalName : UnicodeString;
 
       public
          constructor Create(const name : UnicodeString; typ : TTypeSymbol; aVisibility : TdwsVisibility;
@@ -1914,6 +1914,8 @@ type
          procedure DataContext_CreateLevel(level, addr : Integer; var Result : IDataContext); inline;
          function  DataContext_Nil : IDataContext; inline;
 
+         function  GetStackPData : PData;
+
          procedure LocalizeSymbol(aResSymbol : TResourceStringSymbol; var Result : UnicodeString); virtual;
          procedure LocalizeString(const aString : UnicodeString; var Result : UnicodeString); virtual;
 
@@ -2013,7 +2015,7 @@ type
       private
          FScriptPos : TScriptPos;
          FScriptCallStack : TdwsExprLocationArray;
-         FRawClassName : UnicodeString;
+         FRawClassName : String;
 
          procedure SetScriptPos(const aPos : TScriptPos);
 
@@ -2022,7 +2024,7 @@ type
 
          property ScriptPos : TScriptPos read FScriptPos write SetScriptPos;//FScriptPos;
          property ScriptCallStack : TdwsExprLocationArray read FScriptCallStack write FScriptCallStack;
-         property RawClassName : UnicodeString read FRawClassName write FRawClassName;
+         property RawClassName : String read FRawClassName write FRawClassName;
    end;
 
    EScriptStopped = class (EScriptError)
@@ -2033,7 +2035,7 @@ type
 const
    cFuncKindToString : array [Low(TFuncKind)..High(TFuncKind)] of UnicodeString = (
       'function', 'procedure', 'constructor', 'destructor', 'method', 'lambda' );
-   cFirstFieldUnprepared : TFieldSymbol = Pointer(-1);
+   cFirstFieldUnprepared = Pointer(-1);
    cDefaultRandSeed : UInt64 = 88172645463325252;
 
 // ------------------------------------------------------------------
@@ -2221,14 +2223,14 @@ end;
 
 // RaiseScriptError
 //
-procedure TExprBase.RaiseScriptError(exec : TdwsExecution; const msg : UnicodeString);
+procedure TExprBase.RaiseScriptError(exec : TdwsExecution; const msg : String);
 begin
    RaiseScriptError(exec, EScriptError, msg);
 end;
 
 // RaiseScriptError
 //
-procedure TExprBase.RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : UnicodeString);
+procedure TExprBase.RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass; const msg : String);
 begin
    RaiseScriptError(exec, exceptClass.Create(msg));
 end;
@@ -2236,7 +2238,7 @@ end;
 // RaiseScriptError
 //
 procedure TExprBase.RaiseScriptError(exec : TdwsExecution; exceptClass : EScriptErrorClass;
-                                        const msg : UnicodeString; const args : array of const);
+                                        const msg : String; const args : array of const);
 begin
    RaiseScriptError(exec, exceptClass.CreateFmt(msg, args));
 end;
@@ -3561,7 +3563,7 @@ begin
       msg:=msgs.AddCompilerErrorFmt(FForwardPosition^, CPE_ForwardNotImplemented, [Name]);
       afa:=TdwsAFAAddImplementation.Create(msg, AFA_AddImplementation);
       afa.Text:= #13#10
-                +TrimRight(StringReplace(GetDescription, '()', ' ', [rfIgnoreCase]))
+                +TrimRight(UnicodeStringReplace(GetDescription, '()', ' ', [rfIgnoreCase]))
                 +';'#13#10'begin'#13#10#9'|'#13#10'end;'#13#10;
    end;
 end;
@@ -4099,9 +4101,9 @@ begin
       else if meth is TMethodSymbol then begin
          if TMethodSymbol(meth).StructSymbol=Cls then begin
             if not overloaded then
-               raise Exception.CreateFmt(CPE_MethodExists, [MethName])
+               raise EScriptError.CreateFmt(CPE_MethodExists, [MethName])
             else if not TMethodSymbol(meth).IsOverloaded then
-               raise Exception.CreateFmt(UNT_PreviousNotOverloaded, [MethName])
+               raise EScriptError.CreateFmt(UNT_PreviousNotOverloaded, [MethName])
          end;
       end;
    end;
@@ -4118,11 +4120,11 @@ begin
       IsAbstract := True;
    end else if Attributes = [maVirtual, maOverride] then begin
       if (not IsOverlap) or (ParentMeth=nil) then
-         raise Exception.CreateFmt(CPE_CanNotOverride, [Name])
+         raise EScriptError.CreateFmt(CPE_CanNotOverride, [Name])
       else if (not ParentMeth.IsVirtual)   then
-         raise Exception.CreateFmt(CPE_CantOverrideNotVirtual, [Name])
+         raise EScriptError.CreateFmt(CPE_CantOverrideNotVirtual, [Name])
       else if ParentMeth.IsFinal then
-         raise Exception.CreateFmt(CPE_CantOverrideFinal, [Name])
+         raise EScriptError.CreateFmt(CPE_CantOverrideFinal, [Name])
       else SetOverride(TMethodSymbol(meth));
    end else if Attributes = [maReintroduce] then
       //
@@ -4130,7 +4132,7 @@ begin
       SetIsStatic
    else if Attributes = [] then
       //
-   else raise Exception.Create(CPE_InvalidArgCombination);
+   else raise EScriptError.Create(CPE_InvalidArgCombination);
 end;
 
 // GetIsClassMethod
@@ -4444,7 +4446,7 @@ end;
 
 // GetExternalName
 //
-function TPropertySymbol.GetExternalName : String;
+function TPropertySymbol.GetExternalName : UnicodeString;
 begin
    if FExternalName <> '' then
       Result := FExternalName
@@ -4543,10 +4545,10 @@ end;
 //
 function TPropertySymbol.GetDescription : UnicodeString;
 begin
-   Result := Format('property %s%s: %s', [Name, GetArrayIndicesDescription, Typ.Name]);
+   Result := UnicodeFormat('property %s%s: %s', [Name, GetArrayIndicesDescription, Typ.Name]);
 
    if Assigned(FIndexSym) then
-      Result:=Result+' index '+VarToStr(FIndexValue[0]);
+      Result := Result + ' index ' + VariantToString(FIndexValue[0]);
 
    if Assigned(FReadSym) then
       Result := Result + ' read ' + FReadSym.Name;
@@ -5341,7 +5343,7 @@ end;
 //
 procedure TNilSymbol.InitData(const data : TData; offset : Integer);
 begin
-   VarCopySafe(data[offset], nil);
+   VarCopySafe(data[offset], IUnknown(nil));
 end;
 
 // ------------------
@@ -5801,12 +5803,12 @@ begin
    // Has a default parameter. Format display of param to show it.
    if Length(FDefaultValue) > 0 then begin
       if (Typ is TBaseStringSymbol) then
-         Result := Result + ' = ''' + VarToStr(FDefaultValue[0]) + ''''  // put quotes around value
+         Result := Result + ' = ''' + VariantToString(FDefaultValue[0]) + ''''  // put quotes around value
       else if VarType(FDefaultValue[0])=varUnknown then
          Result := Result + ' = nil'
       else if (Typ is TArraySymbol) then
          Result := Result + ' = []'
-      else Result := Result + ' = ' + VarToStr(FDefaultValue[0]);
+      else Result := Result + ' = ' + VariantToString(FDefaultValue[0]);
    end;
 end;
 
@@ -7194,8 +7196,8 @@ end;
 function TElementSymbol.GetDescription: UnicodeString;
 begin
    if FIsUserDef then
-      Result:=Name+' = '+IntToStr(Value)
-   else Result:=Name;
+      Result := Name+' = '+FastInt64ToStr(Value)
+   else Result := Name;
 end;
 
 // GetValue
@@ -7581,7 +7583,7 @@ end;
 
 // Create
 //
-constructor EScriptException.Create(const msgString : UnicodeString;
+constructor EScriptException.Create(const msgString : String;
       const anExceptionObj : IScriptObj; const aScriptPos: TScriptPos);
 begin
    inherited Create(msgString);
@@ -7910,6 +7912,13 @@ begin
    Result:=FStack.CreateDataContext(nil, 0);
 end;
 
+// GetStackPData
+//
+function TdwsExecution.GetStackPData : PData;
+begin
+   Result := FStack.GetPData;
+end;
+
 // ------------------
 // ------------------ TConditionSymbol ------------------
 // ------------------
@@ -7940,7 +7949,7 @@ begin
    if Length(FCallStack)>0 then begin
       Result:=result+#13#10+TExprBase.CallStackToString(FCallStack);
    end;
-   Result:=Format(MSG_RuntimeError, [Result]);
+   Result := UnicodeFormat(MSG_RuntimeError, [Result]);
 end;
 
 // ------------------

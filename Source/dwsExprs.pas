@@ -113,6 +113,8 @@ type
          procedure AddCRLF; virtual;
          procedure Clear; virtual; abstract;
 
+         function ToString : String; override; deprecated 'Use ToUnicodeString'; final;
+         function ToUnicodeString : UnicodeString; virtual;
          function ToUTF8String : UTF8String; virtual;
          function ToDataString : RawByteString; virtual;
    end;
@@ -130,7 +132,8 @@ type
          procedure AddString(const i : Int64); override;
          procedure AddCRLF; override;
          procedure Clear; override;
-         function ToString : UnicodeString; override;
+
+         function ToUnicodeString : UnicodeString; override;
          function ToDataString : RawByteString; override;
 
          property Text : UnicodeString read GetText;
@@ -1549,7 +1552,7 @@ type
          destructor Destroy; override;
          procedure BeforeDestruction; override;
 
-         function ToString : UnicodeString; override;
+         function ToUnicodeString : UnicodeString; override;
 
          procedure ClearData; override;
 
@@ -1591,7 +1594,7 @@ type
          function IndexOfInteger(const item : Int64; fromIndex : Integer) : Integer;
          function IndexOfFuncPtr(const item : Variant; fromIndex : Integer) : Integer;
 
-         function ToString : UnicodeString; override;
+         function ToUnicodeString : UnicodeString; override;
          function ToStringArray : TStringDynArray;
          function ToInt64Array : TInt64DynArray;
 
@@ -1682,7 +1685,7 @@ type
                             executionContext : TdwsProgramExecution = nil);
          procedure BeforeDestruction; override;
 
-         function ToString : UnicodeString; override;
+         function ToUnicodeString : UnicodeString; override;
 
          property Typ : TInterfaceSymbol read FTyp;
          property Instance : IScriptObj read FInstance;
@@ -3334,14 +3337,14 @@ end;
 //
 function TdwsResult.ToDataString : RawByteString;
 begin
-   Result:=ScriptStringToRawByteString(ToString);
+   Result:=ScriptStringToRawByteString(ToUnicodeString);
 end;
 
 // ToUTF8String
 //
 function TdwsResult.ToUTF8String : UTF8String;
 begin
-   Result:=UTF8Encode(ToString);
+   Result:=UTF8Encode(ToUnicodeString);
 end;
 
 // AddCRLF
@@ -3356,6 +3359,20 @@ end;
 procedure TdwsResult.AddString(const i : Int64);
 begin
    AddString(IntToStr(i));
+end;
+
+// ToString
+//
+function TdwsResult.ToString : String;
+begin
+   Result := ToUnicodeString;
+end;
+
+// ToUnicodeString
+//
+function TdwsResult.ToUnicodeString : UnicodeString;
+begin
+   Result := ClassName;
 end;
 
 // ------------------
@@ -3465,9 +3482,9 @@ end;
 
 // ToString
 //
-function TdwsDefaultResult.ToString : UnicodeString;
+function TdwsDefaultResult.ToUnicodeString : UnicodeString;
 begin
-   Result:=GetText;
+   Result := GetText;
 end;
 
 // ToDataString
@@ -6941,11 +6958,11 @@ begin
    inherited;
 end;
 
-// ToString
+// ToUnicodeString
 //
-function TScriptObjInstance.ToString : UnicodeString;
+function TScriptObjInstance.ToUnicodeString : UnicodeString;
 begin
-   Result:=FClassSym.Name;
+   Result := FClassSym.Name;
 end;
 
 // ClearData
@@ -7246,11 +7263,11 @@ begin
    Result:=-1;
 end;
 
-// ToString
+// ToUnicodeString
 //
-function TScriptDynamicArray.ToString : UnicodeString;
+function TScriptDynamicArray.ToUnicodeString : UnicodeString;
 begin
-   Result:='array of '+FElementTyp.Name;
+   Result := 'array of '+FElementTyp.Name;
 end;
 
 // ToStringArray
@@ -7716,11 +7733,11 @@ begin
    inherited;
 end;
 
-// ToString
+// ToUnicodeString
 //
-function TScriptInterface.ToString : UnicodeString;
+function TScriptInterface.ToUnicodeString : UnicodeString;
 begin
-   Result:=FTyp.ClassName;
+   Result := FTyp.ClassName;
 end;
 
 // GetScriptObj
