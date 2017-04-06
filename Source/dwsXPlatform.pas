@@ -202,8 +202,8 @@ function UnicodeStringReplace(const s, oldPattern, newPattern: String; flags: TR
 function AnsiCompareText(const S1, S2 : UnicodeString) : Integer;
 function AnsiCompareStr(const S1, S2 : UnicodeString) : Integer;
 
-function UnicodeComparePChars(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer; overload;
-function UnicodeComparePChars(p1, p2 : PWideChar; n : Integer) : Integer; overload;
+function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer; overload;
+function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
 
 function UnicodeLowerCase(const s : UnicodeString) : UnicodeString;
 function UnicodeUpperCase(const s : UnicodeString) : UnicodeString;
@@ -261,7 +261,7 @@ function LoadTextFromRawBytes(const buf : RawByteString) : UnicodeString;
 function LoadTextFromStream(aStream : TStream) : UnicodeString;
 function LoadTextFromFile(const fileName : UnicodeString) : UnicodeString;
 procedure SaveTextToUTF8File(const fileName, text : UnicodeString);
-procedure AppendTextToUTF8File(const fileName : UnicodeString; const text : UTF8String);
+procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 function OpenFileForSequentialReadOnly(const fileName : UnicodeString) : THandle;
 function OpenFileForSequentialWriteOnly(const fileName : UnicodeString) : THandle;
 procedure CloseFileHandle(hFile : THandle);
@@ -532,7 +532,11 @@ end;
 //
 function UnicodeFormat(const fmt : UnicodeString; const args : array of const) : UnicodeString;
 begin
-   Result:=Format(fmt, args);
+   {$ifdef FPC}
+   Result := UnicodeString(Format(String(fmt), args));
+   {$else}
+   Result := Format(fmt, args);
+   {$endif}
 end;
 
 // UnicodeCompareStr
@@ -573,18 +577,18 @@ begin
    {$endif}
 end;
 
-// UnicodeComparePChars
+// UnicodeCompareP
 //
-function UnicodeComparePChars(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer;
+function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer;
 const
    CSTR_EQUAL = 2;
 begin
    Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
 end;
 
-// UnicodeComparePChars
+// UnicodeCompareP
 //
-function UnicodeComparePChars(p1, p2 : PWideChar; n : Integer) : Integer; overload;
+function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
 const
    CSTR_EQUAL = 2;
 begin
@@ -763,7 +767,11 @@ end;
 function InterlockedCompareExchangePointer(var destination : Pointer; exchange, comparand : Pointer) : Pointer; {$IFDEF PUREPASCAL} inline; {$endif}
 begin
    {$ifdef FPC}
-   Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
+      {$ifdef CPU64}
+      Result := Pointer(System.InterlockedCompareExchange64(QWord(destination), QWord(exchange), QWord(comparand)));
+      {$else}
+      Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
+      {$endif}
    {$else}
    {$ifdef MSWINDOWS}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
@@ -1268,7 +1276,7 @@ end;
 
 // AppendTextToUTF8File
 //
-procedure AppendTextToUTF8File(const fileName : UnicodeString; const text : UTF8String);
+procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 var
    fs : TFileStream;
 begin
