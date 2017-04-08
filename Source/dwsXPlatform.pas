@@ -668,15 +668,9 @@ end;
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
-<<<<<<< .mine
 {$ENDIF}
 
-function NormalizeString(const s, form : UnicodeString) : UnicodeString;
-=======
 function NormalizeString(const s, form : String) : String;
-
-
->>>>>>> .theirs
 var
    nf, len : Integer;
 begin
