@@ -651,22 +651,26 @@ type
       procedure CodeGenBeginParams(codeGen : TdwsCodeGen; expr : TFuncExprBase); override;
    end;
 
-   TJSConnectorCallExpr = class (TJSExprCodeGen)
+   TJSConnectorExpr = class (TJSExprCodeGen)
+      procedure CodeGenValue(codeGen : TdwsCodeGen; expr : TTypedExpr);
+   end;
+
+   TJSConnectorCallExpr = class (TJSConnectorExpr)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
 
-   TJSConnectorReadExpr = class (TJSExprCodeGen)
+   TJSConnectorReadExpr = class (TJSConnectorExpr)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
-   TJSConnectorWriteExpr = class (TJSExprCodeGen)
-      procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
-   end;
-
-   TJSConnectorForInExpr = class (TJSExprCodeGen)
+   TJSConnectorWriteExpr = class (TJSConnectorExpr)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
 
-   TJSConnectorCastExpr = class (TJSExprCodeGen)
+   TJSConnectorForInExpr = class (TJSConnectorExpr)
+      procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
+   end;
+
+   TJSConnectorCastExpr = class (TJSConnectorExpr)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
 
@@ -1999,7 +2003,7 @@ var
    field : TFieldSymbol;
    fieldTyp : TTypeSymbol;
    prop : TPropertySymbol;
-   firstField : Boolean;
+   firstField, skipValue : Boolean;
    publishedName : String;
    locData : IDataContext;
    activeFields : array of TFieldSymbol;
@@ -2161,44 +2165,51 @@ begin
             firstField:=False
          else WriteString(',');
          WriteLiteralString(publishedName);
-         WriteString(' : ');
+         WriteString(':');
 
+         skipValue := False;
          if sym.Typ is TRecordSymbol then begin
-            WriteString('Pub$');
-            WriteSymbolName(sym.Typ);
-            WriteString('(');
-         end;
-
-         if sym.ClassType=TFieldSymbol then begin
-
-            WriteString('$');
-            WriteFieldAccessor(TFieldSymbol(sym));
-
-         end else if sym is TMethodSymbol then begin
-
-            if TMethodSymbol(sym).IsClassMethod then begin
-               WriteSymbolName(sym);
-               WriteString('()');
+            if cvPublished in TRecordSymbol(sym.Typ).MembersVisibilities then begin
+               WriteString('Pub$');
+               WriteSymbolName(sym.Typ);
+               WriteString('(');
             end else begin
-               WriteSymbolName(rec);
-               WriteString('$');
-               WriteSymbolName(sym);
-               WriteString('($)');
+               WriteString('{}');
+               skipValue := True;
             end;
+         end;
+         if not skipValue then begin
+            if sym.ClassType=TFieldSymbol then begin
 
-         end else if sym is TClassVarSymbol then begin
+               WriteString('$');
+               WriteFieldAccessor(TFieldSymbol(sym));
 
-            WriteSymbolName(sym);
+            end else if sym is TMethodSymbol then begin
 
-         end else if sym is TClassConstSymbol then begin
+               if TMethodSymbol(sym).IsClassMethod then begin
+                  WriteSymbolName(sym);
+                  WriteString('()');
+               end else begin
+                  WriteSymbolName(rec);
+                  WriteString('$');
+                  WriteSymbolName(sym);
+                  WriteString('($)');
+               end;
 
-            CreateDataContext(TClassConstSymbol(sym).Data, 0, locData);
-            WriteValue(sym.Typ, locData);
+            end else if sym is TClassVarSymbol then begin
 
-         end else Assert(False);
+               WriteSymbolName(sym);
 
-         if sym.Typ is TRecordSymbol then
-            WriteString(')');
+            end else if sym is TClassConstSymbol then begin
+
+               CreateDataContext(TClassConstSymbol(sym).Data, 0, locData);
+               WriteValue(sym.Typ, locData);
+
+            end else Assert(False);
+
+            if sym.Typ is TRecordSymbol then
+               WriteString(')');
+         end;
 
          WriteStringLn('');
       end;
@@ -5159,6 +5170,46 @@ begin
 end;
 
 // ------------------
+// ------------------ TJSConnectorExpr ------------------
+// ------------------
+
+// CodeGenValue
+//
+procedure TJSConnectorExpr.CodeGenValue(codeGen : TdwsCodeGen; expr : TTypedExpr);
+var
+   valueTyp : TTypeSymbol;
+   recordSym : TRecordSymbol;
+begin
+   valueTyp := expr.Typ;
+   if valueTyp is TRecordSymbol then begin
+      recordSym := TRecordSymbol(valueTyp);
+      if recordSym.IsExternal then begin
+         if expr.IsConstant then
+            codeGen.CompileNoWrap(expr)
+         else begin
+            codeGen.WriteString('Clone$');
+            codeGen.WriteSymbolName(recordSym);
+            codeGen.WriteString('(');
+            codeGen.CompileNoWrap(expr);
+            codeGen.WriteString(')');
+         end;
+      end else if cvPublished in recordSym.MembersVisibilities then begin
+         codeGen.WriteString('Pub$');
+         codeGen.WriteSymbolName(recordSym);
+         codeGen.WriteString('(');
+         codeGen.CompileNoWrap(expr);
+         codeGen.WriteString(')');
+      end else begin
+         codeGen.WriteString('{}');
+      end;
+   end else if valueTyp is TStaticArraySymbol then begin
+      codeGen.Compile(expr);
+      if not expr.IsConstant then
+         codeGen.WriteString('.slice()');
+   end else codeGen.CompileNoWrap(expr);
+end;
+
+// ------------------
 // ------------------ TJSConnectorCallExpr ------------------
 // ------------------
 
@@ -5195,13 +5246,13 @@ begin
    for i:=1 to n do begin
       if i>1 then
          codeGen.WriteString(',');
-      codeGen.CompileNoWrap(e.SubExpr[i] as TTypedExpr);
+      CodeGenValue(codeGen, e.SubExpr[i] as TTypedExpr);
    end;
    if e.IsIndex then begin
       codeGen.WriteString(']');
       if isWrite then begin
          codeGen.WriteString(' = ');
-         codeGen.CompileNoWrap(e.SubExpr[n+1] as TTypedExpr);
+         CodeGenValue(codeGen, e.SubExpr[n+1] as TTypedExpr);
       end;
    end else codeGen.WriteString(')');
 end;
@@ -5235,7 +5286,6 @@ procedure TJSConnectorWriteExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase)
 var
    e : TConnectorWriteExpr;
    jsMember : TdwsJSConnectorMember;
-   valueTyp : TTypeSymbol;
 begin
    e:=TConnectorWriteExpr(Expr);
    jsMember:=(e.ConnectorMember.GetSelf as TdwsJSConnectorMember);
@@ -5244,22 +5294,7 @@ begin
    codeGen.WriteString('.');
    codeGen.WriteString(jsMember.MemberName);
    codeGen.WriteString(' = ');
-   valueTyp:=e.ValueExpr.Typ;
-   if valueTyp is TRecordSymbol then begin
-      if cvPublished in TRecordSymbol(valueTyp).MembersVisibilities then begin
-         codeGen.WriteString('Pub$');
-         codeGen.WriteSymbolName(valueTyp);
-         codeGen.WriteString('(');
-         codeGen.Compile(e.ValueExpr);
-         codeGen.WriteString(')');
-      end else begin
-         codeGen.WriteString('{}');
-      end;
-   end else if valueTyp is TStaticArraySymbol then begin
-      codeGen.Compile(e.ValueExpr);
-      if not e.ValueExpr.IsConstant then
-         codeGen.WriteString('.slice()');
-   end else codeGen.Compile(e.ValueExpr);
+   CodeGenValue(codeGen, e.ValueExpr);
 end;
 
 // ------------------
@@ -5441,19 +5476,24 @@ end;
 procedure TJSAssociativeArrayGetExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    e : TAssociativeArrayGetExpr;
-   keyTyp : TTypeSymbol;
+   keyTyp, valueTyp : TTypeSymbol;
 begin
    e:=TAssociativeArrayGetExpr(expr);
 
    keyTyp := e.KeyExpr.Typ;
    Assert(keyTyp.UnAliasedTypeIs(TBaseStringSymbol) or keyTyp.UnAliasedTypeIs(TBaseIntegerSymbol),
           'Only String or Integer keys supported');
-   Assert(e.Typ.UnAliasedTypeIs(TBaseSymbol), 'Base type value required');
+   valueTyp := e.Typ.UnAliasedType;
+   Assert(not ((valueTyp is TRecordSymbol) or (valueTyp is TStaticArraySymbol)),
+          'Associative array record or static array values are not supported yet');
 
+   codeGen.WriteString('(');
    codeGen.Compile(e.BaseExpr);
    codeGen.WriteString('[');
    codeGen.CompileNoWrap(e.KeyExpr);
-   codeGen.WriteString(']');
+   codeGen.WriteString(']||');
+   TdwsJSCodeGen(codeGen).WriteDefaultValue(e.Typ, False);
+   codeGen.WriteString(')');
 end;
 
 // ------------------
@@ -5465,14 +5505,16 @@ end;
 procedure TJSAssociativeArraySetExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    e : TAssociativeArraySetExpr;
-   keyTyp : TTypeSymbol;
+   keyTyp, valueTyp : TTypeSymbol;
 begin
    e:=TAssociativeArraySetExpr(expr);
 
    keyTyp := e.KeyExpr.Typ;
    Assert(keyTyp.UnAliasedTypeIs(TBaseStringSymbol) or keyTyp.UnAliasedTypeIs(TBaseIntegerSymbol),
           'Only String or Integer keys supported');
-   Assert(e.ValueExpr.Typ.UnAliasedTypeIs(TBaseSymbol), 'Base type value required');
+   valueTyp := e.ValueExpr.Typ.UnAliasedType;
+   Assert(not ((valueTyp is TRecordSymbol) or (valueTyp is TStaticArraySymbol)),
+          'Associative array record or static array values are not supported yet');
 
    codeGen.Compile(e.BaseExpr);
    codeGen.WriteString('[');
@@ -5498,7 +5540,6 @@ begin
    keyTyp := e.Left.Typ;
    Assert(keyTyp.UnAliasedTypeIs(TBaseStringSymbol) or keyTyp.UnAliasedTypeIs(TBaseIntegerSymbol),
           'Only String or Integer keys supported');
-   Assert(e.Typ.UnAliasedTypeIs(TBaseSymbol), 'Base type value required');
 
    codeGen.Compile(e.Right);
    codeGen.WriteString('.hasOwnProperty(');
@@ -7334,6 +7375,8 @@ begin
 
       if typ.LowBound=0 then
          codeGen.CompileNoWrap(e.IndexExpr)
+      else if e.IndexExpr.ClassType = TConstIntExpr then
+         codeGen.WriteInteger(TConstIntExpr(e.IndexExpr).Value - typ.LowBound)
       else begin
          codeGen.WriteString('(');
          codeGen.CompileNoWrap(e.IndexExpr);
