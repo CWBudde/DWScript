@@ -251,6 +251,8 @@ type
 
          function IsFalsey : Boolean;
 
+         procedure Clear;
+
          property AsString : UnicodeString read GetAsString write SetAsString;
          property IsNull : Boolean read GetIsNull write SetIsNull;
          property IsDefined : Boolean read GetIsDefined;
@@ -343,6 +345,8 @@ type
          function AddValue(const name, value : UnicodeString) : TdwsJSONImmediate; overload;
          function AddValue(const name : UnicodeString; const value : Double) : TdwsJSONImmediate; overload;
          function AddValue(const name : UnicodeString; const value : Boolean) : TdwsJSONImmediate; overload;
+
+         procedure Delete(const name : UnicodeString);
 
          procedure WriteTo(writer : TdwsJSONWriter); override;
 
@@ -459,6 +463,8 @@ type
          property AsBoolean : Boolean read GetAsBoolean write SetAsBoolean;
          property AsNumber : Double read GetAsNumber write SetAsNumber;
          property AsInteger : Int64 read GetAsInteger write SetAsInteger;
+
+         procedure Clear;
    end;
 
    EdwsJSONException = class (Exception);
@@ -1151,6 +1157,13 @@ begin
    Result:=(not Assigned(Self)) or DoIsFalsey;
 end;
 
+// Clear
+//
+procedure TdwsJSONValue.Clear;
+begin
+   Value.Clear;
+end;
+
 // GetValue
 //
 function TdwsJSONValue.GetValue(const index : Variant) : TdwsJSONValue;
@@ -1517,6 +1530,8 @@ end;
 //
 procedure TdwsJSONObject.AddHashed(hash : Cardinal; const aName : UnicodeString; aValue : TdwsJSONValue);
 begin
+   if aValue = nil then
+      aValue := vImmediate.Create;
    Assert(aValue.Owner=nil);
    aValue.FOwner:=Self;
    if FCount=FCapacity then Grow;
@@ -1548,6 +1563,17 @@ function TdwsJSONObject.AddValue(const name : UnicodeString) : TdwsJSONImmediate
 begin
    Result:=vImmediate.Create;
    Add(name, Result);
+end;
+
+// Delete
+//
+procedure TdwsJSONObject.Delete(const name : UnicodeString);
+var
+   i : Integer;
+begin
+   i := IndexOfName(name);
+   if i >= 0 then
+      DetachIndex(i);
 end;
 
 // MergeDuplicates
@@ -2119,7 +2145,7 @@ begin
          if index=FCount-1 then begin
             DeleteIndex(index);
             Exit;
-         end else v:=TdwsJSONImmediate.Create
+         end else v:=vImmediate.Create
       else v:=value;
 
       FElements[index].ClearOwner;
@@ -2509,6 +2535,14 @@ begin
    end;
 end;
 
+// Clear
+//
+procedure TdwsJSONImmediate.Clear;
+begin
+   IsNull := True;
+   FType := jvtUndefined;
+end;
+
 // GetAsVariant
 //
 function TdwsJSONImmediate.GetAsVariant : Variant;
@@ -2521,6 +2555,7 @@ end;
 procedure TdwsJSONImmediate.SetAsVariant(const val : Variant);
 begin
    case VariantType(val) of
+      varEmpty : Clear;
       varNull : IsNull:=True;
       {$ifdef FPC}
       varString : AsString:=val;

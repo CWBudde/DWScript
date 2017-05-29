@@ -58,6 +58,7 @@ type
          FCloneCall : IConnectorCall;
          FExtendCall : IConnectorCall;
          FAddCall : IConnectorCall;
+         FDeleteCall : IConnectorCall;
          FToStringCall : IConnectorCall;
          FLengthMember : IConnectorMember;
 
@@ -121,6 +122,11 @@ type
    end;
 
    TdwsJSONAddCall = class (TdwsJSONFastCallBase, IConnectorFastCall)
+      public
+         procedure FastCall(const args : TExprBaseListExec; var result : Variant);
+   end;
+
+   TdwsJSONDeleteCall = class (TdwsJSONFastCallBase, IConnectorFastCall)
       public
          procedure FastCall(const args : TExprBaseListExec; var result : Variant);
    end;
@@ -291,7 +297,7 @@ const
    SYS_JSON_SERIALIZE = 'Serialize';
 
 type
-   TBoxedJSONValue = class (TInterfacedObject, IBoxedJSONValue, ICoalesceable, IGetSelf, IUnknown)
+   TBoxedJSONValue = class (TInterfacedObject, IBoxedJSONValue, ICoalesceable, INullable, IGetSelf, IUnknown)
       FValue : TdwsJSONValue;
 
       constructor Create(wrapped : TdwsJSONValue);
@@ -307,6 +313,8 @@ type
       function Value : TdwsJSONValue;
 
       function IsFalsey : Boolean;
+      function IsNull : Boolean;
+      function IsDefined : Boolean;
 
       class procedure Allocate(wrapped : TdwsJSONValue; var v : Variant); static;
       class procedure AllocateOrGetImmediate(wrapped : TdwsJSONValue; var v : Variant); static;
@@ -386,6 +394,20 @@ begin
    Result:=FValue.IsFalsey;
 end;
 
+// IsNull
+//
+function TBoxedJSONValue.IsNull : Boolean;
+begin
+   Result := FValue.IsNull;
+end;
+
+// IsDefined
+//
+function TBoxedJSONValue.IsDefined : Boolean;
+begin
+   Result := FValue.IsDefined;
+end;
+
 // Allocate
 //
 class procedure TBoxedJSONValue.Allocate(wrapped : TdwsJSONValue; var v : Variant);
@@ -401,7 +423,7 @@ end;
 class procedure TBoxedJSONValue.AllocateOrGetImmediate(wrapped : TdwsJSONValue; var v : Variant);
 begin
    if wrapped=nil then
-      v:=vNilJSONValue
+      VarClear(v)
    else if wrapped.IsImmediateValue then
       TdwsJSONImmediate(wrapped).GetAsVariant(v)
    else begin
@@ -574,6 +596,7 @@ begin
    FCloneCall:=TdwsJSONCloneCall.Create;
    FExtendCall:=TdwsJSONExtendCall.Create;
    FAddCall:=TdwsJSONAddCall.Create;
+   FDeleteCall:=TdwsJSONDeleteCall.Create;
    FToStringCall:=TdwsJSONToStringCall.Create;
 
    FLengthMember:=TdwsJSONConnectorLengthMember.Create('length');
@@ -657,6 +680,17 @@ begin
 
       Result:=FAddCall;
       typSym:=FTable.TypInteger;
+
+   end else if UnicodeSameText(methodName, 'delete') then begin
+
+      if Length(params)<>1 then
+         raise ECompileException.CreateFmt(CPE_BadNumberOfParameters, [1, Length(params)]);
+      paramTyp := params[0].TypSym;
+      if not (paramTyp.UnAliasedType is TBaseStringSymbol) then
+         raise ECompileException.CreateFmt(CPE_BadParameterType, [0, SYS_STRING, paramTyp.Caption]);
+
+      Result:=FDeleteCall;
+      typSym:=nil;
 
    end else begin
 
@@ -841,7 +875,7 @@ begin
    v:=TBoxedJSONValue.UnBox(base);
    if v<>nil then
       VarCopySafe(result, IBoxedJSONValue(TBoxedJSONValue.Create(v.Clone)))
-   else VarCopySafe(result, vNilJSONValue);
+   else VarClear(result);
 end;
 
 // ------------------
@@ -917,6 +951,26 @@ begin
 end;
 
 // ------------------
+// ------------------ TdwsJSONDeleteCall ------------------
+// ------------------
+
+// FastCall
+//
+procedure TdwsJSONDeleteCall.FastCall(const args : TExprBaseListExec; var result : Variant);
+var
+   base : Variant;
+   baseValue : TdwsJSONValue;
+   name : String;
+begin
+   args.EvalAsVariant(0, base);
+   baseValue:=TBoxedJSONValue.UnBox(base);
+   if baseValue.ValueType <> jvtObject then
+      raise EdwsJSONException.Create('JSON Object required for Delete method');
+   args.EvalAsString(1, name);
+   TdwsJSONObject(baseValue).Delete(name);
+end;
+
+// ------------------
 // ------------------ TdwsJSONToStringCall ------------------
 // ------------------
 
@@ -963,7 +1017,7 @@ begin
          Exit;
       end;
    end;
-   VarCopySafe(Result, vNilJSONValue);
+   VarClear(Result);
 end;
 
 // ------------------
@@ -1020,7 +1074,7 @@ begin
             argValue:=TdwsJSONImmediate.FromVariant(Null);
          end;
          varEmpty : begin
-            argValue:=nil;
+            argValue:=TdwsJSONImmediate.Create;
          end;
       else
          if VarIsNumeric(val) then begin
@@ -1082,7 +1136,7 @@ begin
    if v<>nil then begin
       v:=v.HashedItems[FMemberHash, FMemberName];
       TBoxedJSONValue.AllocateOrGetImmediate(v, result)
-   end else VarCopySafe(result, vNilJSONValue);
+   end else VarClear(result);
 end;
 
 // FastWrite
@@ -1108,11 +1162,11 @@ begin
             end;
          end;
          varEmpty :
-            dataValue := nil;
+            dataValue := TdwsJSONImmediate.Create;
       else
          dataValue := TdwsJSONImmediate.FromVariant(v);
       end;
-   end else dataValue := nil;
+   end else dataValue := TdwsJSONImmediate.Create;
 
    baseValue.HashedItems[FMemberHash, FMemberName]:=dataValue;
 end;
@@ -1138,7 +1192,7 @@ begin
          v:=v.Items[FMemberName];
          TBoxedJSONValue.AllocateOrGetImmediate(v, result)
       end;
-   end else VarCopySafe(result, vNilJSONValue);
+   end else VarClear(result);
 end;
 
 // ------------------
@@ -1188,12 +1242,16 @@ procedure TJSONParseMethod.DoEvalAsVariant(const args : TExprBaseListExec; var r
 var
    v : TdwsJSONValue;
    box : TBoxedJSONValue;
+   json : String;
 begin
-   v:=TdwsJSONValue.ParseString(UnicodeString(args.AsString[0]));
-   if v=nil then
-      box:=nil
-   else box:=TBoxedJSONValue.Create(v);
-   VarCopySafe(result, IBoxedJSONValue(box));
+   args.EvalAsString(0, json);
+   if json <> '' then begin
+      v:=TdwsJSONValue.ParseString(json);
+      if v=nil then
+         box:=nil
+      else box:=TBoxedJSONValue.Create(v);
+      VarCopySafe(result, IBoxedJSONValue(box));
+   end else VarClearSafe(result);
 end;
 
 // ------------------
@@ -1672,9 +1730,13 @@ var
    box : TBoxedJSONValue;
 begin
    Right.EvalAsVariant(exec, rv);
-   v:=TdwsJSONImmediate.FromVariant(rv);
-   box:=TBoxedJSONValue.Create(v);
-   Left.AssignValue(exec, IBoxedJSONValue(box));
+   if VarIsEmpty(rv) then
+      Left.AssignValue(exec, rv)
+   else begin
+      v:=TdwsJSONImmediate.FromVariant(rv);
+      box:=TBoxedJSONValue.Create(v);
+      Left.AssignValue(exec, IBoxedJSONValue(box));
+   end;
 end;
 
 // ------------------------------------------------------------------
