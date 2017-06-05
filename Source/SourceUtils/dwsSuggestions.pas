@@ -37,7 +37,7 @@ type
                              scProperty,
                              scEnum, scElement,
                              scParameter,
-                             scVariable, scConst,
+                             scField, scVariable, scConst,
                              scReservedWord,
                              scSpecialFunction);
 
@@ -62,9 +62,17 @@ type
    TReservedWordSymbol = class(TSymbol);
    TSpecialFunctionSymbol = class(TSymbol);
 
+   TSuggestionFuncSymbol = class (TFuncSymbol)
+   end;
+   TSuggestionForcedParenthesisFuncSymbol = class (TSuggestionFuncSymbol)
+   end;
+
    TSimpleSymbolList = class;
 
    TProcAddToList = procedure (aList : TSimpleSymbolList) of object;
+
+   TAddMembersOption = (amoMeta, amoInstance, amoTypedOnly);
+   TAddMembersOptions = set of TAddMembersOption;
 
    TSimpleSymbolList = class(TSimpleList<TSymbol>)
       protected
@@ -78,10 +86,12 @@ type
 
          procedure AddEnumeration(enum : TEnumerationSymbol; const addToList : TProcAddToList = nil);
          procedure AddMembers(struc : TCompositeTypeSymbol; from : TSymbol;
-                              const addToList : TProcAddToList = nil);
-         procedure AddMetaMembers(struc : TCompositeTypeSymbol; from : TSymbol;
-                                  const addToList : TProcAddToList = nil);
+                              options : TAddMembersOptions;
+                              const addToList : TProcAddToList = nil;
+                              restrictTo : TSymbolClass = nil);
          procedure AddNameSpace(unitSym : TUnitSymbol);
+
+         procedure Remove(sym : TSymbol);
    end;
 
    TdwsSuggestionsOption = (soNoReservedWords, soNoUnits);
@@ -112,6 +122,7 @@ type
          FDynArrayHelpers : TSymbolTable;
          FAssocArrayHelpers : TSymbolTable;
          FEnumElementHelpers : TSymbolTable;
+         FJSONVariantHelpers : TSymbolTable;
          FOptions: TdwsSuggestionsOptions;
 
       protected
@@ -130,11 +141,13 @@ type
          function IsContextSymbol(sym : TSymbol) : Boolean;
 
          function CreateHelper(const name : String; resultType : TTypeSymbol;
-                               const args : array of const) : TFuncSymbol;
+                               const args : array of const;
+                               forceParenthesis : Boolean = False) : TFuncSymbol;
          procedure AddEnumerationElementHelpers(list : TSimpleSymbolList);
          procedure AddStaticArrayHelpers(list : TSimpleSymbolList);
          procedure AddDynamicArrayHelpers(dyn : TDynamicArraySymbol; list : TSimpleSymbolList);
          procedure AddAssociativeArrayHelpers(assoc : TAssociativeArraySymbol; list : TSimpleSymbolList);
+         procedure AddJSONVariantHelpers(list : TSimpleSymbolList);
          procedure AddTypeHelpers(typ : TTypeSymbol; meta : Boolean; list : TSimpleSymbolList);
          procedure AddUnitSymbol(unitSym : TUnitSymbol; list : TSimpleSymbolList);
 
@@ -171,10 +184,13 @@ type
 // OnHelper
 //
 function THelperFilter.OnHelper(helper : THelperSymbol) : Boolean;
+var
+   opt : TAddMembersOptions;
 begin
+   opt := [amoMeta];
    if not Meta then
-      List.AddMembers(helper, nil);
-   List.AddMetaMembers(helper, nil);
+      Include(opt, amoInstance);
+   List.AddMembers(helper, nil, opt);
    Result:=False;
 end;
 
@@ -228,6 +244,7 @@ begin
    FDynArrayHelpers.Free;
    FAssocArrayHelpers.Free;
    FEnumElementHelpers.Free;
+   FJSONVariantHelpers.Free;
    inherited;
 end;
 
@@ -386,6 +403,7 @@ var
    tmp : TStringList;
    sym : TSymbol;
 begin
+   if aList.Count = 0 then Exit;
    tmp:=TFastCompareTextList.Create;
    try
       tmp.CaseSensitive:=False;
@@ -442,17 +460,22 @@ end;
 // CreateHelper
 //
 function TdwsSuggestions.CreateHelper(const name : String; resultType : TTypeSymbol;
-                                      const args : array of const) : TFuncSymbol;
+                                      const args : array of const;
+                                      forceParenthesis : Boolean = False) : TFuncSymbol;
 var
    i : Integer;
    p : TParamSymbol;
+   funcKind : TFuncKind;
 begin
-   if resultType=nil then
-      Result:=TFuncSymbol.Create(name, fkProcedure, 0)
-   else begin
-      Result:=TFuncSymbol.Create(name, fkFunction, 0);
-      Result.Typ:=resultType;
-   end;
+   if resultType = nil then
+      funcKind := fkProcedure
+   else funcKind := fkFunction;
+   if forceParenthesis then
+      Result := TSuggestionForcedParenthesisFuncSymbol.Create(name, funcKind, 0)
+   else Result:=TSuggestionFuncSymbol.Create(name, funcKind, 0);
+   if resultType <> nil then
+      Result.Typ := resultType;
+
    for i:=0 to (Length(args) div 2)-1 do begin
       Assert(args[i*2].VType=vtUnicodeString);
       Assert(args[i*2+1].VType=vtObject);
@@ -541,6 +564,31 @@ begin
    end;
 
    list.AddSymbolTable(FAssocArrayHelpers);
+end;
+
+// AddJSONVariantHelpers
+//
+procedure TdwsSuggestions.AddJSONVariantHelpers(list : TSimpleSymbolList);
+var
+   p : TdwsCompilerContext;
+begin
+   if FJSONVariantHelpers=nil then begin
+      p:=FProg.ProgramObject.CompilerContext;
+      FJSONVariantHelpers:=TSystemSymbolTable.Create;
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Add', p.TypInteger, ['item', p.TypAnyType]));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Push', p.TypInteger, ['item', p.TypAnyType]));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Length', p.TypInteger, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Low', p.TypInteger, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('High', p.TypInteger, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Clone', p.TypVariant, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('ToString', p.TypString, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Extend', p.TypVariant, ['obj', p.TypVariant]));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('Delete', nil, ['name', p.TypString]));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('TypeName', p.TypString, [], True));
+      FJSONVariantHelpers.AddSymbol(CreateHelper('ElementName', p.TypString, ['index', p.TypInteger]));
+   end;
+
+   list.AddSymbolTable(FJSONVariantHelpers);
 end;
 
 // AddTypeHelpers
@@ -659,29 +707,29 @@ begin
          end else if FPreviousSymbol is TStructuredTypeSymbol then begin
 
             if not FPreviousSymbolIsMeta then
-               list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol)
+               list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol, [amoInstance, amoMeta])
             else begin
                if FPreviousToken in [ttPROCEDURE, ttFUNCTION, ttMETHOD, ttCONSTRUCTOR, ttDESTRUCTOR]  then begin
                   FSymbolClassFilter:=TFuncSymbol;
-                  list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol);
-               end else list.AddMetaMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol);
+                  list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol, [amoInstance, amoMeta]);
+               end else list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol), FContextSymbol, [amoMeta]);
             end;
 
          end else if     (FPreviousSymbol is TMethodSymbol)
                      and (TMethodSymbol(FPreviousSymbol).Kind=fkConstructor) then begin
 
-            list.AddMembers(TMethodSymbol(FPreviousSymbol).StructSymbol, FContextSymbol);
+            list.AddMembers(TMethodSymbol(FPreviousSymbol).StructSymbol, FContextSymbol, [amoInstance]);
 
          end else if FPreviousSymbol.Typ is TStructuredTypeSymbol then begin
 
             if     (FContextSymbol is TMethodSymbol)
                and (TMethodSymbol(FContextSymbol).StructSymbol=FPreviousSymbol.Typ) then
-               list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol.Typ), FContextSymbol, AddToList)
-            else list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol.Typ), FContextSymbol);
+               list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol.Typ), FContextSymbol, [amoInstance, amoMeta], AddToList)
+            else list.AddMembers(TStructuredTypeSymbol(FPreviousSymbol.Typ), FContextSymbol, [amoInstance, amoMeta]);
 
          end else if FPreviousSymbol.Typ is TStructuredTypeMetaSymbol then begin
 
-            list.AddMetaMembers(TStructuredTypeMetaSymbol(FPreviousSymbol.Typ).StructSymbol, FContextSymbol);
+            list.AddMembers(TStructuredTypeMetaSymbol(FPreviousSymbol.Typ).StructSymbol, FContextSymbol, [amoMeta]);
 
          end else if FPreviousSymbol is TUnitSymbol then begin
 
@@ -710,6 +758,10 @@ begin
                      or (FPreviousSymbol.Typ is TEnumerationSymbol) then begin
 
             AddEnumerationElementHelpers(list);
+
+         end else if (FPreviousSymbol.Typ is TBaseVariantSymbol) and (FPreviousSymbol.Typ.Name='JSONVariant') then begin
+
+            AddJSONVariantHelpers(list);
 
          end else if list.Count=0 then
 
@@ -753,10 +805,21 @@ begin
             if funcSym is TMethodSymbol then begin
                methSym:=TMethodSymbol(funcSym);
                if methSym.IsClassMethod then
-                  list.AddMetaMembers(methSym.StructSymbol, methSym.StructSymbol, AddToList)
-               else list.AddMembers(methSym.StructSymbol, methSym.StructSymbol, AddToList);
+                  list.AddMembers(methSym.StructSymbol, methSym.StructSymbol, [amoMeta], AddToList)
+               else list.AddMembers(methSym.StructSymbol, methSym.StructSymbol, [amoInstance, amoMeta], AddToList);
             end;
-        end;
+         end;
+
+         case context.Token of
+            ttARRAY : begin
+               if context.ParentSym is TRecordSymbol then
+                  list.AddMembers(TRecordSymbol(context.ParentSym), TRecordSymbol(context.ParentSym), [amoInstance, amoMeta], AddToList, TFieldSymbol);
+            end;
+            ttPROPERTY : if context.ParentSym is TPropertySymbol then begin
+               list.AddMembers(TPropertySymbol(context.ParentSym).OwnerSymbol, nil, [amoInstance, amoMeta, amoTypedOnly], AddToList);
+               FList.Remove(context.ParentSym);
+            end;
+         end;
 
          context:=context.Parent;
       end;
@@ -824,7 +887,7 @@ end;
 //
 function TdwsSuggestions.GetCode(i : Integer) : String;
 begin
-   Result:=FList[i].Name;
+   Result := FList[i].Name;
 end;
 
 // GetCategory
@@ -869,7 +932,9 @@ begin
 
    end else if symbolClass.InheritsFrom(TValueSymbol) then begin
 
-      if symbolClass.InheritsFrom(TParamSymbol) then
+      if symbolClass.InheritsFrom(TFieldSymbol) then
+         Result:=scField
+      else if symbolClass.InheritsFrom(TParamSymbol) then
          Result:=scParameter
       else if symbolClass.InheritsFrom(TPropertySymbol) then
          Result:=scProperty
@@ -1043,45 +1108,9 @@ end;
 // AddMembers
 //
 procedure TSimpleSymbolList.AddMembers(struc : TCompositeTypeSymbol; from : TSymbol;
-                                       const addToList : TProcAddToList = nil);
-var
-   sym : TSymbol;
-   symClass : TClass;
-   scope : TCompositeTypeSymbol;
-   visibility : TdwsVisibility;
-   first : Boolean;
-begin
-   scope:=ScopeStruct(from);
-   visibility:=ScopeVisiblity(scope, struc);
-   first:=True;
-
-   repeat
-      for sym in struc.Members do begin
-         symClass:=sym.ClassType;
-         if    (symClass=TClassOperatorSymbol)
-            or (symClass=TClassConstSymbol)
-            or (symClass=TClassVarSymbol)
-            then continue;
-         if not sym.IsVisibleFor(visibility) then continue;
-         Add(sym);
-      end;
-      if first then begin
-         first:=False;
-         if Assigned(addToList) then begin
-            addToList(Self);
-            Clear;
-         end;
-      end;
-      if visibility=cvPrivate then
-         visibility:=cvProtected;
-      struc:=struc.Parent;
-   until struc=nil;
-end;
-
-// AddMetaMembers
-//
-procedure TSimpleSymbolList.AddMetaMembers(struc : TCompositeTypeSymbol; from : TSymbol;
-                                           const addToList : TProcAddToList = nil);
+                                       options : TAddMembersOptions;
+                                       const addToList : TProcAddToList = nil;
+                                       restrictTo : TSymbolClass = nil);
 
    function IsMetaAccessor(sym : TSymbol) : Boolean;
    var
@@ -1096,9 +1125,9 @@ procedure TSimpleSymbolList.AddMetaMembers(struc : TCompositeTypeSymbol; from : 
 
 var
    sym : TSymbol;
-   methSym : TMethodSymbol;
-   propSym : TPropertySymbol;
+   symClass : TClass;
    scope : TCompositeTypeSymbol;
+   methSym : TMethodSymbol;
    visibility : TdwsVisibility;
    first, allowConstructors : Boolean;
 begin
@@ -1109,22 +1138,31 @@ begin
 
    repeat
       for sym in struc.Members do begin
+         if sym.Name = '' then continue;
+         symClass:=sym.ClassType;
+         if symClass=TClassOperatorSymbol then continue;
+         if (restrictTo <> nil) and not symClass.InheritsFrom(restrictTo) then continue;
          if not sym.IsVisibleFor(visibility) then continue;
-         if sym is TMethodSymbol then begin
-            methSym:=TMethodSymbol(sym);
-            if     methSym.IsClassMethod
-               or (    allowConstructors
-                   and (methSym.Kind=fkConstructor)) then
-               Add(Sym);
-         end else if sym is TClassConstSymbol then begin
-            Add(sym);
-         end else if sym is TClassVarSymbol then begin
-            Add(sym);
-         end else if sym is TPropertySymbol then begin
-            propSym:=TPropertySymbol(sym);
-            if IsMetaAccessor(propSym.ReadSym) or IsMetaAccessor(propSym.WriteSym) then
-               Add(sym);
+
+         if    (symClass=TClassConstSymbol)
+            or (symClass=TClassVarSymbol) then begin
+
+            if not (amoMeta in options) then continue;
+
+         end else if sym is TMethodSymbol then begin
+
+            methSym := TMethodSymbol(sym);
+
+            if methSym.IsClassMethod then begin
+               if not (amoMeta in options) then continue;
+            end else if methSym.Kind=fkConstructor then begin
+               if not allowConstructors then continue;
+            end else if not (amoInstance in options) then continue;
+
          end;
+
+         if (sym.Typ <> nil) or not (amoTypedOnly in options) then
+            Add(sym);
       end;
       if first then begin
          first:=False;
@@ -1146,6 +1184,20 @@ begin
    if unitSym.Main<>nil then
       Add(unitSym)
    else unitSym.EnumerateNameSpaceUnits(AddNameSpace);
+end;
+
+// Remove
+//
+procedure TSimpleSymbolList.Remove(sym : TSymbol);
+var
+   i : Integer;
+begin
+   for i := Count-1 downto 0 do begin
+      if Items[i] = sym then begin
+         Extract(i);
+         Break;
+      end;
+   end;
 end;
 
 end.

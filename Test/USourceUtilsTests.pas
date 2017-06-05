@@ -9,7 +9,7 @@ uses
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsDataContext,
    dwsTokenizer, dwsErrors, dwsUtils, Variants, dwsSymbols, dwsSuggestions,
    dwsFunctions, dwsCaseNormalizer, dwsScriptSource, dwsSymbolDictionary,
-   dwsCompilerContext, dwsUnicode;
+   dwsCompilerContext, dwsUnicode, dwsJSONConnector;
 
 type
 
@@ -36,6 +36,7 @@ type
          procedure ObjectArrayTest;
          procedure AssociativeArrayTest;
          procedure HelperSuggestTest;
+         procedure JSONVariantSuggestTest;
          procedure SuggestInUsesSection;
          procedure SuggestAfterCall;
          procedure SuggestAcrossLines;
@@ -45,6 +46,8 @@ type
          procedure BigEnumerationNamesAndValues;
          procedure EnumerationSuggest;
          procedure StaticClassSuggest;
+         procedure ClassFieldSuggest;
+         procedure RecordConstSuggest;
          procedure SuggestInBlockWithError;
          procedure NormalizeOverload;
          procedure OptimizedIfThenBlockSymbol;
@@ -466,6 +469,40 @@ begin
       CheckEquals(cSugg[i], sugg.Code[i], 'd. '+IntToStr(i));
 end;
 
+// JSONVariantSuggestTest
+//
+procedure TSourceUtilsTests.JSONVariantSuggestTest;
+const
+   cSugg : array [0..10] of String = (
+      'Add', 'Clone', 'Delete', 'ElementName', 'Extend', 'High', 'Length',
+      'Low', 'Push', 'ToString', 'TypeName'
+      );
+
+var
+   module : TdwsJSONLibModule;
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+   i : Integer;
+begin
+   module := TdwsJSONLibModule.Create(nil);
+   try
+      module.Script := FCompiler;
+
+      prog:=FCompiler.Compile( 'var v : JSONVariant;'#13#10
+                              +'v.');
+
+      scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 3);
+      sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
+
+      CheckEquals(Length(cSugg), sugg.Count, 'd.');
+      for i:=0 to High(cSugg) do
+         CheckEquals(cSugg[i], sugg.Code[i], 'd. '+IntToStr(i));
+   finally
+      module.Free;
+   end;
+end;
+
 // SuggestAfterCall
 //
 procedure TSourceUtilsTests.SuggestAfterCall;
@@ -736,6 +773,59 @@ begin
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
    CheckEquals(1, sugg.Count, 'column 6,10');
    CheckEquals('Test', sugg.Code[0], 'sugg 6, 14, 0');
+end;
+
+// ClassFieldSuggest
+//
+procedure TSourceUtilsTests.ClassFieldSuggest;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog:=FCompiler.Compile( 'type TTest = class fi : Integer; fs : String;'#13#10
+                           +'class const fc = 123;'#13#10
+                           +'property F : Integer read '#13#10
+                           +'f');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 4, 2);
+
+   sugg:=TdwsSuggestions.Create(prog, scriptPos);
+   Check(sugg.Count > 3);
+   CheckEquals('fc', sugg.Code[0]);
+   CheckEquals('fi', sugg.Code[1]);
+   CheckEquals('fs', sugg.Code[2]);
+   CheckEquals('Factorial', sugg.Code[3]);
+end;
+
+// RecordConstSuggest
+//
+procedure TSourceUtilsTests.RecordConstSuggest;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog:=FCompiler.Compile( 'type TTest = record xyz, abc : Integer; function Foo : String; end;'#13#10
+                           +'const c : array of TTest = [('#13#10
+                           +'x');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 3, 2);
+
+   sugg:=TdwsSuggestions.Create(prog, scriptPos);
+   CheckEquals(2, sugg.Count);
+   CheckEquals('xyz', sugg.Code[0]);
+   CheckEquals('xor', sugg.Code[1]);
+
+   prog:=FCompiler.Compile( 'type TTest = record xyz, abc : Integer; function Foo : String; end;'#13#10
+                           +'const c : array of TTest = [('#13#10);
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 3, 1);
+
+   sugg:=TdwsSuggestions.Create(prog, scriptPos);
+   Check(sugg.Count > 2);
+   CheckEquals('abc', sugg.Code[0]);
+   CheckEquals('xyz', sugg.Code[1]);
 end;
 
 // SuggestInBlockWithError

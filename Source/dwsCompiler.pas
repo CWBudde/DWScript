@@ -1060,7 +1060,14 @@ end;
 //
 function TStandardSymbolFactory.ReadArrayConstantExpr(closingToken : TTokenType; expecting : TTypeSymbol) : TArrayConstantExpr;
 begin
-   Result:=FCompiler.ReadArrayConstant(closingToken, expecting);
+   if coContextMap in FCompiler.Options then
+      FCompiler.FSourceContextMap.OpenContext(FCompiler.FTok.CurrentPos, expecting.Typ, ttARRAY);
+   try
+      Result:=FCompiler.ReadArrayConstant(closingToken, expecting);
+   finally
+      if coContextMap in FCompiler.Options then
+         FCompiler.FSourceContextMap.CloseContext(FCompiler.FTok.CurrentPos, ttARRAY);
+   end;
 end;
 
 // ReadInitExpr
@@ -9154,6 +9161,9 @@ begin
 
    RecordSymbolUse(propSym, propNamePos, [suDeclaration]);
 
+   if coContextMap in FOptions then
+      FSourceContextMap.OpenContext(propStartPos, propSym, ttPROPERTY);
+
    if FTok.TestDelete(ttEXTERNAL) then begin
       if not FTok.Test(ttStrVal) then
          FMsgs.AddCompilerError(FTok.HotPos, CPE_StringExpected)
@@ -9290,11 +9300,8 @@ begin
    if FTok.Test(ttDEPRECATED) then
       propSym.DeprecatedMessage:=ReadDeprecatedMessage;
 
-   // register context only if we're sure the property symbol will survive
-   if coContextMap in FOptions then begin
-      FSourceContextMap.OpenContext(propStartPos, propSym, ttPROPERTY);
+   if coContextMap in FOptions then
       FSourceContextMap.CloseContext(FTok.CurrentPos);
-   end;
 end;
 
 // ReadPropertyDeclAutoField
