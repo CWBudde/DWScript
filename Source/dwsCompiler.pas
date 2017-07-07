@@ -42,7 +42,7 @@ const
    cDefaultStackChunkSize = 4096;  // 64 kB in 32bit Delphi, each stack entry is a Variant
 
    // compiler version is date in YYYYMMDD format, dot subversion number
-   cCompilerVersion = 20170117.0;
+   cCompilerVersion = 20170627.0;
 
 type
    TdwsCompiler = class;
@@ -341,7 +341,6 @@ type
          FOnResource : TdwsResourceEvent;
          FOnCodeGen : TdwsCodeGenEvent;
          FOnFilter : TdwsFilterEvent;
-         FUnits : TIdwsUnitList;
          FSystemTable : TSystemSymbolTable;
          FScriptPaths : TStrings;
          FFilter : TdwsFilter;
@@ -1251,23 +1250,23 @@ var
    curUnit : IdwsUnit;
 begin
    // Check for duplicate unit names
-   unitName:=FUnits.FindDuplicateUnitName;
+   unitName := FCompilerContext.UnitList.FindDuplicateUnitName;
    if unitName<>'' then
       FMsgs.AddCompilerStopFmt(cNullPos, CPH_UnitAlreadyReferred, [unitName]);
 
    // initialize reference count vector
-   expectedUnitCount:=FUnits.Count;
+   expectedUnitCount := FCompilerContext.UnitList.Count;
    SetLength(refCount, expectedUnitCount);
 
    // Calculate number of outgoing references
-   for i:=0 to FUnits.Count-1 do begin
-      curUnit:=FUnits[i];
+   for i:=0 to FCompilerContext.UnitList.Count-1 do begin
+      curUnit := FCompilerContext.UnitList[i];
       if    (ufImplicitUse in curUnit.GetUnitFlags)
          or (  (scriptType<>stUnit)
              and not (coExplicitUnitUses in FOptions)) then begin
          deps := curUnit.GetDependencies;
          for j:=0 to deps.Count-1 do begin
-            if FUnits.IndexOfName(deps[j])<0 then
+            if FCompilerContext.UnitList.IndexOfName(deps[j])<0 then
                FMsgs.AddCompilerStopFmt(cNullPos, CPE_UnitNotFound,
                                         [deps[j], curUnit.GetUnitName]);
          end;
@@ -1283,16 +1282,16 @@ begin
    // Resolve references
    repeat
       changed:=False;
-      for i:=0 to FUnits.Count-1 do begin
+      for i:=0 to FCompilerContext.UnitList.Count-1 do begin
          // Find unit that is not referencing other units
          if refCount[i]=0 then begin
-            curUnit:=FUnits[i];
+            curUnit := FCompilerContext.UnitList[i];
             Result.Add(curUnit);
 
             // Remove the references to this unit from all other units
             unitName:=curUnit.GetUnitName;
-            for j:=0 to FUnits.Count-1 do begin
-               deps:=FUnits[j].GetDependencies;
+            for j:=0 to FCompilerContext.UnitList.Count-1 do begin
+               deps := FCompilerContext.UnitList[j].GetDependencies;
                for k:=0 to deps.Count-1 do begin
                   if UnicodeSameText(deps[k], unitName) then
                      Dec(refCount[j]);
@@ -1472,8 +1471,6 @@ begin
    FFilter := conf.Filter;
    FConnectors := conf.Connectors;
    FOptions := conf.CompilerOptions;
-   FUnits := TIdwsUnitList.Create;
-   FUnits.AddUnits(conf.Units);
    FOnInclude := conf.OnInclude;
    FOnNeedUnit := conf.OnNeedUnit;
    FOnResource := conf.OnResource;
@@ -1546,7 +1543,6 @@ begin
    FCompileFileSystem:=nil;
    FOnInclude:=nil;
    FOnNeedUnit:=nil;
-   FreeAndNil(FUnits);
    FSystemTable:=nil;
    FUnitContextStack.Clean;
    FUnitsFromStack.Clear;
@@ -1624,6 +1620,7 @@ begin
 
    CurrentProg := FMainProg;
 
+   FCompilerContext.UnitList.AddUnits(aConf.Units);
 
    FOperators:=aConf.SystemSymbols.Operators;
    FMainProg.Operators:=FOperators;
@@ -1717,14 +1714,16 @@ var
    unitsResolved : TIdwsUnitList;
    unitTable : TUnitSymbolTable;
    unitSymbol : TUnitMainSymbol;
+   u : IdwsUnit;
 begin
    unitsResolved:=ResolveUnitReferences(scriptType);
    try
       // Get the symboltables of the units
       for i:=0 to unitsResolved.Count-1 do begin
-         unitTable:=unitsResolved[i].GetUnitTable(FSystemTable, FMainProg.UnitMains, FOperators, FMainProg.RootTable);
-         unitSymbol:=TUnitMainSymbol.Create(unitsResolved[i].GetUnitName, unitTable, FMainProg.UnitMains);
-         unitSymbol.DeprecatedMessage:=unitsResolved[i].GetDeprecatedMessage;
+         u := unitsResolved[i];
+         unitTable:=(u as IdwsUnitTableFactory).GetUnitTable(FSystemTable, FMainProg.UnitMains, FOperators, FMainProg.RootTable);
+         unitSymbol:=TUnitMainSymbol.Create(u.GetUnitName, unitTable, FMainProg.UnitMains);
+         unitSymbol.DeprecatedMessage:=u.GetDeprecatedMessage;
          unitSymbol.ReferenceInSymbolTable(CurrentProg.Table, True);
       end;
    finally
@@ -1755,19 +1754,19 @@ begin
       Exit;
    end;
 
-   i:=FUnits.IndexOfName(unitName);
+   i := FCompilerContext.UnitList.IndexOfName(unitName);
    if i<0 then begin
       if Assigned(FOnNeedUnit) then
          unitResolved:=FOnNeedUnit(unitName, unitSource);
       if unitResolved<>nil then
-         FUnits.Add(unitResolved)
+         FCompilerContext.UnitList.Add(unitResolved)
       else begin
          if unitSource='' then
             unitSource:=GetScriptSource(unitName+'.pas');
          if unitSource<>'' then begin
             srcUnit:=TSourceUnit.Create(unitName, CurrentProg.Root.RootTable, CurrentProg.UnitMains);
             unitResolved:=srcUnit;
-            FUnits.Add(unitResolved);
+            FCompilerContext.UnitList.Add(unitResolved);
             oldContext:=FSourceContextMap.SuspendContext;
             SwitchTokenizerToUnit(srcUnit, unitSource);
             FSourceContextMap.ResumeContext(oldContext);
@@ -1780,7 +1779,7 @@ begin
                                         [unitName, FUnitsFromStack.Peek]);
          Exit;
       end;
-   end else unitResolved:=FUnits[i];
+   end else unitResolved := FCompilerContext.UnitList[i];
 
    dependencies := unitResolved.GetDependencies;
    for i:=0 to dependencies.Count-1 do begin
@@ -1796,7 +1795,7 @@ begin
    if unitMain=nil then begin
       unitTable:=nil;
       try
-         unitTable:=unitResolved.GetUnitTable(FSystemTable, CurrentProg.UnitMains, FOperators, CurrentProg.RootTable);
+         unitTable:=(unitResolved as IdwsUnitTableFactory).GetUnitTable(FSystemTable, CurrentProg.UnitMains, FOperators, CurrentProg.RootTable);
          unitMain:=TUnitMainSymbol.Create(unitName, unitTable, CurrentProg.UnitMains);
          unitMain.DeprecatedMessage:=unitResolved.GetDeprecatedMessage;
       except
@@ -10650,6 +10649,7 @@ begin
                   OrphanAndNil(right);
                end;
                ttQUESTIONQUESTION : begin
+                  FCompilerContext.WrapWithImplicitCast(Result.Typ, hotPos, right);
                   rightTyp:=right.Typ;
                   if not Result.Typ.IsCompatible(rightTyp) then begin
                      if Result.Typ.UnAliasedTypeIs(TClassSymbol) and right.Typ.UnAliasedTypeIs(TClassSymbol) then begin
@@ -10677,6 +10677,8 @@ begin
                      Result:=TCoalesceDynArrayExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else if Result.Typ.IsOfType(FCompilerContext.TypInteger) then begin
                      Result:=TCoalesceIntExpr.Create(FCompilerContext, hotPos, tt, Result, right);
+                  end else if Result.Typ.IsOfType(FCompilerContext.TypFloat) then begin
+                     Result:=TCoalesceFloatExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else begin
                      FMsgs.AddCompilerError(hotPos, CPE_InvalidOperands);
                      // fake result to keep compiler going and report further issues
@@ -12063,6 +12065,8 @@ begin
    else if ASCIISameText(name, 'TIMESTAMP') then begin
       asNum := True;
       numValue := UnixTime;
+   end else if ASCIISameText(name, 'EXEVERSION') then begin
+      value := ApplicationVersion;
    end else if ASCIISameText(name, 'FUNCTION') then begin
       if CurrentProg is TdwsProcedure then begin
          funcSym:=TdwsProcedure(CurrentProg).Func;
@@ -12982,8 +12986,8 @@ begin
    if CurrentUnitSymbol=nil then begin
       // special case of a unit compiled directly (not through a main program)
       FCurrentSourceUnit:=TSourceUnit.Create(name, CurrentProg.Root.RootTable, CurrentProg.UnitMains);
-      CurrentSourceUnit.Symbol.InitializationRank:=FUnits.Count;
-      FUnits.Add(FCurrentSourceUnit);
+      CurrentSourceUnit.Symbol.InitializationRank := FCompilerContext.UnitList.Count;
+      FCompilerContext.UnitList.Add(FCurrentSourceUnit);
       FCurrentUnitSymbol:=CurrentSourceUnit.Symbol;
    end;
 

@@ -1358,6 +1358,13 @@ type
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
    end;
 
+   // left ?? right (floats)
+   TCoalesceFloatExpr = class(TFloatBinOpExpr)
+      public
+         function EvalAsFloat(exec : TdwsExecution) : Double; override;
+         function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
+   end;
+
    // left ?? right (class)
    TCoalesceClassExpr = class(TBinaryOpExpr)
       public
@@ -6145,6 +6152,39 @@ begin
 end;
 
 // ------------------
+// ------------------ TCoalesceFloatExpr ------------------
+// ------------------
+
+// EvalAsFloat
+//
+function TCoalesceFloatExpr.EvalAsFloat(exec : TdwsExecution) : Double;
+begin
+   Result := Left.EvalAsFloat(exec);
+   if Result = 0 then
+      Result := Right.EvalAsFloat(exec);
+end;
+
+// Optimize
+//
+function TCoalesceFloatExpr.Optimize(context : TdwsCompilerContext) : TProgramExpr;
+var
+   f : Double;
+begin
+   if Left.IsConstant then begin
+      f := Left.EvalAsFloat(context.Execution);
+      if f = 0 then begin
+         Result := Right;
+         FRight := nil;
+      end else begin
+         Result := Left;
+         FLeft := nil;
+      end;
+      Orphan(context);
+      Exit;
+   end else Result := inherited Optimize(context);
+end;
+
+// ------------------
 // ------------------ TCoalesceClassExpr ------------------
 // ------------------
 
@@ -10671,7 +10711,7 @@ var
    dyn : TScriptDynamicArray;
 begin
    Expr.EvalAsScriptAssociativeArray(exec, a);
-   dyn := TScriptDynamicArray.CreateNew(Typ);
+   dyn := TScriptDynamicArray.CreateNew(Typ.Typ);
    Result := dyn;
    if a <> nil then
       dyn.ReplaceData((a.GetSelf as TScriptAssociativeArray).CopyKeys);

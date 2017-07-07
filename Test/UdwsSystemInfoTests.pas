@@ -1,21 +1,19 @@
-unit UdwsDataBaseTests;
+unit UdwsSystemInfoTests;
 
 interface
 
 uses
    Classes, SysUtils,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsErrors,
-   dwsDataBaseLibModule, dwsXPlatform, dwsSymbols, dwsUtils,
-   dwsGUIDDatabase, dwsSynSQLiteDatabase, dwsCompilerContext,
-   dwsWMIDatabase;
+   dwsSystemInfoLibModule, dwsXPlatform, dwsCompilerContext;
 
 type
 
-   TdwsDataBaseTests = class (TTestCase)
+   TdwsSystemInfoTests = class (TTestCase)
       private
          FTests : TStringList;
          FCompiler : TDelphiWebScript;
-         FDataBaseLib : TdwsDatabaseLib;
+         FSystemInfoLib : TdwsSystemInfoLibModule;
 
       public
          procedure SetUp; override;
@@ -25,6 +23,7 @@ type
          procedure Compilation;
 
       published
+
          procedure CompilationNormal;
          procedure CompilationWithMapAndSymbols;
          procedure ExecutionNonOptimized;
@@ -40,28 +39,28 @@ implementation
 // ------------------------------------------------------------------
 
 // ------------------
-// ------------------ TdwsDataBaseTests ------------------
+// ------------------ TdwsSystemInfoTests ------------------
 // ------------------
 
 // SetUp
 //
-procedure TdwsDataBaseTests.SetUp;
+procedure TdwsSystemInfoTests.SetUp;
 begin
    FTests:=TStringList.Create;
 
-   CollectFiles(ExtractFilePath(ParamStr(0))+'DatabaseLib'+PathDelim, '*.pas', FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'SystemInfoLib'+PathDelim, '*.pas', FTests);
 
    FCompiler:=TDelphiWebScript.Create(nil);
 
-   FDataBaseLib:=TdwsDatabaseLib.Create(nil);
-   FDataBaseLib.Script:=FCompiler;
+   FSystemInfoLib:=TdwsSystemInfoLibModule.Create(nil);
+   FSystemInfoLib.Script:=FCompiler;
 end;
 
 // TearDown
 //
-procedure TdwsDataBaseTests.TearDown;
+procedure TdwsSystemInfoTests.TearDown;
 begin
-   FDataBaseLib.Free;
+   FSystemInfoLib.Free;
 
    FCompiler.Free;
 
@@ -70,7 +69,7 @@ end;
 
 // Compilation
 //
-procedure TdwsDataBaseTests.Compilation;
+procedure TdwsSystemInfoTests.Compilation;
 var
    source : TStringList;
    i : Integer;
@@ -95,7 +94,7 @@ end;
 
 // CompilationNormal
 //
-procedure TdwsDataBaseTests.CompilationNormal;
+procedure TdwsSystemInfoTests.CompilationNormal;
 begin
    FCompiler.Config.CompilerOptions:=[coOptimize];
    Compilation;
@@ -103,7 +102,7 @@ end;
 
 // CompilationWithMapAndSymbols
 //
-procedure TdwsDataBaseTests.CompilationWithMapAndSymbols;
+procedure TdwsSystemInfoTests.CompilationWithMapAndSymbols;
 begin
    FCompiler.Config.CompilerOptions:=[coSymbolDictionary, coContextMap, coAssertions];
    Compilation;
@@ -111,7 +110,7 @@ end;
 
 // ExecutionNonOptimized
 //
-procedure TdwsDataBaseTests.ExecutionNonOptimized;
+procedure TdwsSystemInfoTests.ExecutionNonOptimized;
 begin
    FCompiler.Config.CompilerOptions:=[coAssertions];
    Execution;
@@ -119,7 +118,7 @@ end;
 
 // ExecutionOptimized
 //
-procedure TdwsDataBaseTests.ExecutionOptimized;
+procedure TdwsSystemInfoTests.ExecutionOptimized;
 begin
    FCompiler.Config.CompilerOptions:=[coOptimize, coAssertions];
    Execution;
@@ -127,7 +126,7 @@ end;
 
 // Execution
 //
-procedure TdwsDataBaseTests.Execution;
+procedure TdwsSystemInfoTests.Execution;
 var
    source, expectedResult : TStringList;
    i : Integer;
@@ -175,6 +174,6 @@ initialization
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-   RegisterTest('LibModules', TdwsDataBaseTests);
+   RegisterTest('LibModules', TdwsSystemInfoTests);
 
 end.

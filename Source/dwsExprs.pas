@@ -501,6 +501,7 @@ type
          FOperators : TObject;
          FConditionalDefines : IAutoStrings;
          FSourceList : TScriptSourceList;
+         FUnitList : TIdwsUnitList;
          FLineCount : Integer;
          FTimeStamp : TDateTime;
          FCompileDurationMSec : Integer;
@@ -592,6 +593,7 @@ type
          property SymbolDictionary: TdwsSymbolDictionary read FSymbolDictionary;
          property Attributes : TdwsSymbolAttributes read FAttributes;
          property SourceList : TScriptSourceList read FSourceList;
+         property UnitList : TIdwsUnitList read FUnitList;
          property LineCount : Integer read FLineCount write FLineCount;
          property TimeStamp : TDateTime read FTimeStamp write FTimeStamp;
          property CompileDurationMSec : Integer read FCompileDurationMSec write FCompileDurationMSec;
@@ -1622,6 +1624,7 @@ type
    TScriptDynamicStringArray = class (TScriptDynamicValueArray)
       public
          procedure Add(const s : String);
+         procedure AddStrings(sl : TStrings);
    end;
 
    TScriptAssociativeArrayHashCodes = array of Cardinal;
@@ -2781,7 +2784,8 @@ begin
    FConditionalDefines.Value.Duplicates := dupIgnore;
    FConditionalDefines.Value.Sorted := True;
 
-   FSourceList:=TScriptSourceList.Create;
+   FSourceList := TScriptSourceList.Create;
+   FUnitList := TIdwsUnitList.Create;
 
    FRoot:=Self;
 
@@ -2800,6 +2804,7 @@ begin
    FCompilerContext.Msgs := CompileMsgs;
    FCompilerContext.SystemTable := FSystemTable.SymbolTable;
    FCompilerContext.UnifiedConstants := FUnifiedConstants;
+   FCompilerContext.UnitList := FUnitList;
 
    FRoot:=Self;
 end;
@@ -2820,6 +2825,7 @@ begin
    inherited;
 
    FCompilerContext.Free;
+   FUnitList.Free;
 
    FFinalExpr.Free;
    FSourceContextMap.Free;
@@ -7408,6 +7414,18 @@ begin
    ArrayLength:=ArrayLength+1;
    if s<>'' then
       AsString[ArrayLength-1]:=s;
+end;
+
+// AddStrings
+//
+procedure TScriptDynamicStringArray.AddStrings(sl : TStrings);
+var
+   i, n : Integer;
+begin
+   n := ArrayLength;
+   ArrayLength := n+sl.Count;
+   for i := 0 to sl.Count-1 do
+      AsString[n+i] := sl[i];
 end;
 
 // ------------------

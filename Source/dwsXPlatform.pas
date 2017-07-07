@@ -147,6 +147,7 @@ type
 procedure CollectFiles(const directory, fileMask : TFileName;
                        list : TStrings; recurseSubdirectories: Boolean = False;
                        onProgress : TCollectFileProgressEvent = nil);
+procedure CollectSubDirs(const directory : TFileName; list : TStrings);
 
 type
    {$IFNDEF FPC}
@@ -336,6 +337,17 @@ procedure AcquireSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel
 function TryAcquireSRWLockShared(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
 procedure ReleaseSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
 {$endif}
+
+type
+   TModuleVersion = record
+      Major, Minor : Word;
+      Release, Build : Word;
+      function AsString : String;
+   end;
+
+function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
+function GetApplicationVersion(var version : TModuleVersion) : Boolean;
+function ApplicationVersion : String;
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -985,6 +997,43 @@ begin
    end;
 end;
 
+// CollectSubDirs
+//
+procedure CollectSubDirs(const directory : TFileName; list : TStrings);
+const
+   // contant defined in Windows.pas is incorrect
+   FindExInfoBasic = 1;
+var
+   searchRec : TFindDataRec;
+   infoLevel : TFindexInfoLevels;
+   fileName : TFileName;
+begin
+   // 6.1 required for FindExInfoBasic (Win 2008 R2 or Win 7)
+   if ((Win32MajorVersion shl 8) or Win32MinorVersion)>=$601 then
+      infoLevel:=TFindexInfoLevels(FindExInfoBasic)
+   else infoLevel:=FindExInfoStandard;
+
+   fileName := directory+'*';
+   searchRec.Handle:=FindFirstFileEx(PChar(fileName), infoLevel,
+                                     @searchRec.Data, FINDEX_SEARCH_OPS.FindExSearchLimitToDirectories,
+                                     nil, 0);
+   if searchRec.Handle<>INVALID_HANDLE_VALUE then begin
+      repeat
+         if (searchRec.Data.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY)<>0 then begin
+            if searchRec.Data.cFileName[0]='.' then begin
+               if searchRec.Data.cFileName[1]='.' then begin
+                  if searchRec.Data.cFileName[2]=#0 then continue;
+               end else if searchRec.Data.cFileName[1]=#0 then continue;
+            end;
+            // decomposed cast and concatenation to avoid implicit string variable
+            fileName := searchRec.Data.cFileName;
+            list.Add(fileName);
+         end;
+      until not FindNextFileW(searchRec.Handle, searchRec.Data);
+      Windows.FindClose(searchRec.Handle);
+   end;
+end;
+
 {$ifdef FPC}
 // VarCopy
 //
@@ -1569,6 +1618,79 @@ begin
    {$else}
    fmt:=SysUtils.TFormatSettings((@CurrencyString{%H-})^);
    {$endif}
+end;
+
+// AsString
+//
+function TModuleVersion.AsString : String;
+begin
+   Result := Format('%d.%d.%d.%d', [Major, Minor, Release, Build]);
+end;
+
+// Adapted from Ian Boyd code published in
+// http://stackoverflow.com/questions/10854958/how-to-get-version-of-running-executable
+function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
+var
+   fileInformation : PVSFIXEDFILEINFO;
+   verlen : Cardinal;
+   rs : TResourceStream;
+   m : TMemoryStream;
+   resource : HRSRC;
+begin
+   Result:=False;
+
+   // Workaround bug in Delphi if resource doesn't exist
+   resource:=FindResource(instance, PChar(1), RT_VERSION);
+   if resource=0 then Exit;
+
+   m:=TMemoryStream.Create;
+   try
+      rs:=TResourceStream.CreateFromID(instance, 1, RT_VERSION);
+      try
+         m.CopyFrom(rs, rs.Size);
+      finally
+         rs.Free;
+      end;
+
+      m.Position:=0;
+      if VerQueryValue(m.Memory, '\', Pointer(fileInformation), verlen) then begin
+         version.Major := fileInformation.dwFileVersionMS shr 16;
+         version.Minor := fileInformation.dwFileVersionMS and $FFFF;
+         version.Release := fileInformation.dwFileVersionLS shr 16;
+         version.Build := fileInformation.dwFileVersionLS and $FFFF;
+         Result := True;
+      end;
+   finally
+      m.Free;
+   end;
+end;
+
+// GetApplicationVersion
+//
+var
+   vApplicationVersion : TModuleVersion;
+   vApplicationVersionRetrieved : Integer;
+function GetApplicationVersion(var version : TModuleVersion) : Boolean;
+begin
+   if vApplicationVersionRetrieved = 0 then begin
+      if GetModuleVersion(HInstance, vApplicationVersion) then
+         vApplicationVersionRetrieved := 1
+      else vApplicationVersionRetrieved := -1;
+   end;
+   Result := (vApplicationVersionRetrieved = 1);
+   if Result then
+      version := vApplicationVersion;
+end;
+
+// ApplicationVersion
+//
+function ApplicationVersion : String;
+var
+   version : TModuleVersion;
+begin
+   if GetApplicationVersion(version) then
+      Result := version.AsString
+   else Result := '?.?.?.?';
 end;
 
 // ------------------

@@ -20,7 +20,7 @@ unit dwsJSON;
 interface
 
 uses
-   Classes, SysUtils, Math,
+   Classes, SysUtils, Math, Variants,
    dwsUtils, dwsXPlatform, dwsXXHash, dwsUnicode;
 
 type
@@ -85,6 +85,8 @@ type
          procedure WriteStrings(const str : array of UnicodeString); overload;
 
          procedure WriteJSON(const json : UnicodeString);
+
+         procedure WriteVariant(const v : Variant);
 
          function ToString : String; override; final;
          function ToUnicodeString : UnicodeString;
@@ -371,6 +373,7 @@ type
          procedure SetCapacity(newCapacity : Integer);
          procedure DetachChild(child : TdwsJSONValue); override;
          procedure DeleteIndex(idx : Integer);
+         procedure SwapNoRangeCheck(index1, index2 : Integer);
 
          function GetValueType : TdwsJSONValueType; override;
          function DoGetName(index : Integer) : UnicodeString; override;
@@ -401,6 +404,7 @@ type
          function AddArray : TdwsJSONArray;
          function AddValue : TdwsJSONImmediate;
          procedure AddNull;
+         procedure Delete(index : Integer);
 
          procedure Sort(const aCompareMethod : TdwsJSONValueCompareMethod);
          procedure Swap(index1, index2 : Integer);
@@ -470,6 +474,9 @@ type
    EdwsJSONException = class (Exception);
    EdwsJSONParseError = class (EdwsJSONException);
    EdwsJSONWriterError = class (EdwsJSONException);
+   EdwsJSONIndexOutOfRange = class (EdwsJSONException)
+      constructor Create(idx, count : Integer);
+   end;
 
 procedure WriteJavaScriptString(destStream : TWriteOnlyBlockStream; const str : UnicodeString); overload; inline;
 procedure WriteJavaScriptString(destStream : TWriteOnlyBlockStream; p : PWideChar); overload;
@@ -488,6 +495,18 @@ var
    vObject : TClassCloneConstructor<TdwsJSONObject>;
    vArray : TClassCloneConstructor<TdwsJSONArray>;
 
+// ------------------
+// ------------------ EdwsJSONIndexOutOfRange ------------------
+// ------------------
+
+// Create
+//
+constructor EdwsJSONIndexOutOfRange.Create(idx, count : Integer);
+begin
+   if count = 0 then
+      inherited CreateFmt('Array index (%d) out of range (empty array)', [idx])
+   else inherited CreateFmt('Array index (%d) out of range [0..%d]', [idx, count-1]);
+end;
 // ------------------
 // ------------------ TdwsJSONParserState ------------------
 // ------------------
@@ -2063,6 +2082,15 @@ begin
    Add(v);
 end;
 
+// Delete
+//
+procedure TdwsJSONArray.Delete(index : Integer);
+begin
+   if Cardinal(index) >= Cardinal(FCount) then
+      raise EdwsJSONIndexOutOfRange.Create(index, FCount);
+   DeleteIndex(index);
+end;
+
 // Sort
 //
 type
@@ -2087,24 +2115,34 @@ begin
       adapter.ValueArray:=FElements;
       adapter.CompareMethod:=aCompareMethod;
       qs.CompareMethod:=adapter.Compare;
-      qs.SwapMethod:=Swap;
+      qs.SwapMethod:=SwapNoRangeCheck;
       qs.Sort(0, FCount-1);
    finally
       adapter.Free;
    end;
 end;
 
-// Swap
+// SwapNoRangeCheck
 //
-procedure TdwsJSONArray.Swap(index1, index2 : Integer);
+procedure TdwsJSONArray.SwapNoRangeCheck(index1, index2 : Integer);
 var
    temp : TdwsJSONValue;
 begin
-   Assert(Cardinal(index1)<Cardinal(FCount));
-   Assert(Cardinal(index2)<Cardinal(FCount));
-   temp:=FElements[index1];
-   FElements[index1]:=FElements[index2];
-   FElements[index2]:=temp;
+   temp := FElements[index1];
+   FElements[index1] := FElements[index2];
+   FElements[index2] := temp;
+end;
+
+// Swap
+//
+procedure TdwsJSONArray.Swap(index1, index2 : Integer);
+begin
+   if Cardinal(index1) >= Cardinal(FCount) then
+      raise EdwsJSONIndexOutOfRange.Create(index1, FCount);
+   if Cardinal(index2) >= Cardinal(FCount) then
+      raise EdwsJSONIndexOutOfRange.Create(index1, FCount);
+
+   SwapNoRangeCheck(index1, index2);
 end;
 
 // DoGetName
@@ -2870,6 +2908,34 @@ begin
    BeforeWriteImmediate;
    FStream.WriteString(json);
    AfterWriteImmediate;
+end;
+
+// WriteVariant
+//
+procedure TdwsJSONWriter.WriteVariant(const v : Variant);
+var
+   i : Integer;
+begin
+   if VarIsArray(v) then begin
+      BeginArray;
+      for i := VarArrayLowBound(v, 1) to VarArrayHighBound(v, 1) do
+         WriteVariant(v[i]);
+      EndArray;
+   end else case VarType(v) of
+      varInteger, varInt64, varSmallint, varShortInt,
+      varUInt64, varWord, varByte, varLongWord :
+         WriteInteger(v);
+      varSingle, varDouble :
+         WriteNumber(v);
+      varBoolean :
+         WriteBoolean(v);
+      varDate :
+         WriteDate(v);
+      varNull, varEmpty :
+         WriteNull;
+   else
+      WriteString(v);
+   end;
 end;
 
 // WriteStrings

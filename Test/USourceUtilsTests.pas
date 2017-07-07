@@ -9,7 +9,7 @@ uses
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsDataContext,
    dwsTokenizer, dwsErrors, dwsUtils, Variants, dwsSymbols, dwsSuggestions,
    dwsFunctions, dwsCaseNormalizer, dwsScriptSource, dwsSymbolDictionary,
-   dwsCompilerContext, dwsUnicode, dwsJSONConnector;
+   dwsCompilerContext, dwsUnicode, dwsJSONConnector, dwsUnitSymbols;
 
 type
 
@@ -473,9 +473,9 @@ end;
 //
 procedure TSourceUtilsTests.JSONVariantSuggestTest;
 const
-   cSugg : array [0..10] of String = (
+   cSugg : array [0..11] of String = (
       'Add', 'Clone', 'Delete', 'ElementName', 'Extend', 'High', 'Length',
-      'Low', 'Push', 'ToString', 'TypeName'
+      'Low', 'Push', 'Swap', 'ToString', 'TypeName'
       );
 
 var
