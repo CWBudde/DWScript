@@ -295,6 +295,8 @@ function DirectSetMXCSR(newValue : Word) : Word; register;
 
 function SwapBytes(v : Cardinal) : Cardinal;
 
+function RDTSC : UInt64;
+
 function GetCurrentUserName : String;
 
 {$ifndef FPC}
@@ -1566,6 +1568,13 @@ end;
 {$IFDEF MACOS}
 function NSUserName: Pointer; cdecl; external '/System/Library/Frameworks/Foundation.framework/Foundation' name '_NSUserName';
 {$ENDIF}
+
+// RDTSC
+//
+function RDTSC : UInt64;
+asm
+   RDTSC
+end;
 
 // GetCurrentUserName
 //

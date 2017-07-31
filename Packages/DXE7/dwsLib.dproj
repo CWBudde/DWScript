@@ -1,4 +1,4 @@
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{E913878A-8A52-4F96-BBDB-62477ABDC942}</ProjectGuid>
         <MainSource>dwsLib.dpk</MainSource>
