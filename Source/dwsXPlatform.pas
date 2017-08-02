@@ -36,7 +36,7 @@ unit dwsXPlatform;
 interface
 
 uses
-   Classes, SysUtils, Types, Masks, Registry, SyncObjs, Variants,
+   Classes, SysUtils, Types, Masks, Registry, SyncObjs, Variants, StrUtils,
    {$IFDEF FPC}
       {$IFDEF Windows}
          Windows
@@ -924,10 +924,12 @@ type
       Data : TWin32FindDataW;
    end;
 
+   TMasks = array of TMask;
+
 // CollectFilesMasked
 //
 procedure CollectFilesMasked(const directory : TFileName;
-                             mask : TMask; list : TStrings;
+                             const masks : TMasks; list : TStrings;
                              recurseSubdirectories: Boolean = False;
                              onProgress : TCollectFileProgressEvent = nil);
 const
@@ -937,7 +939,8 @@ var
    searchRec : TFindDataRec;
    infoLevel : TFindexInfoLevels;
    fileName : TFileName;
-   skipScan : Boolean;
+   skipScan, addToList : Boolean;
+   i : Integer;
 begin
    // 6.1 required for FindExInfoBasic (Win 2008 R2 or Win 7)
    if ((Win32MajorVersion shl 8) or Win32MinorVersion)>=$601 then
@@ -959,7 +962,12 @@ begin
          if (searchRec.Data.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY)=0 then begin
             // check file against mask
             fileName:=searchRec.Data.cFileName;
-            if mask.Matches(fileName) then begin
+            addToList := True;
+            for i := 0 to High(masks) do begin
+               addToList := masks[i].Matches(fileName);
+               if addToList then Break;
+            end;
+            if addToList then begin
                fileName:=directory+fileName;
                list.Add(fileName);
             end;
@@ -973,7 +981,7 @@ begin
             // decomposed cast and concatenation to avoid implicit string variable
             fileName:=searchRec.Data.cFileName;
             fileName:=directory+fileName+PathDelim;
-            CollectFilesMasked(fileName, mask, list, True, onProgress);
+            CollectFilesMasked(fileName, masks, list, True, onProgress);
          end;
       until not FindNextFileW(searchRec.Handle, searchRec.Data);
       Windows.FindClose(searchRec.Handle);
@@ -986,16 +994,33 @@ procedure CollectFiles(const directory, fileMask : TFileName; list : TStrings;
                        recurseSubdirectories: Boolean = False;
                        onProgress : TCollectFileProgressEvent = nil);
 var
-   mask : TMask;
+   masks : TMasks;
+   p, pNext : Integer;
 begin
+   if fileMask <> '' then begin
+      p := 1;
+      repeat
+         pNext := PosEx(';', fileMask, p);
+         if pNext < p then begin
+            SetLength(masks, Length(masks)+1);
+            masks[High(masks)] := TMask.Create(Copy(fileMask, p));
+            break;
+         end;
+         if pNext > p then begin
+            SetLength(masks, Length(masks)+1);
+            masks[High(masks)] := TMask.Create(Copy(fileMask, p, pNext-p));
+         end;
+         p := pNext + 1;
+      until p > Length(fileMask);
+   end;
    // Windows can match 3 character filters with old DOS filenames
    // Mask confirmation is necessary
-   mask:=TMask.Create(fileMask);
    try
-      CollectFilesMasked(IncludeTrailingPathDelimiter(directory), mask,
+      CollectFilesMasked(IncludeTrailingPathDelimiter(directory), masks,
                          list, recurseSubdirectories, onProgress);
    finally
-      mask.Free;
+      for p := 0 to High(masks) do
+         masks[p].Free;
    end;
 end;
 
