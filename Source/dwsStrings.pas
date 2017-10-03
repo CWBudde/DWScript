@@ -68,6 +68,8 @@ const
 
   SYS_EXTERNAL_ARRAY = '[]';
 
+  SYS_JSON_STRINGIFY = 'Stringify';
+
   // Compiler switches
   SWI_INCLUDE_LONG = 'INCLUDE';
   SWI_INCLUDE_SHORT = 'I';
@@ -479,6 +481,8 @@ const
   CPE_NoResultTypeRequired = 'No result type required';
   CPE_ResultTypeExpected = 'Result type expected';
   CPE_NoResultRequired = 'No result required';
+
+  CPE_NotSupportedFor = '"%s" is not supported for "%s"';
 
   CPE_CanNotOverride = 'Method %s not found in parent class. Cannot override';
   CPE_InvalidArgCombination = 'Invalid argument combination';
