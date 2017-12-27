@@ -6,7 +6,7 @@ uses
    Classes, SysUtils, Variants, ComObj,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsErrors, dwsInfo,
    dwsUtils, dwsSymbols, dwsDebugger, dwsStrings, dwsEvaluate, dwsScriptSource,
-   dwsCompilerContext;
+   dwsCompilerContext, dwsXPlatform;
 
 type
 
@@ -45,6 +45,7 @@ type
          procedure EvaluateLocalVar;
          procedure EvaluateBlockVar;
          procedure EvaluateAfterBlock;
+         procedure EvaluateArray;
 
          procedure ExecutableLines;
 
@@ -56,6 +57,7 @@ type
 
          procedure BreakpointsStatic;
          procedure BreakpointsDynamic;
+         procedure BreakPointCastPos;
    end;
 
    TDebuggerOptimizedTests = class (TDebuggerTests)
@@ -418,6 +420,64 @@ begin
    end;
 end;
 
+// EvaluateArray
+//
+procedure TDebuggerTests.EvaluateArray;
+var
+   prog : IdwsProgram;
+   exec : IdwsProgramExecution;
+begin
+   prog:=FCompiler.Compile( 'var a : array of String; for var i := 1 to 3 do a.Add("*"+i.ToString);'#13#10
+                           +'PrintLn(a.Join(","));');
+   try
+      FDebugEvalAtLine:=2;
+
+      exec:=prog.CreateNewExecution;
+      try
+         FDebugEvalExpr:='a';
+         FDebugLastEvalResult:='';
+         FDebugger.BeginDebug(exec);
+         try
+            CheckEquals('array of String', FDebugLastEvalResult, 'a at line 2');
+         finally
+            FDebugger.EndDebug;
+         end;
+      finally
+         exec:=nil;
+      end;
+
+      exec:=prog.CreateNewExecution;
+      try
+         FDebugEvalExpr:='a.Length';
+         FDebugLastEvalResult:='';
+         FDebugger.BeginDebug(exec);
+         try
+            CheckEquals('3', FDebugLastEvalResult, 'a.Length at line 2');
+         finally
+            FDebugger.EndDebug;
+         end;
+      finally
+         exec:=nil;
+      end;
+
+      exec:=prog.CreateNewExecution;
+      try
+         FDebugEvalExpr:='a.Join(";")';
+         FDebugLastEvalResult:='';
+         FDebugger.BeginDebug(exec);
+         try
+            CheckEquals('*1;*2;*3', FDebugLastEvalResult, 'a.Join(";") at line 2');
+         finally
+            FDebugger.EndDebug;
+         end;
+      finally
+         exec:=nil;
+      end;
+   finally
+      prog:=nil;
+   end;
+end;
+
 // ExecutableLines
 //
 procedure TDebuggerTests.ExecutableLines;
@@ -652,6 +712,34 @@ begin
       CheckEquals('ab', exec.Result.ToString, 'case 2');
    finally
       FDebugger.Breakpoints.Clear;
+   end;
+end;
+
+// BreakPointCastPos
+//
+procedure TDebuggerTests.BreakPointCastPos;
+var
+   prog : IdwsProgram;
+   bp : TdwsBreakpointableLines;
+   bits : TBits;
+begin
+   prog := FCompiler.Compile(  'type TTest = (one, two);'#13#10
+                             + 'var a := 1;'#13#10
+                             + 'var b := TTest(a);'#13#10);
+   CheckEquals('', prog.Msgs.AsInfo);
+
+   bp := TdwsBreakpointableLines.Create(prog);
+   try
+      CheckEquals(1, bp.Count);
+
+      bits := bp.SourceLines[MSG_MainModule];
+      CheckEquals(5, bits.Size, '5 lines');  // 3 actual lines + one empty + line zero
+      CheckEquals(False, bits[0], '0 n/a');
+      CheckEquals(False, bits[1], '1 false');
+      CheckEquals(True, bits[2], '2 true');
+      CheckEquals(True, bits[3], '3 true');
+   finally
+      bp.Free;
    end;
 end;
 

@@ -47,6 +47,7 @@ type
          FBaseTypes : TdwsBaseSymbolTypes;
          FOrphanedObjects : TSimpleStack<TRefCountedObject>;
          FUnitList : TIdwsUnitList;
+         FHelperMemberNames : TSimpleStringHash;
 
          FTypDefaultConstructor : TMethodSymbol;
          FTypDefaultDestructor : TMethodSymbol;
@@ -82,6 +83,7 @@ type
          property Prog : TObject read FProg write FProg;
          property UnifiedConstants : TObject read FUnifiedConstants write FUnifiedConstants;
          property UnitList : TIdwsUnitList read FUnitList write FUnitList;
+         property HelperMemberNames : TSimpleStringHash read FHelperMemberNames;
 
          property Execution : TdwsExecution read FExecution write FExecution;
          property Options : TCompilerOptions read FOptions write FOptions;
@@ -123,6 +125,7 @@ begin
    inherited;
    FOrphanedObjects := TSimpleStack<TRefCountedObject>.Create;
    FStringsUnifier := TStringUnifier.Create;
+   FHelperMemberNames := TSimpleStringHash.Create;
 end;
 
 // Destroy
@@ -140,6 +143,8 @@ begin
    FOrphanedObjects.Free;
 
    FStringsUnifier.Free;
+
+   FHelperMemberNames.Free;
 
    inherited;
 end;
@@ -246,10 +251,10 @@ begin
       Result := (casterClass <> nil);
       if Result then begin
          if casterClass.InheritsFrom(TUnaryOpExpr) then
-            typedExpr := TUnaryOpExprClass(casterClass).Create(Self, typedExpr)
+            typedExpr := TUnaryOpExprClass(casterClass).Create(Self, scriptPos, typedExpr)
          else begin
             Assert(casterClass.InheritsFrom(TUnaryOpDataExpr));
-            typedExpr := TUnaryOpDataExprClass(casterClass).Create(Self, typedExpr);
+            typedExpr := TUnaryOpDataExprClass(casterClass).Create(Self, scriptPos, typedExpr);
          end;
          TObject(expr) := typedExpr;
          if Optimize then

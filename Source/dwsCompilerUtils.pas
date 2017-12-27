@@ -80,7 +80,7 @@ type
       amkNone,
       amkAdd, amkPush, amkIndexOf, amkRemove, amkSort, amkMap, amkHigh, amkLow,
       amkLength, amkCount, amkPop, amkPeek, amkDelete, amkInsert, amkSetLength,
-      amkClear, amkSwap, amkCopy, amkReverse, amkDimCount, amkKeys
+      amkClear, amkSwap, amkCopy, amkReverse, amkDimCount, amkKeys, amkMove
    );
 
 
@@ -732,7 +732,7 @@ begin
                Exit(operatorResolver.Resolved);
          (currentProg.Root.Operators as TOperators).EnumerateOperatorsFor(token, aLeftType, aRightType, operatorResolver.Callback);
       end;
-      Result:=operatorResolver.Resolved;
+      Result := operatorResolver.Resolved;
    finally
       operatorResolver.Free;
    end;
@@ -919,12 +919,15 @@ begin
 
       Result := expr;
 
+   end else if expr.Typ.IsOfType(context.TypVariant) then begin
+
+      Result := TConvExpr.WrapWithConvCast(context, hotPos, toTyp, expr, msg);
+
    end else begin
 
       // error & keep compiling
       IncompatibleTypes(context, hotPos, msg, toTyp, exprTyp);
-      Result:=TConvInvalidExpr.Create(context, expr, toTyp);
-      Exit;
+      Result := TConvInvalidExpr.Create(context, hotPos, expr, toTyp);
 
    end;
 end;

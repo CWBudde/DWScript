@@ -127,6 +127,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+uses dwsSynSQLiteFunctions;
+
 var
    vSQLite3DynamicMRSW : TMultiReadSingleWrite;
 
@@ -194,6 +196,28 @@ begin
    end;
 end;
 
+type
+   TdwsSQLDatabase = class (TSQLDatabase)
+      function DBOpen: integer; override;
+   end;
+
+// DBOpen
+//
+function TdwsSQLDatabase.DBOpen : Integer;
+const
+   SQLITE_DETERMINISTIC = $800;
+begin
+   Result := inherited DBOpen;
+   if result = SQLITE_OK then begin
+      sqlite3.create_function(DB, 'SQRT', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, SQLiteFunc_Sqrt, nil, nil);
+      sqlite3.create_function(DB, 'MEDIAN', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_MedianStep, SQLiteFunc_MedianFinal);
+      sqlite3.create_function(DB, 'BOOL_AND', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_BoolAndStep, SQLiteFunc_BoolFinal);
+      sqlite3.create_function(DB, 'BOOL_OR', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_BoolOrStep, SQLiteFunc_BoolFinal);
+      sqlite3.create_function(DB, 'BIT_AND', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_BitAndStep, SQLiteFunc_BitFinal);
+      sqlite3.create_function(DB, 'BIT_OR', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_BitOrStep, SQLiteFunc_BitFinal);
+   end;
+end;
+
 // ------------------
 // ------------------ TdwsSynSQLiteDataBaseFactory ------------------
 // ------------------
@@ -236,8 +260,8 @@ begin
    end;
 
    try
-      FDB:=TSQLDatabase.Create(dbName, '', flags);
-      FDB.BusyTimeout:=1500;
+      FDB := TdwsSQLDatabase.Create(dbName, '', flags);
+      FDB.BusyTimeout := 1500;
    except
       RefCount:=0;
       raise;

@@ -1505,6 +1505,7 @@ type
          FVisibility : TdwsVisibility;
          FDeprecatedMessage : String;
          FExternalName : String;
+         FUserDescription : String;
 
       protected
          function GetCaption : String; override;
@@ -1541,6 +1542,7 @@ type
          property DeprecatedMessage : String read FDeprecatedMessage write FDeprecatedMessage;
          property IsDeprecated : Boolean read GetIsDeprecated;
          property ExternalName : String read GetExternalName write FExternalName;
+         property UserDescription : String read FUserDescription write FUserDescription;
    end;
 
    // class operator X (params) uses method;
@@ -2093,13 +2095,16 @@ class function TExprBase.CallStackToString(const callStack : TdwsExprLocationArr
 var
    i : Integer;
    buffer : TWriteOnlyBlockStream;
+   expr : TExprBase;
 begin
    buffer:=TWriteOnlyBlockStream.Create;
    try
       for i:=0 to High(callStack) do begin
          if i>0 then
             buffer.WriteString(#13#10);
-         buffer.WriteString(callStack[i].Expr.ScriptLocation(callStack[i].Prog));
+         expr := callStack[i].Expr;
+         if expr <> nil then
+            buffer.WriteString(expr.ScriptLocation(callStack[i].Prog));
       end;
       Result:=buffer.ToString;
    finally

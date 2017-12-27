@@ -953,7 +953,7 @@ type
                         potResult,
                         potResultInteger, potResultFloat, potResultBoolean,
                         potResultString, potResultConstString,
-                        potData, potConstData,
+                        potData, potConstData, potArrayExpr,
                         potLazy, potInitResult);
    PPushOperator = ^TPushOperator;
    TPushOperator = packed record
@@ -965,12 +965,13 @@ type
       procedure InitPushTempAddr(stackAddr: Integer; argExpr: TTypedExpr);
       procedure InitPushTempArrayAddr(stackAddr: Integer; argExpr: TTypedExpr);
       procedure InitPushTempArray(stackAddr: Integer; argExpr: TTypedExpr);
+      procedure InitPushArrayExpr(stackAddr: Integer; argExpr: TTypedExpr);
       procedure InitPushResult(context : TdwsCompilerContext; stackAddr: Integer; argExpr: TTypedExpr);
       procedure InitPushData(stackAddr: Integer; argExpr: TTypedExpr; ParamSym: TSymbol);
       procedure InitPushInitResult(stackAddr: Integer; argExpr: TTypedExpr);
       procedure InitPushLazy(stackAddr: Integer; argExpr: TTypedExpr);
 
-      procedure Execute(exec : TdwsExecution); inline;
+      procedure Execute(exec : TdwsExecution); //inline;
 
       procedure ExecuteAddr(exec : TdwsExecution);
       procedure ExecutePassAddr(exec : TdwsExecution);
@@ -978,6 +979,7 @@ type
       procedure ExecuteTempData(exec : TdwsExecution);
       procedure ExecuteTempArrayAddr(exec : TdwsExecution);
       procedure ExecuteTempArray(exec : TdwsExecution);
+      procedure ExecuteArrayExpr(exec : TdwsExecution);
       procedure ExecuteResult(exec : TdwsExecution);
       procedure ExecuteResultBoolean(exec : TdwsExecution);
       procedure ExecuteResultInteger(exec : TdwsExecution);
@@ -1004,6 +1006,7 @@ type
          procedure StaticPostCall(exec : TdwsExecution; var Result : Variant);
          procedure StaticPostCallInteger(exec : TdwsExecution; var Result : Int64);
          procedure StaticPostCallFloat(exec : TdwsExecution; var Result : Double);
+         procedure StaticPostCallString(exec : TdwsExecution; var Result : String);
 
          procedure EvalPushExprs(exec : TdwsExecution); inline;
 
@@ -1035,6 +1038,7 @@ type
          procedure EvalNoResult(exec : TdwsExecution); override;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function  EvalAsFloat(exec : TdwsExecution) : Double; override;
+         procedure EvalAsString(exec : TdwsExecution; var result : String); override;
    end;
 
    IFuncPointer = interface
@@ -1212,7 +1216,7 @@ type
          function GetIsConstant : Boolean; override;
 
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); virtual;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); virtual;
          destructor Destroy; override;
 
          property Expr : TTypedExpr read FExpr write FExpr;
@@ -1222,6 +1226,7 @@ type
    TUnaryOpExpr = class(TTypedExpr)
       protected
          FExpr : TTypedExpr;
+         FScriptPos : TScriptPos;
 
          function GetSubExpr(i : Integer) : TExprBase; override;
          function GetSubExprCount : Integer; override;
@@ -1229,8 +1234,10 @@ type
          function GetIsConstant : Boolean; override;
 
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); virtual;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); virtual;
          destructor Destroy; override;
+
+         function ScriptPos : TScriptPos; override;
 
          property Expr : TTypedExpr read FExpr write FExpr;
    end;
@@ -1239,14 +1246,14 @@ type
    // bool unary result
    TUnaryOpBoolExpr = class(TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); override;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
    end;
 
    // int unary result
    TUnaryOpIntExpr = class(TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); override;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
          procedure Orphan(context : TdwsCompilerContext); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override; final;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
@@ -1255,7 +1262,7 @@ type
    // float unary result
    TUnaryOpFloatExpr = class(TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); override;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
          procedure Orphan(context : TdwsCompilerContext); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override; final;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
@@ -1264,14 +1271,14 @@ type
    // String unary result
    TUnaryOpStringExpr = class(TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); override;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override; final;
    end;
 
    // variant unary result
    TUnaryOpVariantExpr = class(TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; expr : TTypedExpr); override;
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
    end;
 
    // wraps an expression with a result into a no-result one and discard the result
@@ -1445,8 +1452,6 @@ type
          procedure SetResultAsBoolean(const value : Boolean);
          procedure SetResultAsFloat(const value : Double);
 
-         procedure SetResultAsStringArray(const a : TStringDynArray);
-
          function GetParamAsPVariant(index : Integer) : PVariant;
          function GetParamAsVariant(index : Integer) : Variant;
          procedure SetParamAsVariant(index : Integer; const v : Variant);
@@ -1482,6 +1487,9 @@ type
          function CompilerContext : TdwsCompilerContext; inline;
 
          procedure RaiseExceptObj(const msg : String; const obj : IScriptObj);
+
+         procedure SetResultAsStringArray(const a : TStringDynArray); overload;
+         procedure SetResultAsStringArray(const s : TStrings); overload;
 
          property Table : TSymbolTable read FTable write FTable;
          property SystemTable : TSystemSymbolTable read GetSystemTable;
@@ -1602,6 +1610,7 @@ type
          procedure Copy(src : TScriptDynamicArray; index, count : Integer);
          procedure RawCopy(const src : TData; rawIndex, rawCount : Integer);
          procedure Concat(src : TScriptDynamicArray);
+         procedure MoveItem(srcIndex, dstIndex : Integer);
 
          function IndexOfData(const item : IDataContext; fromIndex : Integer) : Integer;
          function IndexOfValue(const item : Variant; fromIndex : Integer) : Integer;
@@ -4684,6 +4693,16 @@ begin
    else FArgExpr:=nil;  // error caught earlier, if not, ensure runtime crash
 end;
 
+// InitPushArrayExpr
+//
+procedure TPushOperator.InitPushArrayExpr(stackAddr: Integer; argExpr: TTypedExpr);
+begin
+   Assert(argExpr is TDynamicArrayExpr);
+   FTypeParamSym := TSymbol(potArrayExpr);
+   FStackAddr := stackAddr;
+   FArgExpr := argExpr;
+end;
+
 // InitPushResult
 //
 procedure TPushOperator.InitPushResult(context : TdwsCompilerContext; stackAddr : Integer; argExpr : TTypedExpr);
@@ -4746,6 +4765,7 @@ begin
       NativeInt(potTempData) : ExecuteTempData(exec);
       NativeInt(potTempArrayAddr) : ExecuteTempArrayAddr(exec);
       NativeInt(potTempArray) : ExecuteTempArray(exec);
+      NativeInt(potArrayExpr) : ExecuteArrayExpr(exec);
       NativeInt(potResultBoolean) : ExecuteResultBoolean(exec);
       NativeInt(potResultInteger) : ExecuteResultInteger(exec);
       NativeInt(potResultFloat) : ExecuteResultFloat(exec);
@@ -4834,6 +4854,19 @@ end;
 procedure TPushOperator.ExecuteTempArray(exec : TdwsExecution);
 begin
    exec.Stack.WriteInterfaceValue(exec.Stack.StackPointer+FStackAddr, TConstParamExpr(FArgExpr).DataPtr[exec]);
+end;
+
+// ExecuteArrayExpr
+//
+procedure TPushOperator.ExecuteArrayExpr(exec : TdwsExecution);
+var
+   expr : TDynamicArrayExpr;
+   elementDC : IDataContext;
+begin
+   expr := TDynamicArrayExpr(FArgExpr); // type already checked at init
+   expr.CreateArrayElementDataContext(exec, elementDC);
+
+   exec.Stack.WriteInterfaceValue(exec.Stack.StackPointer+FStackAddr, elementDC);
 end;
 
 // ExecuteResult
@@ -5021,11 +5054,12 @@ begin
    // But the frame is already restored so its relative to the stackpointer here
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
    // Copy return value
-   exec.Stack.ReadValue(sourceAddr, Result);
+   if FuncSym.Typ.Size = 1 then
+      exec.Stack.ReadValue(sourceAddr, Result);
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
-      exec.Stack.CopyData(sourceAddr, destAddr, FFunc.Typ.Size);
+      exec.Stack.CopyData(sourceAddr, destAddr, FuncSym.Typ.Size);
    end;
 end;
 
@@ -5036,11 +5070,12 @@ var
    sourceAddr, destAddr: Integer;
 begin
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
-   Result:=exec.Stack.ReadIntValue(sourceAddr);
+   if FuncSym.Typ.Size = 1 then
+      Result:=exec.Stack.ReadIntValue(sourceAddr);
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
-      exec.Stack.CopyData(sourceAddr, destAddr, FFunc.Typ.Size);
+      exec.Stack.CopyData(sourceAddr, destAddr, FuncSym.Typ.Size);
    end;
 end;
 
@@ -5051,11 +5086,28 @@ var
    sourceAddr, destAddr: Integer;
 begin
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
-   Result:=exec.Stack.ReadFloatValue(sourceAddr);
+   if FuncSym.Typ.Size = 1 then
+      Result:=exec.Stack.ReadFloatValue(sourceAddr);
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
-      exec.Stack.CopyData(sourceAddr, destAddr, FFunc.Typ.Size);
+      exec.Stack.CopyData(sourceAddr, destAddr, FuncSym.Typ.Size);
+   end;
+end;
+
+// StaticPostCallString
+//
+procedure TFuncExpr.StaticPostCallString(exec : TdwsExecution; var Result : String);
+var
+   sourceAddr, destAddr: Integer;
+begin
+   sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
+   if FuncSym.Typ.Size = 1 then
+      exec.Stack.ReadStrValue(sourceAddr, Result);
+
+   if ResultAddr>=0 then begin
+      destAddr:=exec.Stack.BasePointer+ResultAddr;
+      exec.Stack.CopyData(sourceAddr, destAddr, FuncSym.Typ.Size);
    end;
 end;
 
@@ -5087,6 +5139,8 @@ begin
          end else if param is TByRefParamSymbol then begin
             if arg is TFuncExprBase then
                pushOperator.InitPushTempAddr(param.StackAddr, arg)
+            else if arg is TDynamicArrayExpr then
+               pushOperator.InitPushArrayExpr(param.StackAddr, arg)
             else pushOperator.InitPushAddr(param.StackAddr, arg);
          end else if param.Size>1 then
             pushOperator.InitPushData(param.StackAddr, TDataExpr(arg), param)
@@ -5180,6 +5234,24 @@ begin
       try
          DoEvalCall(exec, FuncSym);
          StaticPostCallFloat(exec, Result);
+      finally
+         exec.Stack.Pop(ParamSize);
+      end;
+   except
+      exec.SetScriptError(Self);
+      raise;
+   end;
+end;
+
+// EvalAsString
+//
+procedure TFuncSimpleExpr.EvalAsString(exec : TdwsExecution; var result : String);
+begin
+   try
+      exec.Stack.Push(ParamSize);
+      try
+         DoEvalCall(exec, FuncSym);
+         StaticPostCallString(exec, Result);
       finally
          exec.Stack.Pop(ParamSize);
       end;
@@ -5914,8 +5986,9 @@ end;
 
 // Create
 //
-constructor TUnaryOpDataExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpDataExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
+   inherited Create(aScriptPos, expr.Typ);
    FExpr:=Expr;
 end;
 
@@ -5954,9 +6027,11 @@ end;
 
 // Create
 //
-constructor TUnaryOpExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
-   FExpr:=Expr;
+   inherited Create;
+   FScriptPos := aScriptPos;
+   FExpr := Expr;
 end;
 
 // Destroy
@@ -5965,6 +6040,13 @@ destructor TUnaryOpExpr.Destroy;
 begin
    FExpr.Free;
    inherited;
+end;
+
+// ScriptPos
+//
+function TUnaryOpExpr.ScriptPos : TScriptPos;
+begin
+   Result := FScriptPos;
 end;
 
 // GetIsConstant
@@ -5994,7 +6076,7 @@ end;
 
 // Create
 //
-constructor TUnaryOpBoolExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpBoolExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Typ:=context.TypBoolean;
@@ -6013,7 +6095,7 @@ end;
 
 // Create
 //
-constructor TUnaryOpIntExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpIntExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Typ := context.TypInteger;
@@ -6055,7 +6137,7 @@ end;
 
 // Create
 //
-constructor TUnaryOpFloatExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpFloatExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Typ:=context.TypFloat;
@@ -6097,7 +6179,7 @@ end;
 
 // Create
 //
-constructor TUnaryOpStringExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpStringExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Typ:=context.TypString;
@@ -6119,7 +6201,7 @@ end;
 
 // Create
 //
-constructor TUnaryOpVariantExpr.Create(context : TdwsCompilerContext; expr : TTypedExpr);
+constructor TUnaryOpVariantExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Typ:=context.TypVariant;
@@ -6559,11 +6641,25 @@ var
    i, n : Integer;
    result : IScriptDynArray;
 begin
-   result:=ResultVars.ScriptDynArray;
-   n:=Length(a);
-   result.ArrayLength:=n;
-   for i:=0 to n-1 do
-      result.AsString[i]:=a[i];
+   result := ResultVars.ScriptDynArray;
+   n := Length(a);
+   result.ArrayLength := n;
+   for i := 0 to n-1 do
+      result.AsString[i] := a[i];
+end;
+
+// SetResultAsStringArray
+//
+procedure TProgramInfo.SetResultAsStringArray(const s : TStrings);
+var
+   i, n : Integer;
+   result : IScriptDynArray;
+begin
+   result := ResultVars.ScriptDynArray;
+   n := s.Count;
+   result.ArrayLength := n;
+   for i := 0 to n-1 do
+      result.AsString[i] := s[i];
 end;
 
 // GetParamAsPVariant
@@ -7244,6 +7340,13 @@ begin
       SetDataLength(FArrayLength*ElementSize);
       DWSCopyData(src.AsData, 0, AsData, n*ElementSize, nSrc*ElementSize);
    end;
+end;
+
+// MoveItem
+//
+procedure TScriptDynamicArray.MoveItem(srcIndex, dstIndex : Integer);
+begin
+   DWSMoveData(AsData, srcIndex*ElementSize, dstIndex*ElementSize, ElementSize);
 end;
 
 // IndexOfData

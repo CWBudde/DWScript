@@ -129,6 +129,12 @@ type
       function IsDefined : Boolean;
    end;
 
+   INumeric = interface
+      ['{11C48916-A0E4-4D4E-B534-89020D9842A7}']
+      function ToFloat : Double;
+      function ToInteger : Int64;
+   end;
+
    // TVarRecArrayContainer
    //
    TVarRecArrayContainer = class
@@ -784,13 +790,19 @@ type
 
    TSimpleDoubleList = class(TSimpleList<Double>)
       protected
-         procedure DoExchange(index1, index2 : Integer); inline;
          procedure QuickSort(minIndex, maxIndex : Integer);
+         procedure MedianSort(minIndex, maxIndex : Integer);
 
       public
+         procedure Exchange(index1, index2 : Integer); inline;
          procedure Sort;
-         // Kahan summation
-         function Sum : Double;
+
+         function QuickSum : Double;
+         function KahanSum : Double;
+         function NeumaierSum : Double;
+
+         // Computes median using a partial sort (alters the list)
+         function QuickMedian : Double;
    end;
 
    TSimpleStringHash = class(TSimpleHash<String>)
@@ -1824,10 +1836,21 @@ end;
 //
 procedure VariantToInt64(const v : Variant; var r : Int64);
 
-   procedure DefaultCast;
+   procedure UnknownAsInteger(const unknown : IUnknown; var r : Int64);
+   var
+      intf : INumeric;
+   begin
+      if unknown = nil then
+         r := 0
+      else if unknown.QueryInterface(INumeric, intf)=0 then
+         r := intf.ToInteger
+      else raise EVariantTypeCastError.CreateFmt(CPE_AssignIncompatibleTypes, ['[IUnknown]', SYS_INTEGER]);
+   end;
+
+   procedure DefaultCast(const v : Variant; var r : Int64);
    begin
       try
-         r:=v;
+         r := v;
       except
          // workaround for RTL bug that will sometimes report a failed cast to Int64
          // as being a failed cast to Boolean
@@ -1840,17 +1863,15 @@ procedure VariantToInt64(const v : Variant; var r : Int64);
 begin
    case TVarData(v).VType of
       varInt64 :
-         r:=TVarData(v).VInt64;
+         r := TVarData(v).VInt64;
       varBoolean :
-         r:=Ord(Boolean(TVarData(v).VBoolean));
+         r := Ord(Boolean(TVarData(v).VBoolean));
       varUnknown :
-         if TVarData(v).VUnknown=nil then
-            r:=0
-         else DefaultCast;
+         UnknownAsInteger(IUnknown(TVarData(v).VUnknown), r);
       varNull :
          r := 0;
    else
-      DefaultCast;
+      DefaultCast(v, r);
    end;
 end;
 
@@ -1891,6 +1912,18 @@ end;
 // VariantToFloat
 //
 function VariantToFloat(const v : Variant) : Double;
+
+   procedure UnknownAsFloat(const unknown : IUnknown; var Result : Double);
+   var
+      intf : INumeric;
+   begin
+      if unknown = nil then
+         Result := 0
+      else if unknown.QueryInterface(INumeric, intf)=0 then
+         Result := intf.ToFloat
+      else raise EVariantTypeCastError.CreateFmt(CPE_AssignIncompatibleTypes, ['[IUnknown]', SYS_FLOAT]);
+   end;
+
 begin
    case TVarData(v).VType of
       varDouble :
@@ -1901,6 +1934,8 @@ begin
          Result := Ord(Boolean(TVarData(v).VBoolean));
       varNull :
          Result := 0;
+      varUnknown :
+         UnknownAsFloat(IUnknown(TVarData(v).VUnknown), Result);
    else
       Result := v;
    end;
@@ -6264,34 +6299,9 @@ end;
 // ------------------ TSimpleDoubleList ------------------
 // ------------------
 
-// Sort
-//
-procedure TSimpleDoubleList.Sort;
-begin
-   QuickSort(0, Count-1);
-end;
-
-// Sum
-//
-function TSimpleDoubleList.Sum : Double;
-var
-   c, y, t : Double;
-   i : Integer;
-begin
-   if Count=0 then Exit(0);
-   Result:=FItems[0];
-   c:=0;
-   for i:=1 to Count-1 do begin
-      y:=FItems[i]-c;
-      t:=Result+y;
-      c:=(t-Result)-y;
-      Result:=t;
-   end;
-end;
-
 // DoExchange
 //
-procedure TSimpleDoubleList.DoExchange(index1, index2 : Integer);
+procedure TSimpleDoubleList.Exchange(index1, index2 : Integer);
 var
    buf : Double;
 begin
@@ -6306,45 +6316,193 @@ procedure TSimpleDoubleList.QuickSort(minIndex, maxIndex : Integer);
 var
    i, j, p, n : Integer;
 begin
-   n:=maxIndex-minIndex;
+   n := maxIndex - minIndex;
    case n of
       1 : begin
-         if FItems[minIndex]>FItems[maxIndex] then
-            DoExchange(minIndex, maxIndex);
+         if FItems[minIndex] > FItems[maxIndex] then
+            Exchange(minIndex, maxIndex);
       end;
       2 : begin
-         i:=minIndex+1;
-         if FItems[minIndex]>FItems[i] then
-            DoExchange(minIndex, i);
-         if FItems[i]>FItems[maxIndex] then begin
-            DoExchange(i, maxIndex);
-            if FItems[minIndex]>FItems[i] then
-               DoExchange(minIndex, i);
+         i := minIndex+1;
+         if FItems[minIndex] > FItems[i] then
+            Exchange(minIndex, i);
+         if FItems[i] > FItems[maxIndex] then begin
+            Exchange(i, maxIndex);
+            if FItems[minIndex] > FItems[i] then
+               Exchange(minIndex, i);
          end;
       end;
    else
-      if n<=0 then Exit;
       repeat
-         i:=minIndex;
-         j:=maxIndex;
-         p:=((i+j) shr 1);
+         i := minIndex;
+         j := maxIndex;
+         p := ((i+j) shr 1);
          repeat
-            while FItems[i]<FItems[p] do Inc(i);
-            while Fitems[j]>FItems[p] do Dec(j);
-            if i<=j then begin
-               DoExchange(i, j);
-               if p=i then
-                  p:=j
-               else if p=j then
-                  p:=i;
+            while FItems[i] < FItems[p] do Inc(i);
+            while FItems[j] > FItems[p] do Dec(j);
+            if i <= j then begin
+               Exchange(i, j);
+               if p = i then
+                  p := j
+               else if p = j then
+                  p := i;
                Inc(i);
                Dec(j);
             end;
-         until i>j;
-         if minIndex<j then
+         until i > j;
+         if minIndex < j then
             QuickSort(minIndex, j);
-         minIndex:=i;
-      until i>=maxIndex;
+         minIndex := i;
+      until i >= maxIndex;
+   end;
+end;
+
+// Sort
+//
+procedure TSimpleDoubleList.Sort;
+begin
+   if Count > 1 then
+      QuickSort(0, Count-1);
+end;
+
+// QuickSum
+//
+function TSimpleDoubleList.QuickSum : Double;
+{$ifndef WIN32_ASM}
+var
+   i : Integer;
+   buf : Extended;
+begin
+   buf := 0;
+   for i := 0 to Count-1 do
+      buf := buf + FItems[i];
+   Result := buf;
+{$else}
+asm
+   fldz
+   mov   ecx, [eax + OFFSET FCount]
+   test  ecx, ecx
+   jz    @@done
+
+   mov   edx, [eax + OFFSET FItems]
+
+@@loop:
+   fadd  qword ptr [edx]
+   lea   edx, [edx+8]
+   dec   ecx
+   jnz   @@Loop
+
+@@done:
+   ret
+{$endif}
+end;
+
+// KahanSum
+//
+function TSimpleDoubleList.KahanSum : Double;
+var
+   c, y, t : Double;
+   i : Integer;
+begin
+   if Count = 0 then Exit(0);
+   Result := FItems[0];
+   c := 0;
+   for i := 1 to Count-1 do begin
+      y := FItems[i] - c;
+      t := Result + y;
+      c := (t-Result) - y;
+      Result := t;
+   end;
+end;
+
+// NeumaierSum
+//
+function TSimpleDoubleList.NeumaierSum : Double;
+var
+   c, t : Double;
+   i : Integer;
+begin
+   if Count = 0 then Exit(0);
+   Result := FItems[0];
+   c := 0;
+   for i := 1 to Count-1 do begin
+      t := Result + FItems[i];
+      if Abs(Result) >= Abs(FItems[i]) then
+         c := c + (Result - t) + FItems[i]
+      else c := c + (FItems[i] - t) + Result;
+      Result := t;
+   end;
+   Result := Result + c;
+end;
+
+// MedianSort
+//
+procedure TSimpleDoubleList.MedianSort(minIndex, maxIndex : Integer);
+// Median sorts aims only to sort accurately the two mid-point values
+// which are (potentially) used to compute the median
+var
+   i, j, p, n : Integer;
+begin
+   n := maxIndex - minIndex;
+   case n of
+      1 : begin
+         if FItems[minIndex] > FItems[maxIndex] then
+            Exchange(minIndex, maxIndex);
+      end;
+      2 : begin
+         i := minIndex+1;
+         if FItems[minIndex] > FItems[i] then
+            Exchange(minIndex, i);
+         if FItems[i] > FItems[maxIndex] then begin
+            Exchange(i, maxIndex);
+            if FItems[minIndex] > FItems[i] then
+               Exchange(minIndex, i);
+         end;
+      end;
+   else
+      repeat
+         i := minIndex;
+         j := maxIndex;
+         p := ((i+j) shr 1);
+         repeat
+            while FItems[i] < FItems[p] do Inc(i);
+            while FItems[j] > FItems[p] do Dec(j);
+            if i <= j then begin
+               Exchange(i, j);
+               if p = i then
+                  p := j
+               else if p = j then
+                  p := i;
+               Inc(i);
+               Dec(j);
+            end;
+         until i > j;
+         if minIndex < j then
+            if (j >= Count div 2 - 1) and (minIndex <= Count div 2) then
+               MedianSort(minIndex, j);
+         minIndex := i;
+      until i >= maxIndex;
+   end;
+end;
+
+// QuickMedian
+//
+function TSimpleDoubleList.QuickMedian : Double;
+var
+   n : Integer;
+begin
+   case Count of
+      0 : Result := 0;
+      1 : Result := FItems[0];
+      2 : Result := (FItems[0] + FItems[1])*0.5;
+   else
+      MedianSort(0, Count-1);
+      if (Count and 1)=0 then begin
+         n := Count shr 1;
+         Result := (FItems[n] + FItems[n-1])*0.5;
+      end else begin
+         Result := FItems[Count shr 1];
+      end;
    end;
 end;
 

@@ -146,7 +146,7 @@ implementation
 {$R dwsJSRTL.res dwsJSRTL.rc}
 
 const
-   cJSRTLDependencies : array [1..264] of TJSRTLDependency = (
+   cJSRTLDependencies : array [1..274] of TJSRTLDependency = (
       // codegen utility functions
       (Name : '$CheckStep';
        Code : 'function $CheckStep(s,z) { if (s>0) return s; throw Exception.Create($New(Exception),"FOR loop STEP should be strictly positive: "+s.toString()+z); }';
@@ -193,6 +193,14 @@ const
               +#9'return a.slice($Idx(i,0,a.length-1,z),$Idx(i+l-1,0,a.length-1,z)-i+1,z)'#13#10
               +'}';
        Dependency : '$Idx' ),
+      (Name : '$ArrayMove';
+       Code : 'function $ArrayMove(a,s,d) { var e=a[s]; a.splice(s, 1); a.splice(d, 0, e) }' ),
+      (Name : '$ArrayMoveChk';
+       Code : 'function $ArrayMoveChk(a,s,d,z) {'#13#10
+              +#9'var n=a.length-1;'#13#10
+              +#9'$ArrayMove(a,$Idx(s,0,n,z),$Idx(d,0,n,z));'#13#10
+              +'}';
+       Dependency : '$Idx'; Dependency2 : '$ArrayMove' ),
       (Name : '$ArraySwap';
        Code : 'function $ArraySwap(a,i1,i2) { var t=a[i1]; a[i1]=a[i2]; a[i2]=t }' ),
       (Name : '$ArraySwapChk';
@@ -492,6 +500,16 @@ const
        code : 'function $SetExc(s,v,m,n) { v-=m; if (v>=0 && v<n) s[v>>5]&=~(1<<(v&31)) }'),
       (Name : '$SetIn';
        code : 'function $SetIn(s,v,m,n) { v-=m; return (v<0 && v>=n)?false:(s[v>>5]&(1<<(v&31)))!=0 }'),
+      (Name : '$SetEqual';
+       code : 'function $SetEqual(a,b) { for(var i=0;i<a.length;i++) if (a[i]!==b[i]) return false; return true }'),
+      (Name : '$SetLiR';
+       code : 'function $SetLiR(a,b) { for(var i=0;i<a.length;i++) if ((a[i]&b[i])!=a[i]) return false; return true }'),
+      (Name : '$SetAdd';
+       code : 'function $SetAdd(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]|b[i]); return r }'),
+      (Name : '$SetSub';
+       code : 'function $SetSub(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]&(~b[i])); return r }'),
+      (Name : '$SetMul';
+       code : 'function $SetMul(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]&b[i]); return r }'),
       (Name : '$TZ';
        code : 'var $TZ = 1;'#13#10
               +'var $fmt = { '#13#10
@@ -747,36 +765,40 @@ const
       (Name : 'Factorial';
        Code : 'function Factorial(i) { var r=1; while (i>1) { r*=i; i--; } return r }'),
       (Name : 'FirstDayOfMonth';
-       Code : 'function FirstDayOfMonth(v) {'#13#10
+       Code : 'function FirstDayOfMonth(v, u) {'#13#10
                +#9'var o=(v===0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return EncodeDate(o.getFullYear(), o.getMonth()+1, 1, 1)'#13#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
+               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#13#10
+               +#9'return EncodeDate(y, m+1, 1, u)'#13#10
                +'}';
        Dependency : 'DateTimeToDate,EncodeDate' ),
       (Name : 'FirstDayOfNextMonth';
-       Code : 'function FirstDayOfNextMonth(v) {'#13#10
+       Code : 'function FirstDayOfNextMonth(v,u) {'#13#10
                +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=o.getFullYear();'#13#10
-               +#9'var m=o.getMonth();'#13#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
+               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#13#10
                +#9'if (m==11) { m=0; y++ } else m++;'#13#10
-               +#9'return EncodeDate(y,m+1,1)'#13#10
+               +#9'return EncodeDate(y, m+1, 1, u)'#13#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfNextYear';
-       Code : 'function FirstDayOfNextYear(v) {'#13#10
+       Code : 'function FirstDayOfNextYear(v,u) {'#13#10
                +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return EncodeDate(o.getFullYear()+1,1,1)'#13#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
+               +#9'return EncodeDate(y+1,1,1,u)'#13#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfYear';
-       Code : 'function FirstDayOfYear(v) {'#13#10
+       Code : 'function FirstDayOfYear(v,u) {'#13#10
                +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return EncodeDate(o.getFullYear(),1,1)'#13#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
+               +#9'return EncodeDate(y,1,1)'#13#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfWeek';
-       Code : 'function FirstDayOfWeek(v) {'#13#10
+       Code : 'function FirstDayOfWeek(v,u) {'#13#10
                +#9'var o=DateTimeToDate(v);'#13#10
-               +#9'var d=o.getDay();'#13#10
+               +#9'var d=((u||$TZ)===2) ? o.getUTCDay() : o.getDay();'#13#10
                +#9'return (d==0)?v-6:v-(d-1)'#13#10
                +'}';
        Dependency : 'DateTimeToDate' ),
@@ -991,8 +1013,12 @@ const
        Code : 'function Sleep(v) { for(v+=Date.now();Date.now()>v;); }'),
       (Name : 'StrAfter';
        Code : 'function StrAfter(s,d) { if (!d) return ""; var p=s.indexOf(d); return (p<0)?"":s.substr(p+d.length) }'),
+      (Name : 'StrAfterLast';
+       Code : 'function StrAfterLast(s,d) { if (!d) return ""; var p=s.lastIndexOf(d); return (p<0)?"":s.substr(p+d.length) }'),
       (Name : 'StrBefore';
        Code : 'function StrBefore(s,d) { if (!d) return s; var p=s.indexOf(d); return (p<0)?s:s.substr(0, p) }'),
+      (Name : 'StrBeforeLast';
+       Code : 'function StrBeforeLast(s,d) { if (!d) return s; var p=s.lastIndexOf(d); return (p<0)?s:s.substr(0, p) }'),
       (Name : 'StrBetween';
        Code : 'function StrBetween(s,d,f) { return StrBefore(StrAfter(s, d), f) }';
        Dependency: 'StrAfter'; Dependency2: 'StrBefore'),
@@ -1081,6 +1107,9 @@ const
       (Name : 'StrToTimeDef';
        Code : 'function StrToTimeDef(s,d) { return strToDateTimeDef($fmt.LongTimeFormat, s, 0)||strToDateTimeDef($fmt.ShortTimeFormat, s, 0)||d }';
        Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+      (Name : 'StrToXML';
+       Code : 'function StrToXML(v) { return v.replace(/[&<>"'']/g, StrToXML.e) }'#13#10
+              +'StrToXML.e = function(c) { return { "&":"&amp;", "<":"&lt;", ">":"&gt;", ''"'':"&quot;", "''":"&apos;" }[c] }' ),
       (Name : 'SubStr';
        Code : 'function SubStr(s,f) { return s.substr(f-1) }'),
       (Name : 'SubString';

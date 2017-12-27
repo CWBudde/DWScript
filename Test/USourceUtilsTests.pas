@@ -54,6 +54,7 @@ type
          procedure MemberVisibilities;
          procedure UnitNamesSuggest;
          procedure OverloadSuggest;
+         procedure PropertyDescription;
    end;
 
 // ------------------------------------------------------------------
@@ -328,10 +329,12 @@ begin
 
    CheckTrue(sugg.Count>4, 's.');
    CheckEquals('After', sugg.Code[0], 's. 0');
-   CheckEquals('Before', sugg.Code[1], 's. 1');
-   CheckEquals('Between', sugg.Code[2], 's. 2');
-   CheckEquals('CompareText', sugg.Code[3], 's. 3');
-   CheckEquals('CompareTo', sugg.Code[4], 's. 4');
+   CheckEquals('AfterLast', sugg.Code[1], 's. 1');
+   CheckEquals('Before', sugg.Code[2], 's. 2');
+   CheckEquals('BeforeLast', sugg.Code[3], 's. 3');
+   CheckEquals('Between', sugg.Code[4], 's. 4');
+   CheckEquals('CompareText', sugg.Code[5], 's. 5');
+   CheckEquals('CompareTo', sugg.Code[6], 's. 6');
 
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 4);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
@@ -378,7 +381,7 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 3);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
-   CheckEquals(19, sugg.Count, 'd.');
+   CheckEquals(20, sugg.Count, 'd.');
    CheckEquals('Add', sugg.Code[0], 'd. 0');
    CheckEquals('Clear', sugg.Code[1], 'd. 1');
    CheckEquals('Copy', sugg.Code[2], 'd. 2');
@@ -390,14 +393,15 @@ begin
    CheckEquals('Length', sugg.Code[8], 'd. 8');
    CheckEquals('Low', sugg.Code[9], 'd. 9');
    CheckEquals('Map', sugg.Code[10], 'd. 10');
-   CheckEquals('Peek', sugg.Code[11], 'd. 11');
-   CheckEquals('Pop', sugg.Code[12], 'd. 12');
-   CheckEquals('Push', sugg.Code[13], 'd. 13');
-   CheckEquals('Remove', sugg.Code[14], 'd. 14');
-   CheckEquals('Reverse', sugg.Code[15], 'd. 15');
-   CheckEquals('SetLength', sugg.Code[16], 'd. 16');
-   CheckEquals('Sort', sugg.Code[17], 'd. 17');
-   CheckEquals('Swap', sugg.Code[18], 'd. 18');
+   CheckEquals('Move', sugg.Code[11], 'd. 11');
+   CheckEquals('Peek', sugg.Code[12], 'd. 12');
+   CheckEquals('Pop', sugg.Code[13], 'd. 13');
+   CheckEquals('Push', sugg.Code[14], 'd. 14');
+   CheckEquals('Remove', sugg.Code[15], 'd. 15');
+   CheckEquals('Reverse', sugg.Code[16], 'd. 16');
+   CheckEquals('SetLength', sugg.Code[17], 'd. 17');
+   CheckEquals('Sort', sugg.Code[18], 'd. 18');
+   CheckEquals('Swap', sugg.Code[19], 'd. 19');
 end;
 
 // ObjectArrayTest
@@ -905,6 +909,30 @@ begin
    CheckEquals(2, sugg.Count);
    CheckEquals('Toto (s: String) : String', sugg.Caption[0]);
    CheckEquals('Toto (i: Integer) : String', sugg.Caption[1]);
+end;
+
+// PropertyDescription
+//
+procedure TSourceUtilsTests.PropertyDescription;
+var
+   prog : IdwsProgram;
+   cls, prop : TSymbol;
+begin
+   prog := FCompiler.Compile(
+         'type TTest = class '
+         + 'function Func : String; begin Result := '''' ; end; '
+         + 'property Hello : String read Func description "world"; '
+       + 'end;'
+   );
+   CheckEquals(0, prog.Msgs.Count, prog.Msgs.AsInfo);
+
+   cls := prog.Table.FindSymbol('TTest', cvMagic, TClassSymbol);
+   Check(cls <> nil, 'TTest missing');
+
+   prop := (cls as TClassSymbol).Members.FindLocal('Hello', TPropertySymbol);
+   Check(prop <> nil, 'TTest.Hello missing');
+
+   CheckEquals('world', (prop as TPropertySymbol).UserDescription);
 end;
 
 // SuggestInBlockWithError
