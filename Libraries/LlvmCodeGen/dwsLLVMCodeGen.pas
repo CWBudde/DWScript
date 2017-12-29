@@ -365,7 +365,7 @@ type
       procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
    end;
 
-   TLLVMConvFloatExpr = class (TLLVMExprCodeGen)
+   TLLVMConvIntToFloatExpr = class (TLLVMExprCodeGen)
       procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
    end;
 
@@ -1237,7 +1237,7 @@ begin
    RegisterCodeGen(TMultAssignFloatExpr, TLLVMOpAssignExpr.Create(LLVMFMul));
    RegisterCodeGen(TDivideAssignExpr, TLLVMOpAssignExpr.Create(LLVMFDiv));
 
-   RegisterCodeGen(TConvFloatExpr, TLLVMConvFloatExpr.Create);
+   RegisterCodeGen(TConvIntToFloatExpr, TLLVMConvIntToFloatExpr.Create);
 
    RegisterCodeGen(TRelIntIsZeroExpr, TLLVMRelIntZeroExpr.Create(True));
    RegisterCodeGen(TRelIntIsNotZeroExpr, TLLVMRelIntZeroExpr.Create(False));
@@ -2640,18 +2640,18 @@ end;
 
 
 // ------------------
-// ------------------ TLLVMConvFloatExpr ------------------
+// ------------------ TLLVMConvIntToFloatExpr ------------------
 // ------------------
 
-procedure TLLVMConvFloatExpr.CodeGenNoWrap(codeGen: TdwsCodeGen;
+procedure TLLVMConvIntToFloatExpr.CodeGenNoWrap(codeGen: TdwsCodeGen;
   expr: TTypedExpr);
 var
    cg : TdwsLLVMCodeGen;
-   e : TConvFloatExpr;
+   e : TConvIntToFloatExpr;
    valE, valO : PLLVMValue;
 begin
    cg := TdwsLLVMCodeGen(codeGen);
-   e := TConvFloatExpr(expr);
+   e := TConvIntToFloatExpr(expr);
 
    cg.CompileNoWrap(e.Expr);
    valE := cg.ExpressionToLLVMValue(e.Expr);

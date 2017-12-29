@@ -1,0 +1,96 @@
+{
+        "search_pathes": 
+    [
+        {
+            "pathes": "SourceUtils;..\\Libraries\\asmLib;..\\Libraries\\BigIntegersLib;..\\Libraries\\ClassesLib;..\\Libraries\\CryptoLib;..\\Libraries\\DatabaseLib;..\\Libraries\\DocBuilder;..\\Libraries\\GraphicsLib;..\\Libraries\\Indy;..\\Libraries\\LinqLib;..\\Libraries\\LlvmCodeGen;..\\Libraries\\SimpleServer;..\\Libraries\\SymbolsLib;..\\Libraries\\SynapseLib",
+            "platforms": "Win32;Win64"
+        }
+    ],
+    "browsing_pathes": 
+    [
+        {
+            "pathes": "SourceUtils;..\\Libraries\\asmLib;..\\Libraries\\BigIntegersLib;..\\Libraries\\ClassesLib;..\\Libraries\\CryptoLib;..\\Libraries\\DatabaseLib;..\\Libraries\\DocBuilder;..\\Libraries\\GraphicsLib;..\\Libraries\\Indy;..\\Libraries\\LinqLib;..\\Libraries\\LlvmCodeGen;..\\Libraries\\SimpleServer;..\\Libraries\\SymbolsLib;..\\Libraries\\SynapseLib",
+            "platforms": "Win32;Win64"
+        }
+    ],
+
+    "source_folders":
+    [
+        {
+            "folder": "Source",
+            "base": "Source",
+            "recursive": true,
+            "filter": "*"
+        },
+        {
+            "folder": "Libraries",
+            "base": "Libraries",
+            "recursive": true,
+            "filter": "*"
+        }
+    ],
+
+	"projects":
+	[
+		{
+			"project": "Packages\\D2009\\dwsLib.dproj",
+			"compiler_min": 20,
+			"compiler_max": 20
+		},
+		{
+			"project": "Packages\\D2010\\dwsLib.dproj",
+			"compiler_min": 21,
+			"compiler_max": 21
+		},
+		{
+			"project": "Packages\\DXE\\dwsLib.dproj",
+			"compiler_min": 22,
+			"compiler_max": 22
+		},
+		{
+			"project": "Packages\\DXE2\\dwsLib.dproj",
+			"compiler_min": 23,
+			"compiler_max": 23
+		},
+		{
+			"project": "Packages\\DXE3\\dwsLib.dproj",
+			"compiler_min": 24,
+			"compiler_max": 24
+		},
+		{
+			"project": "Packages\\DXE4\\dwsLib.dproj",
+			"compiler_min": 25,
+			"compiler_max": 25
+		},
+		{
+			"project": "Packages\\DXE5\\dwsLib.dproj",
+			"compiler_min": 26,
+			"compiler_max": 26
+		},
+		{
+			"project": "Packages\\DXE6\\dwsLib.dproj",
+			"compiler_min": 27,
+			"compiler_max": 27
+		},
+		{
+			"project": "Packages\\DXE7\\dwsLib.dproj",
+			"compiler_min": 28,
+			"compiler_max": 28
+		},
+		{
+			"project": "Packages\\DXE8\\dwsLib.dproj",
+			"compiler_min": 29,
+			"compiler_max": 29
+		},
+		{
+			"project": "Packages\\DX\\dwsLib.dproj",
+			"compiler_min": 30,
+			"compiler_max": 30
+		},
+		{
+			"project": "Packages\\DX1\\dwsLib.dproj",
+			"compiler_min": 31,
+			"compiler_max": 31
+		}
+  ]
+}

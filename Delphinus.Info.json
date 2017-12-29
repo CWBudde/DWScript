@@ -1,0 +1,8 @@
+{
+  "id": "{E6AABC1D-B20E-410A-B7E3-DC9AADFFC22B}",
+  "picture": "Logo.png",
+  "license_type": "MPL-1.1",
+	"platforms": "Win32",
+	"package_compiler_min": 21,
+	"compiler_min": 21
+}

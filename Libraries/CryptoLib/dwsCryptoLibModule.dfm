@@ -2,8 +2,6 @@ object dwsCryptoLib: TdwsCryptoLib
   OldCreateOrder = False
   OnCreate = DataModuleCreate
   OnDestroy = DataModuleDestroy
-  Left = 810
-  Top = 86
   Height = 215
   Width = 195
   object dwsCrypto: TdwsUnit

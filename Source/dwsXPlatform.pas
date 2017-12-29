@@ -44,7 +44,14 @@ uses
          LCLIntf
       {$ENDIF}
    {$ELSE}
+      {$IFDEF POSIX}
+      Posix.Time, Posix.SysTime, DateUtils
+      {$IFDEF MACOS}
+      , Macapi.CoreFoundation, Macapi.Foundation
+      {$ENDIF}
+      {$ELSE}
       Windows
+      {$ENDIF}
       {$IFNDEF VER200}, IOUtils{$ENDIF}
    {$ENDIF}
    ;
@@ -367,7 +374,11 @@ begin
    GetSystemTimeAsFileTime(fileTime);
    Result:=Round(PInt64(@fileTime)^*1e-4); // 181
 {$ELSE}
-   Not yet implemented!
+var
+   fileTime : timeval;
+begin
+   gettimeofday(fileTime, nil);
+   Result := 1000 * fileTime.tv_sec + fileTime.tv_usec;
 {$ENDIF}
 end;
 
@@ -402,17 +413,24 @@ end;
 // UTCDateTime
 //
 function UTCDateTime : TDateTime;
+{$IFDEF Windows}
 var
    systemTime : TSystemTime;
 begin
-{$IFDEF Windows}
    FillChar(systemTime, SizeOf(systemTime), 0);
    GetSystemTime(systemTime);
    with systemTime do
       Result:= EncodeDate(wYear, wMonth, wDay)
               +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
-{$ELSE}
-   Not yet implemented!
+{$ENDIF}
+{$IFDEF MACOS}
+var
+   systemTime : CFGregorianDate;
+begin
+   systemTime := CFAbsoluteTimeGetGregorianDate(CFAbsoluteTimeGetCurrent, nil);
+   with systemTime do
+      Result := EncodeDate(year, month, day)
+               +EncodeTime(hour, minute, Trunc(second), Round((second - Trunc(second)) * MSecsPerSec));
 {$ENDIF}
 end;
 
@@ -423,6 +441,7 @@ begin
    Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
 end;
 
+{$IFDEF MSWINDOWS}
 type
    TDynamicTimeZoneInformation = record
       Bias : Longint;
@@ -443,10 +462,12 @@ function GetTimeZoneInformationForYear(wYear: USHORT; lpDynamicTimeZoneInformati
       var lpTimeZoneInformation: TTimeZoneInformation): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
 function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInformation;
       var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
+{$ENDIF}
 
 // LocalDateTimeToUTCDateTime
 //
 function LocalDateTimeToUTCDateTime(t : TDateTime) : TDateTime;
+{$IFDEF MSWINDOWS}
 var
    localSystemTime, universalSystemTime : TSystemTime;
    tzDynInfo : TDynamicTimeZoneInformation;
@@ -460,11 +481,16 @@ begin
    if not TzSpecificLocalTimeToSystemTime(@tzInfo, localSystemTime, universalSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(universalSystemTime);
+{$ELSE}
+begin
+   Result := TTimeZone.Local.ToUniversalTime(t);
+{$ENDIF}
 end;
 
 // UTCDateTimeToLocalDateTime
 //
 function UTCDateTimeToLocalDateTime(t : TDateTime) : TDateTime;
+{$IFDEF MSWINDOWS}
 var
    tzDynInfo : TDynamicTimeZoneInformation;
    tzInfo : TTimeZoneInformation;
@@ -478,6 +504,10 @@ begin
    if not SystemTimeToTzSpecificLocalTime(@tzInfo, universalSystemTime, localSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(localSystemTime);
+{$ELSE}
+begin
+   Result := TTimeZone.Local.ToLocalTime(t);
+{$ENDIF}
 end;
 
 // SystemMillisecondsToUnixTime
@@ -497,9 +527,18 @@ end;
 // SystemSleep
 //
 procedure SystemSleep(msec : Integer);
+{$IFDEF MSWINDOWS}
 begin
    if msec>=0 then
       Windows.Sleep(msec);
+{$ENDIF}
+{$IFDEF POSIX}
+var
+  tim: timespec;
+begin
+   tim.tv_nsec := msec * 1000000;
+   nanosleep(tim, nil);
+{$ENDIF}
 end;
 
 // FirstWideCharOfString
@@ -571,7 +610,7 @@ function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Inte
 const
    CSTR_EQUAL = 2;
 begin
-   Result:=CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
 end;
 
 // UnicodeCompareP
@@ -645,9 +684,12 @@ end;
 
 // NormalizeString
 //
+{$IFDEF MSWINDOWS}
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
+{$ENDIF}
+
 function NormalizeString(const s, form : String) : String;
 var
    nf, len : Integer;
@@ -774,13 +816,19 @@ begin
       Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
       {$endif}
    {$else}
+   {$ifdef MSWINDOWS}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
+   {$else}
+   Not implemented yet
+   {$endif}
    {$endif}
 end;
 
 // SetThreadName
 //
+{$IFDEF MSWINDOWS}
 function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPresent';
+{$ENDIF}
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
 type
@@ -1542,6 +1590,10 @@ begin
 {$endif}
 end;
 
+{$IFDEF MACOS}
+function NSUserName: Pointer; cdecl; external '/System/Library/Frameworks/Foundation.framework/Foundation' name '_NSUserName';
+{$ENDIF}
+
 // RDTSC
 //
 function RDTSC : UInt64;
@@ -1552,13 +1604,15 @@ end;
 // GetCurrentUserName
 //
 function GetCurrentUserName : String;
+{$IFDEF MSWINDOWS}
 var
    len : Cardinal;
 begin
-   len:=255;
-   SetLength(Result, len);
-   Windows.GetUserNameW(PWideChar(Result), len);
-   SetLength(Result, len-1);
+{$ENDIF}
+{$IFDEF MACOS}
+begin
+   Result := UnicodeString(TNSString.Wrap(NSUserName).UTF8String);
+{$ENDIF}
 end;
 
 {$ifndef FPC}
