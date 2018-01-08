@@ -36,7 +36,7 @@ unit dwsXPlatform;
 interface
 
 uses
-   Classes, SysUtils, Types, Masks, Registry, SyncObjs, Variants, StrUtils,
+   Classes, SysUtils, Types, Masks, SyncObjs, Variants, StrUtils,
    {$IFDEF FPC}
       {$IFDEF Windows}
          Windows
@@ -57,7 +57,7 @@ uses
    ;
 
 const
-{$IFDEF UNIX}
+{$IFDEF POSIX}
    cLineTerminator  = #10;
 {$ELSE}
    cLineTerminator  = #13#10;
@@ -76,7 +76,7 @@ type
 
    // see http://delphitools.info/2011/11/30/fixing-tcriticalsection/
    {$HINTS OFF}
-   {$ifdef UNIX}
+   {$ifdef POSIX}
    TdwsCriticalSection = class (TCriticalSection);
    {$else}
    TdwsCriticalSection = class
@@ -107,7 +107,7 @@ type
 
    TMultiReadSingleWriteState = (mrswUnlocked, mrswReadLock, mrswWriteLock);
 
-   {$ifdef UNIX}{$define SRW_FALLBACK}{$endif}
+   {$ifdef POSIX}{$define SRW_FALLBACK}{$endif}
 
    TMultiReadSingleWrite = class (TInterfacedObject, IMultiReadSingleWrite)
       private
@@ -367,10 +367,10 @@ type
 // GetSystemTimeMilliseconds
 //
 function GetSystemTimeMilliseconds : Int64; stdcall;
+{$IFDEF WINDOWS}
 var
    fileTime : TFileTime;
 begin
-{$IFDEF WINDOWS}
    GetSystemTimeAsFileTime(fileTime);
    Result:=Round(PInt64(@fileTime)^*1e-4); // 181
 {$ELSE}
@@ -688,7 +688,6 @@ end;
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
-{$ENDIF}
 
 function NormalizeString(const s, form : String) : String;
 var
@@ -711,6 +710,7 @@ begin
       RaiseLastOSError;
    SetLength(Result, len);
 end;
+{$ENDIF}
 
 // StripAccents
 //
