@@ -38,6 +38,12 @@ object FrmBasic: TFrmBasic
     Font.Name = 'Courier New'
     Font.Style = []
     TabOrder = 0
+    CodeFolding.CollapsedLineColor = clGrayText
+    CodeFolding.FolderBarLinesColor = clGrayText
+    CodeFolding.ShowCollapsedLine = True
+    CodeFolding.IndentGuidesColor = clGray
+    CodeFolding.IndentGuides = True
+    UseCodeFolding = False
     Gutter.Font.Charset = DEFAULT_CHARSET
     Gutter.Font.Color = clWindowText
     Gutter.Font.Height = -11

@@ -29,9 +29,10 @@ uses
   Types, SyncObjs, ImgList, dwsComp, dwsExprs, dwsSymbols, dwsErrors,
   dwsSuggestions, dwsRTTIConnector, dwsVCLGUIFunctions, dwsStrings,
   dwsUnitSymbols, {$IFDEF LLVM}dwsLLVMCodeGen, dwsLLVM, {$ENDIF}
-  {$IFDEF JS}dwsJSCodeGen, {$ENDIF} SynEdit, SynEditHighlighter,
-  SynHighlighterDWS, SynCompletionProposal, SynEditMiscClasses, SynEditSearch,
-  SynEditOptionsDialog, SynEditPlugins, SynMacroRecorder;
+  {$IFDEF JS}dwsJSCodeGen, {$ENDIF} dwsScriptSource, dwsSymbolDictionary,
+  SynEdit, SynEditHighlighter, SynHighlighterDWS, SynCompletionProposal,
+  SynEditMiscClasses, SynEditSearch, SynEditOptionsDialog, SynEditPlugins,
+  SynMacroRecorder;
 
 type
   TRescanThread = class(TThread)
@@ -632,6 +633,7 @@ procedure TFrmBasic.SynParametersExecute(Kind: SynCompletionType;
 
     SymbolDictionary: TdwsSymbolDictionary;
     Symbol, TestSymbol: TSymbol;
+    TestSymbolPosList: TSymbolPositionList;
   begin
     // make sure the string list is present
     Assert(Assigned(ParameterInfos));
@@ -663,9 +665,9 @@ procedure TFrmBasic.SynParametersExecute(Kind: SynCompletionType;
 
       if TFuncSymbol(Symbol).IsOverloaded then
       begin
-        for ItemIndex := 0 to SymbolDictionary.Count - 1 do
+        for TestSymbolPosList in SymbolDictionary do
         begin
-          TestSymbol := SymbolDictionary.Items[ItemIndex].Symbol;
+          TestSymbol := TestSymbolPosList.Symbol;
 
           if (TestSymbol.ClassType = Symbol.ClassType) and
             SameText(TFuncSymbol(TestSymbol).Name, TFuncSymbol(Symbol).Name) and
