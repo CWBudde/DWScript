@@ -29,10 +29,9 @@ uses
   Types, SyncObjs, ImgList, dwsComp, dwsExprs, dwsSymbols, dwsErrors,
   dwsSuggestions, dwsRTTIConnector, dwsVCLGUIFunctions, dwsStrings,
   dwsUnitSymbols, {$IFDEF LLVM}dwsLLVMCodeGen, dwsLLVM, {$ENDIF}
-  {$IFDEF JS}dwsJSCodeGen, {$ENDIF} dwsScriptSource, dwsSymbolDictionary,
-  SynEdit, SynEditHighlighter, SynHighlighterDWS, SynCompletionProposal,
-  SynEditMiscClasses, SynEditSearch, SynEditOptionsDialog, SynEditPlugins,
-  SynMacroRecorder;
+  {$IFDEF JS}dwsJSCodeGen, {$ENDIF} SynEdit, SynEditHighlighter,
+  SynHighlighterDWS, SynCompletionProposal, SynEditMiscClasses, SynEditSearch,
+  SynEditOptionsDialog, SynEditPlugins, SynMacroRecorder;
 
 type
   TRescanThread = class(TThread)
@@ -164,7 +163,7 @@ implementation
 {$R *.dfm}
 
 uses
-  Math, Registry, dwsUtils, dwsXPlatform;
+  Math, Registry, dwsUtils, dwsScriptSource, dwsSymbolDictionary, dwsXPlatform;
 
 { TRescanThread }
 
@@ -284,6 +283,8 @@ begin
 
   FreeAndNil(FCriticalSection);
 
+  FCompiledProgram := nil;
+
   FreeAndNil(FUnitRTTI);
 end;
 
@@ -375,6 +376,8 @@ begin
 //  AcnCodeGenLLVM.Execute;
   {$ENDIF}
   {$ENDIF}
+
+  ExecutedProgram := nil;
 end;
 
 procedure TFrmBasic.MnuSaveMessagesAsClick(Sender: TObject);
@@ -550,7 +553,7 @@ begin
   // use this handler only in case the kind is set to ctCode!
   Assert(Kind = ctCode);
 
-  // ok, get the compiled "program" from DWS
+  // get the compiled "program" from DWS
   if Assigned(FCompiledProgram) then
   begin
     SourceFile := FCompiledProgram.SourceList.MainScript.SourceFile;
@@ -688,7 +691,7 @@ procedure TFrmBasic.SynParametersExecute(Kind: SynCompletionType;
 
 
 var
-  LineText: String;
+  LineText: string;
   Proposal: TSynCompletionProposal;
   LocLine: string;
   TmpX: Integer;
@@ -717,7 +720,7 @@ begin
 
       LocLine := LineText;
 
-      //go back from the cursor and find the first open paren
+      // go back from the cursor and find the first open paren
       TmpX := CaretX;
       if TmpX > Length(LocLine) then
         TmpX := Length(LocLine)
