@@ -163,7 +163,7 @@ implementation
 {$R *.dfm}
 
 uses
-  Math, Registry, dwsUtils, dwsScriptSource, dwsSymbolDictionary, dwsXPlatform;
+  Math, Registry, dwsUtils, dwsXPlatform, dwsScriptSource, dwsSymbolDictionary;
 
 { TRescanThread }
 
@@ -284,7 +284,6 @@ begin
   FreeAndNil(FCriticalSection);
 
   FCompiledProgram := nil;
-
   FreeAndNil(FUnitRTTI);
 end;
 
@@ -556,17 +555,25 @@ begin
   // get the compiled "program" from DWS
   if Assigned(FCompiledProgram) then
   begin
-    SourceFile := FCompiledProgram.SourceList.MainScript.SourceFile;
-    ScriptPos := TScriptPos.Create(SourceFile, SynEdit.CaretY, SynEdit.CaretX);
-    Suggestions := TDWSSuggestions.Create(FCompiledProgram, ScriptPos,
-      [soNoReservedWords]);
+    SourceFile := TSourceFile.Create;
+    try
+      SourceFile.Name := SYS_MainModule;
+      SourceFile.Code := SynEdit.Lines.Text;
+      ScriptPos := TScriptPos.Create(SourceFile, SynEdit.CaretY, SynEdit.CaretX);
 
-    // now populate the suggestion box
-    for SuggestionIndex := 0 to Suggestions.Count - 1 do
-    begin
-      Proposal.ItemList.AddObject(Suggestions.Caption[SuggestionIndex],
-        TObject(Suggestions.Category[SuggestionIndex]));
-      Proposal.InsertList.Add(Suggestions.Code[SuggestionIndex]);
+      Suggestions := TDWSSuggestions.Create(FCompiledProgram, ScriptPos,
+        [soNoReservedWords]);
+
+      // now populate the suggestion box
+      for SuggestionIndex := 0 to Suggestions.Count - 1 do
+      begin
+        Proposal.ItemList.AddObject(Suggestions.Caption[SuggestionIndex],
+          TObject(Suggestions.Category[SuggestionIndex]));
+        Proposal.InsertList.Add(Suggestions.Code[SuggestionIndex]);
+      end;
+    finally
+      Suggestions:= nil;
+      SourceFile.Free;
     end;
   end;
 
@@ -635,8 +642,8 @@ procedure TFrmBasic.SynParametersExecute(Kind: SynCompletionType;
     FuncSymbol: TFuncSymbol;
 
     SymbolDictionary: TdwsSymbolDictionary;
+    SymbolPositionList: TSymbolPositionList;
     Symbol, TestSymbol: TSymbol;
-    TestSymbolPosList: TSymbolPositionList;
   begin
     // make sure the string list is present
     Assert(Assigned(ParameterInfos));
@@ -668,9 +675,9 @@ procedure TFrmBasic.SynParametersExecute(Kind: SynCompletionType;
 
       if TFuncSymbol(Symbol).IsOverloaded then
       begin
-        for TestSymbolPosList in SymbolDictionary do
+        for SymbolPositionList in SymbolDictionary do
         begin
-          TestSymbol := TestSymbolPosList.Symbol;
+          TestSymbol := SymbolPositionList.Symbol;
 
           if (TestSymbol.ClassType = Symbol.ClassType) and
             SameText(TFuncSymbol(TestSymbol).Name, TFuncSymbol(Symbol).Name) and
