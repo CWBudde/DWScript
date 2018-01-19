@@ -8,6 +8,7 @@ program LanguageTests;
 {$ENDIF}
 
 uses
+  FastMM4,
   Classes,
   Forms,
   Windows,
@@ -79,7 +80,8 @@ uses
   dwsUnicode in '..\Source\dwsUnicode.pas',
   UdwsSystemInfoTests in 'UdwsSystemInfoTests.pas',
   dwsSHA512 in '..\Libraries\CryptoLib\dwsSHA512.pas',
-  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas';
+  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas',
+  UdwsXPlatformTests in 'UdwsXPlatformTests.pas';
 
 {$R *.res}
 
