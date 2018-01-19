@@ -8,7 +8,6 @@ program LanguageTests;
 {$ENDIF}
 
 uses
-  FastMM4Debug,
   Classes,
   Forms,
   Windows,
@@ -41,6 +40,7 @@ uses
   UBuildTests in 'UBuildTests.pas',
   USourceUtilsTests in 'USourceUtilsTests.pas',
   ULocalizerTests in 'ULocalizerTests.pas',
+  BeaEngineDelphi in '..\Tools\BeaEngine\BeaEngineDelphi.pas',
   dwsRTTIFunctions,
   dwsRTTIConnector,
   dwsStringResult,
