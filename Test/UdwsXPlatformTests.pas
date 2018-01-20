@@ -26,13 +26,13 @@ uses Classes, SysUtils, Math, Variants, Types, SynCommons,
 type
 
    TdwsXPlatformTests = class (TTestCase)
-      private
       protected
          procedure SetUp; override;
          procedure TearDown; override;
       published
          procedure DateTimeConversionTest;
          procedure MillisecondsConversionTest;
+         procedure UnicodeLowerAndUpperCaseTest;
    end;
 
 // ------------------------------------------------------------------
@@ -81,6 +81,64 @@ var
 begin
    CurrentMilliseconds := UnixTime;
    CheckEquals(CurrentMilliseconds, UnixTimeToSystemMilliseconds(SystemMillisecondsToUnixTime(CurrentMilliseconds)));
+end;
+
+
+// UnicodeLowerAndUpperCaseTest
+//
+procedure TdwsXPlatformTests.UnicodeLowerAndUpperCaseTest;
+const
+  TestStringUpperCaseBasic = '0123456789<=>ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  TestStringUpperCaseSupplement = 'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ';
+  TestStringUpperCaseExtendedA =
+    'ĀĂĄĆĈĊČĎĐĒĔĖĘĚĜĞĠĢĤĦĨĪĬĮİĲĴĶĹĻĽĿŁŃŅŇŊŌŎŐŒŔŖŘŚŜŞŠŢŤŦŨŪŬŮŰŲŴŶŹŻŽ';
+  TestStringUpperCaseExtendedB = 'ƇƉƑƓƔƘǄǇǊǍǏǑǓǕǗǙǛǞǠǢǤǦǨǪǬǮ';
+  TestStringUpperCaseGreek = 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩΪΫϢ';
+  TestStringUpperCaseCyrillic = 'ЁЂЃЄЅІЇЈЉЊЋЌЎЏАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ';
+  TestStringUpperCaseArmenian = 'ԱԲԳԴԵԶԷԸԹԺԻԼԽԾԿՀՁՂՃՄՅՆՇՈՉՊՋՌՍՎՏՐՑՒՓՔՕ';
+  TestStringUpperCaseExtendedAdditional =
+    'ḀḂḄḆḈḊḌḎḐḒḔḖḘḚḜḞḠḢḤḦḨḪḬḮḰḲḴḶḸḺḼḾṀṂṄṆṈṊṌṎṐṒṔṖṘṚṜṞṠṢṤṦṨṪṬṮṰṲṴṶṸṺṼṾ';
+  TestStringUpperCaseGreekExtended =
+    'ἈἉἊἋἌἍἎἏἘἙἚἛἜἝἨἩἪἫἬἭἮἯἸἹἺἻἼἽἾἿὈὉὊὋὌὍὙὛὝὟὨὩὪὫὬὭὮὯᾈᾉᾊᾋᾌᾍ';
+  TestStringUpperCaseFullWidth =
+    'ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ';
+  TestStringLowerCaseBasic = '0123456789<=>abcdefghijklmnopqrstuvwxyz';
+  TestStringLowerCaseSupplement = 'àáâãäåæçèéêëìíîïðñòóôõö';
+  TestStringLowerCaseExtendedA =
+    'āăąćĉċčďđēĕėęěĝğġģĥħĩīĭįİĳĵķĺļľŀłńņňŋōŏőœŕŗřśŝşšţťŧũūŭůűųŵŷźżž';
+  TestStringLowerCaseExtendedB = 'ƈɖƒɠɣƙǆǉǌǎǐǒǔǖǘǚǜǟǡǣǥǧǩǫǭǯ';
+  TestStringLowerCaseGreek = 'αβγδεζηθικλμνξοπρστυφχψωϊϋϣ';
+  TestStringLowerCaseCyrillic = 'ёђѓєѕіїјљњћќўџабвгдежзийклмнопрстуфхцчшщъыьэюя';
+  TestStringLowerCaseArmenian = 'աբգդեզէըթժիլխծկհձղճմյնշոչպջռսվտրցւփքօ';
+  TestStringLowerCaseExtendedAdditional =
+    'ḁḃḅḇḉḋḍḏḑḓḕḗḙḛḝḟḡḣḥḧḩḫḭḯḱḳḵḷḹḻḽḿṁṃṅṇṉṋṍṏṑṓṕṗṙṛṝṟṡṣṥṧṩṫṭṯṱṳṵṷṹṻṽṿ';
+  TestStringLowerCaseGreekExtended =
+    'ἀἁἂἃἄἅἆἇἐἑἒἓἔἕἠἡἢἣἤἥἦἧἰἱἲἳἴἵἶἷὀὁὂὃὄὅὑὓὕὗὠὡὢὣὤὥὦὧᾀᾁᾂᾃᾄᾅ';
+  TestStringLowerCaseFullWidth =
+    'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ';
+var
+   Test: String;
+begin
+   CheckEquals(TestStringLowerCaseBasic, UnicodeLowerCase(TestStringUpperCaseBasic));
+   CheckEquals(TestStringLowerCaseSupplement, UnicodeLowerCase(TestStringUpperCaseSupplement));
+   CheckEquals(TestStringLowerCaseExtendedA, UnicodeLowerCase(TestStringUpperCaseExtendedA));
+   CheckEquals(TestStringLowerCaseExtendedB, UnicodeLowerCase(TestStringUpperCaseExtendedB));
+   CheckEquals(TestStringLowerCaseGreek, UnicodeLowerCase(TestStringUpperCaseGreek));
+   CheckEquals(TestStringLowerCaseCyrillic, UnicodeLowerCase(TestStringUpperCaseCyrillic));
+   CheckEquals(TestStringLowerCaseArmenian, UnicodeLowerCase(TestStringUpperCaseArmenian));
+   CheckEquals(TestStringLowerCaseExtendedAdditional, UnicodeLowerCase(TestStringUpperCaseExtendedAdditional));
+   CheckEquals(TestStringLowerCaseGreekExtended, UnicodeLowerCase(TestStringUpperCaseGreekExtended));
+   CheckEquals(TestStringLowerCaseFullWidth, UnicodeLowerCase(TestStringUpperCaseFullWidth));
+   CheckEquals(TestStringUpperCaseBasic, UnicodeUpperCase(TestStringLowerCaseBasic));
+   CheckEquals(TestStringUpperCaseSupplement, UnicodeUpperCase(TestStringLowerCaseSupplement));
+   CheckEquals(TestStringUpperCaseExtendedA, UnicodeUpperCase(TestStringLowerCaseExtendedA));
+   CheckEquals(TestStringUpperCaseExtendedB, UnicodeUpperCase(TestStringLowerCaseExtendedB));
+   CheckEquals(TestStringUpperCaseGreek, UnicodeUpperCase(TestStringLowerCaseGreek));
+   CheckEquals(TestStringUpperCaseCyrillic, UnicodeUpperCase(TestStringLowerCaseCyrillic));
+   CheckEquals(TestStringUpperCaseArmenian, UnicodeUpperCase(TestStringLowerCaseArmenian));
+   CheckEquals(TestStringUpperCaseExtendedAdditional, UnicodeUpperCase(TestStringLowerCaseExtendedAdditional));
+   CheckEquals(TestStringUpperCaseGreekExtended, UnicodeUpperCase(TestStringLowerCaseGreekExtended));
+   CheckEquals(TestStringUpperCaseFullWidth, UnicodeUpperCase(TestStringLowerCaseFullWidth));
 end;
 
 
