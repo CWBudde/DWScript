@@ -29,6 +29,8 @@ unit dwsXPlatform;
 
 {$WARN SYMBOL_PLATFORM OFF}
 
+{-$DEFINE WindowsCaseConvert}
+
 {$IFDEF FPC}
    {$DEFINE VER200}  // FPC compatibility = D2009
 {$ENDIF}
@@ -45,9 +47,10 @@ uses
       {$ENDIF}
    {$ELSE}
       {$IFDEF POSIX}
-      Posix.Time, Posix.SysTime, DateUtils
+      Posix.Time, Posix.SysTime, Posix.SysTypes, Posix.Dirent, Posix.Fcntl,
+      Posix.Stdio, DateUtils
       {$IFDEF MACOS}
-      , Macapi.CoreFoundation, Macapi.Foundation
+      , Macapi.CoreFoundation, Macapi.Foundation, Macapi.Helpers
       {$ENDIF}
       {$ELSE}
       Windows
@@ -144,10 +147,12 @@ function GetDecimalSeparator : Char;
 type
    TCollectFileProgressEvent = procedure (const directory : TFileName; var skipScan : Boolean) of object;
 
+{$IFDEF MSWindows}
 procedure CollectFiles(const directory, fileMask : TFileName;
                        list : TStrings; recurseSubdirectories: Boolean = False;
                        onProgress : TCollectFileProgressEvent = nil);
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
+{$ENDIF}
 
 type
    {$IFNDEF FPC}
@@ -223,8 +228,10 @@ function UnicodeUpperCase(const s : String) : String; overload;
 function ASCIICompareText(const s1, s2 : String) : Integer; inline;
 function ASCIISameText(const s1, s2 : String) : Boolean; inline;
 
+{$ifdef MSWindows}
 function NormalizeString(const s, form : String) : String;
 function StripAccents(const s : String) : String;
+{$endif}
 
 function InterlockedIncrement(var val : Integer) : Integer; overload; {$IFDEF PUREPASCAL} inline; {$endif}
 function InterlockedDecrement(var val : Integer) : Integer; {$IFDEF PUREPASCAL} inline; {$endif}
@@ -262,6 +269,7 @@ function RawByteStringToBytes(const buf : RawByteString) : TBytes;
 function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString; overload;
 function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString; overload;
 
+{$ifdef MSWindows}
 function LoadDataFromFile(const fileName : TFileName) : TBytes;
 procedure SaveDataToFile(const fileName : TFileName; const data : TBytes);
 
@@ -274,11 +282,13 @@ function LoadTextFromBuffer(const buf : TBytes) : UnicodeString;
 function LoadTextFromRawBytes(const buf : RawByteString) : UnicodeString;
 function LoadTextFromStream(aStream : TStream) : UnicodeString;
 function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
+{$endif}
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 procedure CloseFileHandle(hFile : THandle);
+{$ifdef MSWindows}
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
 function FileFlushBuffers(hFile : THandle) : Boolean;
 function FileCopy(const existing, new : TFileName; failIfExists : Boolean) : Boolean;
@@ -288,6 +298,7 @@ function FileRename(const oldName, newName : TFileName) : Boolean;
 function FileSize(const name : TFileName) : Int64;
 function FileDateTime(const name : TFileName) : TDateTime;
 procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
+{$endif}
 function DeleteDirectory(const path : String) : Boolean;
 
 function DirectSet8087CW(newValue : Word) : Word; register;
@@ -309,6 +320,7 @@ procedure GetMemForT(var T; Size: integer); inline;
 
 procedure InitializeWithDefaultFormatSettings(var fmt : TFormatSettings);
 
+{$ifdef MSWindows}
 type
    TTimerEvent = procedure of object;
 
@@ -327,6 +339,7 @@ type
 
          procedure Cancel;
    end;
+{$endif}
 
 {$ifndef SRW_FALLBACK}
 type
@@ -348,8 +361,10 @@ type
       function AsString : String;
    end;
 
+{$IFDEF MSWINDOWS}
 function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
 function GetApplicationVersion(var version : TModuleVersion) : Boolean;
+{$ENDIF}
 function ApplicationVersion : String;
 
 // ------------------------------------------------------------------
@@ -608,19 +623,29 @@ end;
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer;
+{$IFDEF MACOS}
+begin
+   Result := StrToNSSTR(p1).localizedCaseInsensitiveCompare(StrToNSSTR(p2));
+{$ELSE}
 const
    CSTR_EQUAL = 2;
 begin
    Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+{$ENDIF}
 end;
 
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
+{$IFDEF MACOS}
+begin
+   Result := StrToNSSTR(p1).localizedCaseInsensitiveCompare(StrToNSSTR(p2));
+{$ELSE}
 const
    CSTR_EQUAL = 2;
 begin
-   Result:=CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n, p2, n)-CSTR_EQUAL;
+   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n, p2, n)-CSTR_EQUAL;
+{$ENDIF}
 end;
 
 {$ifndef WindowsCaseConvert}
@@ -1351,7 +1376,6 @@ begin
       RaiseLastOSError;
    SetLength(Result, len);
 end;
-{$ENDIF}
 
 // StripAccents
 //
@@ -1374,10 +1398,15 @@ begin
    end;
    SetLength(Result, (NativeUInt(pDest)-NativeUInt(Pointer(Result))) div 2);
 end;
+{$ENDIF}
 
 // InterlockedIncrement
 //
 function InterlockedIncrement(var val : Integer) : Integer;
+{$ifdef MACOS}
+begin
+   Result:=System.AtomicIncrement(val);
+{$else}
 {$ifndef WIN32_ASM}
 begin
    Result:=Windows.InterlockedIncrement(val);
@@ -1388,11 +1417,16 @@ asm
    lock  xadd [ecx], eax
    inc   eax
 {$endif}
+{$endif}
 end;
 
 // InterlockedDecrement
 //
 function InterlockedDecrement(var val : Integer) : Integer;
+{$ifdef MACOS}
+begin
+   Result:=System.AtomicIncrement(val);
+{$else}
 {$ifndef WIN32_ASM}
 begin
    Result:=Windows.InterlockedDecrement(val);
@@ -1402,6 +1436,7 @@ asm
    mov   eax,  -1
    lock  xadd [ecx], eax
    dec   eax
+{$endif}
 {$endif}
 end;
 
@@ -1432,6 +1467,10 @@ end;
 // InterlockedExchangePointer
 //
 function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Pointer;
+{$ifdef MACOS}
+begin
+   Result:=System.AtomicExchange(target, val);
+{$else}
 {$ifndef WIN32_ASM}
 begin
    {$ifdef FPC}
@@ -1443,6 +1482,7 @@ begin
 asm
    lock  xchg dword ptr [eax], edx
    mov   eax, edx
+{$endif}
 {$endif}
 end;
 
@@ -1460,7 +1500,7 @@ begin
    {$ifdef MSWINDOWS}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
    {$else}
-   Not implemented yet
+   Result:=System.AtomicCmpExchange(destination, exchange, comparand);
    {$endif}
    {$endif}
 end;
@@ -1470,6 +1510,12 @@ end;
 {$IFDEF MSWINDOWS}
 function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPresent';
 {$ENDIF}
+{$IFDEF MACOS}
+// eventually add an implementation of IsDebuggerPresent here, see:
+// https://gist.github.com/rais38/4758465
+// yet missing the definition of kinfo_proc though... (could be found in FPC code)
+{$ENDIF}
+
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
 type
@@ -1482,6 +1528,7 @@ type
 var
    info : TThreadNameInfo;
 begin
+{$IFDEF MSWINDOWS}
    if not IsDebuggerPresent then Exit;
 
    info.dwType:=$1000;
@@ -1494,19 +1541,29 @@ begin
    except
    end;
    {$endif}
+{$ENDIF}
 end;
 
 // OutputDebugString
 //
 procedure OutputDebugString(const msg : String);
 begin
+{$IFDEF MACOS}
+   WriteLn(msg);
+{$ELSE}
    Windows.OutputDebugStringW(PWideChar(msg));
+{$ENDIF}
 end;
 
 // WriteToOSEventLog
 //
 procedure WriteToOSEventLog(const logName, logCaption, logDetails : String;
                             const logRawData : RawByteString = '');
+{$IFDEF MACOS}
+begin
+   // yet todo
+   WriteLn(logName, logCaption, logDetails);
+{$ELSE}
 var
   eventSource : THandle;
   detailsPtr : array [0..1] of PWideChar;
@@ -1525,6 +1582,7 @@ begin
          DeregisterEventSource(eventSource);
       end;
    end;
+{$ENDIF}
 end;
 
 // SetDecimalSeparator
@@ -1557,6 +1615,7 @@ begin
    {$ENDIF}
 end;
 
+{$IFDEF MSWINDOWS}
 // CollectFiles
 //
 type
@@ -1701,6 +1760,7 @@ begin
       Windows.FindClose(searchRec.Handle);
    end;
 end;
+{$ENDIF}
 
 {$ifdef FPC}
 // VarCopy
@@ -1800,6 +1860,8 @@ begin
    Result:=TextToFloat(s, value, fvExtended, formatSettings)
 {$endif}
 end;
+
+{$IFDEF MSWINDOWS}
 
 // LoadTextFromBuffer
 //
@@ -2030,12 +2092,18 @@ begin
       CloseHandle(hFile);
    end;
 end;
+{$endif}
 
 // SaveTextToUTF8File
 //
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 begin
+{$IFDEF MACOS}
+   StrToNSStr(string(text)).writeToFile(StrToNSStr(fileName), False);
+{$ENDIF}
+{$IFDEF MSWINDOWS}
    SaveRawBytesToFile(fileName, UTF8Encode(text));
+{$ENDIF}
 end;
 
 // AppendTextToUTF8File
@@ -2060,31 +2128,47 @@ end;
 //
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 begin
+{$IFDEF POSIX}
+   Result := open(PAnsiChar(AnsiString(fileName)), O_RDONLY);
+{$ENDIF}
+{$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_READ, FILE_SHARE_READ+FILE_SHARE_WRITE,
                       nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
    if Result=INVALID_HANDLE_VALUE then begin
       if GetLastError<>ERROR_FILE_NOT_FOUND then
          RaiseLastOSError;
    end;
+{$ENDIF}
 end;
 
 // OpenFileForSequentialWriteOnly
 //
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 begin
+{$IFDEF POSIX}
+   Result := open(PAnsiChar(AnsiString(fileName)), O_WRONLY);
+{$ENDIF}
+{$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_WRITE, 0, nil, CREATE_ALWAYS,
                       FILE_ATTRIBUTE_NORMAL+FILE_FLAG_SEQUENTIAL_SCAN, 0);
    if Result=INVALID_HANDLE_VALUE then
       RaiseLastOSError;
+{$ENDIF}
 end;
 
 // CloseFileHandle
 //
 procedure CloseFileHandle(hFile : THandle);
 begin
+{$IFDEF POSIX}
+  fcntl(hFile, FD_CLOEXEC)
+{$ENDIF}
+{$IFDEF MSWINDOWS}
    CloseHandle(hFile);
+{$ENDIF}
 end;
 
+{$ifdef MSWINDOWS}
 // FileWrite
 //
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
@@ -2161,6 +2245,7 @@ procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
 begin
    FileSetDate(hFile, DateTimeToFileDate(aDateTime));
 end;
+{$ENDIF}
 
 // DeleteDirectory
 //
@@ -2255,10 +2340,6 @@ begin
 {$endif}
 end;
 
-{$IFDEF MACOS}
-function NSUserName: Pointer; cdecl; external '/System/Library/Frameworks/Foundation.framework/Foundation' name '_NSUserName';
-{$ENDIF}
-
 // RDTSC
 //
 function RDTSC : UInt64;
@@ -2326,6 +2407,7 @@ begin
    Result := Format('%d.%d.%d.%d', [Major, Minor, Release, Build]);
 end;
 
+{$IFDEF MSWindows}
 // Adapted from Ian Boyd code published in
 // http://stackoverflow.com/questions/10854958/how-to-get-version-of-running-executable
 function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
@@ -2391,7 +2473,24 @@ begin
       Result := version.AsString
    else Result := '?.?.?.?';
 end;
+{$ENDIF}
 
+{$IFDEF MACOS}
+function ApplicationVersion : String;
+var
+   CFStr: CFStringRef;
+   Range: CFRange;
+begin
+   CFStr := CFBundleGetValueForInfoDictionaryKey(CFBundleGetMainBundle,
+      kCFBundleVersionKey);
+   Range.location := 0;
+   Range.length := CFStringGetLength(CFStr);
+   SetLength(Result, Range.length);
+   CFStringGetCharacters(CFStr, Range, PChar(Result));
+end;
+{$ENDIF}
+
+{$ifndef POSIX}
 // ------------------
 // ------------------ TdwsCriticalSection ------------------
 // ------------------
@@ -2430,6 +2529,7 @@ function TdwsCriticalSection.TryEnter : Boolean;
 begin
    Result:=TryEnterCriticalSection(FCS);
 end;
+{$endif}
 
 // ------------------
 // ------------------ TPath ------------------
@@ -2635,6 +2735,7 @@ const
    WT_EXECUTELONGFUNCTION  = ULONG($00000010);
 {$endif}
 
+{$ifdef MSWINDOWS}
 procedure TTimerTimeoutCallBack(Context: Pointer; {%H-}Success: Boolean); stdcall;
 var
    tt : TTimerTimeout;
@@ -2684,6 +2785,7 @@ begin
    DeleteTimerQueueTimer(0, FTimer, INVALID_HANDLE_VALUE);
    FTimer:=0;
 end;
+{$endif}
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
