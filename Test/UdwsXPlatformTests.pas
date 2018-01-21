@@ -30,6 +30,8 @@ type
          procedure SetUp; override;
          procedure TearDown; override;
       published
+         procedure DecimalPointTest;
+         procedure CollectFilesTest;
          procedure DateTimeConversionTest;
          procedure MillisecondsConversionTest;
          procedure UnicodeLowerAndUpperCaseTest;
@@ -64,9 +66,22 @@ end;
 
 // DateTimeConversionTest
 //
+procedure TdwsXPlatformTests.CollectFilesTest;
+var
+   Files : TStringList;
+begin
+   Files:=TStringList.Create;
+   try
+      CollectFiles(ExtractFilePath(ParamStr(0))+'Data'+PathDelim, '*.txt', Files);
+      CheckEquals(3, Files.Count);
+   finally
+      Files.Free;
+   end;
+end;
+
 procedure TdwsXPlatformTests.DateTimeConversionTest;
 var
-   CurrentDateTime: TDateTime;
+   CurrentDateTime : TDateTime;
 begin
    CurrentDateTime := UTCDateTime;
    CheckEquals(CurrentDateTime, UTCDateTimeToLocalDateTime(LocalDateTimeToUTCDateTime(Now)));
@@ -75,9 +90,21 @@ end;
 
 // MillisecondsConversionTest
 //
+procedure TdwsXPlatformTests.DecimalPointTest;
+var
+  OldDecimalSeparator : Char;
+begin
+  OldDecimalSeparator := GetDecimalSeparator;
+  SetDecimalSeparator(',');
+  CheckEquals(',', GetDecimalSeparator);
+  SetDecimalSeparator('.');
+  CheckEquals('.', GetDecimalSeparator);
+  SetDecimalSeparator(OldDecimalSeparator);
+end;
+
 procedure TdwsXPlatformTests.MillisecondsConversionTest;
 var
-   CurrentMilliseconds: Int64;
+   CurrentMilliseconds : Int64;
 begin
    CurrentMilliseconds := UnixTime;
    CheckEquals(CurrentMilliseconds, UnixTimeToSystemMilliseconds(SystemMillisecondsToUnixTime(CurrentMilliseconds)));
@@ -91,7 +118,7 @@ const
   TestStringUpperCaseBasic = '0123456789<=>ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   TestStringUpperCaseSupplement = 'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ';
   TestStringUpperCaseExtendedA =
-    'ĀĂĄĆĈĊČĎĐĒĔĖĘĚĜĞĠĢĤĦĨĪĬĮİĲĴĶĹĻĽĿŁŃŅŇŊŌŎŐŒŔŖŘŚŜŞŠŢŤŦŨŪŬŮŰŲŴŶŹŻŽ';
+    'ĀĂĄĆĈĊČĎĐĒĔĖĘĚĜĞĠĢĤĦĨĪĬĮĲĴĶĹĻĽĿŁŃŅŇŊŌŎŐŒŔŖŘŚŜŞŠŢŤŦŨŪŬŮŰŲŴŶŹŻŽ';
   TestStringUpperCaseExtendedB = 'ƇƉƑƓƔƘǄǇǊǍǏǑǓǕǗǙǛǞǠǢǤǦǨǪǬǮ';
   TestStringUpperCaseGreek = 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩΪΫϢ';
   TestStringUpperCaseCyrillic = 'ЁЂЃЄЅІЇЈЉЊЋЌЎЏАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ';
@@ -105,7 +132,7 @@ const
   TestStringLowerCaseBasic = '0123456789<=>abcdefghijklmnopqrstuvwxyz';
   TestStringLowerCaseSupplement = 'àáâãäåæçèéêëìíîïðñòóôõö';
   TestStringLowerCaseExtendedA =
-    'āăąćĉċčďđēĕėęěĝğġģĥħĩīĭįİĳĵķĺļľŀłńņňŋōŏőœŕŗřśŝşšţťŧũūŭůűųŵŷźżž';
+    'āăąćĉċčďđēĕėęěĝğġģĥħĩīĭįĳĵķĺļľŀłńņňŋōŏőœŕŗřśŝşšţťŧũūŭůűųŵŷźżž';
   TestStringLowerCaseExtendedB = 'ƈɖƒɠɣƙǆǉǌǎǐǒǔǖǘǚǜǟǡǣǥǧǩǫǭǯ';
   TestStringLowerCaseGreek = 'αβγδεζηθικλμνξοπρστυφχψωϊϋϣ';
   TestStringLowerCaseCyrillic = 'ёђѓєѕіїјљњћќўџабвгдежзийклмнопрстуфхцчшщъыьэюя';

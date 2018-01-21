@@ -23,6 +23,7 @@ uses
   dwsLinqSql in '..\Libraries\LinqLib\dwsLinqSql.pas',
   dwsLinqJson in '..\Libraries\LinqLib\dwsLinqJson.pas',
   dwsDocBuilder in '..\Libraries\DocBuilder\dwsDocBuilder.pas',
+  UdwsXPlatformTests in 'UdwsXPlatformTests.pas',
   UScriptTests in 'UScriptTests.pas',
   UAlgorithmsTests in 'UAlgorithmsTests.pas',
   UdwsUnitTests in 'UdwsUnitTests.pas',
@@ -80,8 +81,7 @@ uses
   dwsUnicode in '..\Source\dwsUnicode.pas',
   UdwsSystemInfoTests in 'UdwsSystemInfoTests.pas',
   dwsSHA512 in '..\Libraries\CryptoLib\dwsSHA512.pas',
-  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas',
-  UdwsXPlatformTests in 'UdwsXPlatformTests.pas';
+  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas';
 
 {$R *.res}
 
