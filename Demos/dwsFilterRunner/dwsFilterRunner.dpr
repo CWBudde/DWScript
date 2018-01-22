@@ -1,6 +1,4 @@
-program dwsFilter;
-
-{$SetPEFlags $0001}
+program dwsFilterRunner;
 
 {$IFNDEF VER200} // delphi 2009
 {$WEAKLINKRTTI ON}
@@ -8,10 +6,12 @@ program dwsFilter;
 {$ENDIF}
 {$APPTYPE CONSOLE}
 
+{$IFDEF MSWINDOWS}
+{$SetPEFlags $0001}
 {$r *.dres}
+{$ENDIF}
 
 uses
-  Windows,
   Classes,
   SysUtils,
   dwsXPlatform,
@@ -20,36 +20,40 @@ uses
   dwsExprs,
   dwsUtils,
   dwsFunctions,
+{$IFDEF MSWINDOWS}
   SynZip,
+  dwsFileFunctions,
+  dwsZipLibModule,
+  dwsWebLibModule,
+  dwsComConnector,
+  dwsEncodingLibModule,
+  dwsCryptoLibModule,
+  dwsSynSQLiteDatabase,
+{$ENDIF}
   dwsErrors,
   dwsMathFunctions,
   dwsStringFunctions,
   dwsTimeFunctions,
   dwsVariantFunctions,
-  dwsFileFunctions,
   dwsClassesLibModule,
-  dwsZipLibModule,
-  dwsEncodingLibModule,
-  dwsCryptoLibModule,
-  dwsWebLibModule,
   dwsDatabaseLibModule,
-  dwsComConnector,
   dwsJSONConnector,
-  dwsSynSQLiteDatabase,
   dwsHtmlFilter;
 
 function CreateScript : TDelphiWebScript;
 begin
    Result := TDelphiWebScript.Create(nil);
 
+{$IFDEF MSWINDOWS}
    TdwsComConnector.Create(Result).Script:=Result;
-   TdwsJSONLibModule.Create(Result).Script:=Result;
-   TdwsClassesLib.Create(Result).dwsUnit.Script:=Result;
    TdwsEncodingLib.Create(Result).dwsEncoding.Script:=Result;
    TdwsCryptoLib.Create(Result).dwsCrypto.Script:=Result;
    TdwsZipLib.Create(Result).dwsZip.Script:=Result;
    TdwsWebLib.Create(Result).dwsWeb.Script:=Result;
    TdwsDatabaseLib.Create(Result).dwsDatabase.Script:=Result;
+{$ENDIF}
+   TdwsJSONLibModule.Create(Result).Script:=Result;
+   TdwsClassesLib.Create(Result).dwsUnit.Script:=Result;
 end;
 
 procedure WriteHeader;
@@ -115,7 +119,7 @@ begin
       Exec := Prog.ExecuteParam(Params);
       Text := Exec.Result.ToString;
 
-      SaveTextToUTF8File(OutputFileName, Text);
+      SaveTextToUTF8File(OutputFileName, UTF8String(Text));
     finally
       Script.Free;
     end;
