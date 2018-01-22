@@ -19,9 +19,7 @@ unit dwsWebLibModule;
 interface
 
 uses
-   Windows, WinInet, Variants,
-   SysUtils, Classes, StrUtils,
-   SynZip, SynCrtSock, SynCommons, SynWinSock,
+   Variants, SysUtils, Classes, StrUtils,
    dwsUtils, dwsComp, dwsExprs, dwsWebEnvironment, dwsExprList, dwsSymbols,
    dwsJSONConnector, dwsCryptoXPlatform, dwsHTTPSysServerEvents, dwsWebServerInfo,
    dwsXPlatform, dwsCustomData;
@@ -194,7 +192,8 @@ implementation
 
 {$R *.dfm}
 
-uses dwsWinHTTP;
+uses
+   WinInet, SynZip, SynCrtSock, SynCommons, SynWinSock, dwsWinHTTP;
 
 // WebServerSentEventToRawData
 //
@@ -353,7 +352,7 @@ type
       RawResponseHeaders : SockString;
       ResponseHeaders : TStrings;
       CustomStates : TdwsCustomStates;
-      CurrentSize, ContentLength : DWORD;
+      CurrentSize, ContentLength : Cardinal;
       StatusCode : Integer;
       Error : String;
       Completed, Released : Boolean;
@@ -366,7 +365,7 @@ type
       procedure Execute; override;
       procedure Release;
       function Wait : THttpRequestThread;
-      procedure DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
+      procedure DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: Cardinal);
    end;
 
 // CreateQuery
@@ -475,7 +474,7 @@ end;
 
 // DoProgress
 //
-procedure THttpRequestThread.DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
+procedure THttpRequestThread.DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: Cardinal);
 begin
    Self.CurrentSize := CurrentSize;
    Self.ContentLength := ContentLength;

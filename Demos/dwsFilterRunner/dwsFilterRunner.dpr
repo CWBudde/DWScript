@@ -20,17 +20,18 @@ uses
   dwsExprs,
   dwsUtils,
   dwsFunctions,
+  dwsErrors,
 {$IFDEF MSWINDOWS}
+  SynCommons,
   SynZip,
+  dwsComConnector,
+  dwsCryptoLibModule,
+  dwsEncodingLibModule,
   dwsFileFunctions,
+  dwsSynSQLiteDatabase,
   dwsZipLibModule,
   dwsWebLibModule,
-  dwsComConnector,
-  dwsEncodingLibModule,
-  dwsCryptoLibModule,
-  dwsSynSQLiteDatabase,
 {$ENDIF}
-  dwsErrors,
   dwsMathFunctions,
   dwsStringFunctions,
   dwsTimeFunctions,
@@ -46,11 +47,11 @@ begin
 
 {$IFDEF MSWINDOWS}
    TdwsComConnector.Create(Result).Script:=Result;
-   TdwsEncodingLib.Create(Result).dwsEncoding.Script:=Result;
    TdwsCryptoLib.Create(Result).dwsCrypto.Script:=Result;
+   TdwsEncodingLib.Create(Result).dwsEncoding.Script:=Result;
+   TdwsDatabaseLib.Create(Result).dwsDatabase.Script:=Result;
    TdwsZipLib.Create(Result).dwsZip.Script:=Result;
    TdwsWebLib.Create(Result).dwsWeb.Script:=Result;
-   TdwsDatabaseLib.Create(Result).dwsDatabase.Script:=Result;
 {$ENDIF}
    TdwsJSONLibModule.Create(Result).Script:=Result;
    TdwsClassesLib.Create(Result).dwsUnit.Script:=Result;

@@ -1377,16 +1377,32 @@ begin
       RaiseLastOSError;
    SetLength(Result, len);
 {$else}
+var
+   str: CFStringRef;
+   mstr: CFMutableStringRef;
+   Range: CFRange;
+   nf : Integer;
 begin
-   // yet todo!
-   Result := s;
+   str := CFStringCreateWithCharacters(nil, PWideChar(s), length(S));
+   if (form = '') or (form = 'NFC') then
+      nf := kCFStringNormalizationFormC
+   else if form = 'NFD' then
+      nf := kCFStringNormalizationFormD
+   else if form = 'NFKC' then
+      nf := kCFStringNormalizationFormKC
+   else if form = 'NFKD' then
+      nf := kCFStringNormalizationFormKD
+   else raise Exception.CreateFmt('Unsupported normalization form "%s"', [form]);
+
+   mstr := CFStringCreateMutableCopy(nil, 0, str);
+   CFStringNormalize(mstr, nf);
+   Result := NSStrToStr(NSString(mstr));
 {$endif}
 end;
 
 // StripAccents
 //
 function StripAccents(const s : String) : String;
-{$ifdef MSWindows}
 var
    i : Integer;
    pSrc, pDest : PWideChar;
@@ -1404,11 +1420,6 @@ begin
       Inc(pSrc);
    end;
    SetLength(Result, (NativeUInt(pDest)-NativeUInt(Pointer(Result))) div 2);
-{$else}
-begin
-   // yet todo!
-   Result := s;
-{$endif}
 end;
 
 // InterlockedIncrement

@@ -19,7 +19,7 @@ unit dwsCryptoLibModule;
 interface
 
 uses
-   Windows, SysUtils, Classes, Types,
+   SysUtils, Classes, Types,
    dwsComp, dwsExprs, dwsUtils, dwsXPlatform, dwsTokenStore, dwsCryptoXPlatform,
    dwsXXHash;
 
