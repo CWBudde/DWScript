@@ -3572,7 +3572,11 @@ begin
 
    inherited Create(True);
 
+{$IF Defined(MSWINDOWS)}
    Priority:=tpTimeCritical;
+{$ELSEIF Defined(POSIX)}
+   Priority:=3;
+{$ENDIF POSIX}
 end;
 
 // Destroy

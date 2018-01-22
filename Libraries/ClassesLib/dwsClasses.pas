@@ -4,7 +4,8 @@ unit dwsClasses;
 
 interface
 
-uses Windows, SysUtils, Classes, dwsUtils, dwsXPlatform;
+uses
+  SysUtils, Classes, dwsUtils, dwsXPlatform;
 
 type
 
@@ -152,12 +153,15 @@ type
 
 implementation
 
+uses
+   RTLConsts
 {$IFDEF MSWINDOWS}
-uses RTLConsts, Types;
+   , Types
 {$ENDIF}
 {$IFDEF LINUX}
-uses RTLConsts, SysConst;
+   , SysConst
 {$ENDIF}
+   ;
 
 { TdwsStrings }
 

@@ -17,11 +17,7 @@ unit UdwsXPlatformTests;
 
 interface
 
-uses Classes, SysUtils, Math, Variants, Types, SynCommons,
-   dwsXPlatformTests, dwsUtils,
-   dwsXPlatform, dwsWebUtils, dwsTokenStore, dwsCryptoXPlatform,
-   dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext,
-   dwsXXHash, dwsURLRewriter, dwsJSON;
+uses Classes, SysUtils, Math, Types, dwsXPlatformTests, dwsUtils, dwsXPlatform;
 
 type
 
@@ -35,6 +31,8 @@ type
          procedure DateTimeConversionTest;
          procedure MillisecondsConversionTest;
          procedure UnicodeLowerAndUpperCaseTest;
+         procedure UnicodeCompareTest;
+         procedure RawBytesStringTest;
    end;
 
 // ------------------------------------------------------------------
@@ -107,12 +105,52 @@ var
    CurrentMilliseconds : Int64;
 begin
    CurrentMilliseconds := UnixTime;
-   CheckEquals(CurrentMilliseconds, UnixTimeToSystemMilliseconds(SystemMillisecondsToUnixTime(CurrentMilliseconds)));
+   CheckEquals(CurrentMilliseconds, UnixTimeToSystemMilliseconds(
+     SystemMillisecondsToUnixTime(CurrentMilliseconds)));
 end;
 
 
+procedure TdwsXPlatformTests.RawBytesStringTest;
+var
+  Text: RawByteString;
+  Bytes: TBytes;
+const
+  CTestString = 'Hello World!';
+begin
+  Bytes := RawByteStringToBytes(RawByteString(CTestString));
+  CheckEquals(Text, BytesToRawByteString(@Bytes[0], Length(Bytes)));
+end;
+
 // UnicodeLowerAndUpperCaseTest
 //
+procedure TdwsXPlatformTests.UnicodeCompareTest;
+const
+  CTestStrings : array [0 .. 5] of string = ('HeLlO WoRlD!', 'hElLo wOrLd!',
+    'Héllo World!', 'AA', 'AAa', 'AB');
+begin
+   // test equal string with different cases
+   CheckEquals(0, UnicodeCompareP(PWideChar(CTestStrings[0]),
+      Length(CTestStrings[0]), PWideChar(CTestStrings[1]),
+      Length(CTestStrings[1])));
+
+   // test equal string with different cases (same length)
+   CheckEquals(0, UnicodeCompareP(PWideChar(CTestStrings[0]),
+      PWideChar(CTestStrings[1]), Max(Length(CTestStrings[0]),
+      Length(CTestStrings[1]))));
+
+   // test equal string with different cases but different length
+   CheckEquals(1, UnicodeCompareP(PWideChar(CTestStrings[0]), Length(CTestStrings[0]),
+      PWideChar(CTestStrings[1]), Length(CTestStrings[1]) - 2));
+
+   // test unequal string with different cases (same length)
+   CheckEquals(-1, UnicodeCompareP(PWideChar(CTestStrings[0]),
+      PWideChar(CTestStrings[2]), Max(Length(CTestStrings[0]),
+      Length(CTestStrings[2]))));
+   CheckEquals(-1, UnicodeCompareP(PWideChar(CTestStrings[4]),
+      Length(CTestStrings[4]), PWideChar(CTestStrings[5]),
+      Length(CTestStrings[5])));
+end;
+
 procedure TdwsXPlatformTests.UnicodeLowerAndUpperCaseTest;
 const
   TestStringUpperCaseBasic = '0123456789<=>ABCDEFGHIJKLMNOPQRSTUVWXYZ';

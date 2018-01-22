@@ -228,10 +228,8 @@ function UnicodeUpperCase(const s : String) : String; overload;
 function ASCIICompareText(const s1, s2 : String) : Integer; inline;
 function ASCIISameText(const s1, s2 : String) : Boolean; inline;
 
-{$ifdef MSWindows}
 function NormalizeString(const s, form : String) : String;
 function StripAccents(const s : String) : String;
-{$endif}
 
 function InterlockedIncrement(var val : Integer) : Integer; overload; {$IFDEF PUREPASCAL} inline; {$endif}
 function InterlockedDecrement(var val : Integer) : Integer; {$IFDEF PUREPASCAL} inline; {$endif}
@@ -280,9 +278,9 @@ procedure LoadRawBytesAsScriptStringFromFile(const fileName : TFileName; var res
 
 function LoadTextFromBuffer(const buf : TBytes) : UnicodeString;
 function LoadTextFromRawBytes(const buf : RawByteString) : UnicodeString;
+{$endif}
 function LoadTextFromStream(aStream : TStream) : UnicodeString;
 function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
-{$endif}
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
@@ -630,7 +628,8 @@ begin
 const
    CSTR_EQUAL = 2;
 begin
-   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+//   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+   Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n1, p2, n2, nil, nil, 0)-CSTR_EQUAL;
 {$ENDIF}
 end;
 
@@ -1354,8 +1353,10 @@ end;
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
+{$endif}
 
 function NormalizeString(const s, form : String) : String;
+{$ifdef MSWindows}
 var
    nf, len : Integer;
 begin
@@ -1375,11 +1376,17 @@ begin
    if len <= 0 then
       RaiseLastOSError;
    SetLength(Result, len);
+{$else}
+begin
+   // yet todo!
+   Result := s;
+{$endif}
 end;
 
 // StripAccents
 //
 function StripAccents(const s : String) : String;
+{$ifdef MSWindows}
 var
    i : Integer;
    pSrc, pDest : PWideChar;
@@ -1397,8 +1404,12 @@ begin
       Inc(pSrc);
    end;
    SetLength(Result, (NativeUInt(pDest)-NativeUInt(Pointer(Result))) div 2);
+{$else}
+begin
+   // yet todo!
+   Result := s;
+{$endif}
 end;
-{$ENDIF}
 
 // InterlockedIncrement
 //
@@ -1906,29 +1917,6 @@ begin
    Result:=LoadTextFromBuffer(b);
 end;
 
-// LoadTextFromStream
-//
-function LoadTextFromStream(aStream : TStream) : UnicodeString;
-var
-   n : Integer;
-   buf : TBytes;
-begin
-   n := aStream.Size-aStream.Position;
-   SetLength(buf, n);
-   aStream.Read(buf[0], n);
-   Result:=LoadTextFromBuffer(buf);
-end;
-
-// LoadTextFromFile
-//
-function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
-var
-   buf : TBytes;
-begin
-   buf:=LoadDataFromFile(fileName);
-   Result:=LoadTextFromBuffer(buf);
-end;
-
 // ReadFileChunked
 //
 function ReadFileChunked(hFile : THandle; const buffer; size : Integer) : Integer;
@@ -2094,6 +2082,55 @@ begin
 end;
 {$endif}
 
+// LoadTextFromStream
+//
+function LoadTextFromStream(aStream : TStream) : UnicodeString;
+{$ifdef MSWINDOWS}
+var
+   n : Integer;
+   buf : TBytes;
+begin
+   n := aStream.Size-aStream.Position;
+   SetLength(buf, n);
+   aStream.Read(buf[0], n);
+   Result:=LoadTextFromBuffer(buf);
+{$else}
+var
+   StringList: TStringList;
+begin
+   StringList := TStringList.Create;
+   try
+     StringList.LoadFromStream(aStream);
+     Result := StringList.Text;
+   finally
+     StringList.Free;
+   end;
+{$endif}
+end;
+
+// LoadTextFromFile
+//
+function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
+{$ifdef MSWINDOWS}
+var
+   buf : TBytes;
+begin
+   buf:=LoadDataFromFile(fileName);
+   Result:=LoadTextFromBuffer(buf);
+{$else}
+var
+   StringList: TStringList;
+begin
+   StringList := TStringList.Create;
+   try
+     StringList.LoadFromFile(fileName);
+     Result := StringList.Text;
+   finally
+     StringList.Free;
+   end;
+{$endif}
+end;
+
 // SaveTextToUTF8File
 //
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
@@ -2129,7 +2166,7 @@ end;
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 begin
 {$IFDEF POSIX}
-   Result := open(PAnsiChar(AnsiString(fileName)), O_RDONLY);
+   Result := open(PAnsiChar(AnsiString(fileName)), 0, O_RDONLY);
 {$ENDIF}
 {$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_READ, FILE_SHARE_READ+FILE_SHARE_WRITE,
@@ -2146,7 +2183,7 @@ end;
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 begin
 {$IFDEF POSIX}
-   Result := open(PAnsiChar(AnsiString(fileName)), O_WRONLY);
+   Result := open(PAnsiChar(AnsiString(fileName)), 0, O_WRONLY);
 {$ENDIF}
 {$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_WRITE, 0, nil, CREATE_ALWAYS,
