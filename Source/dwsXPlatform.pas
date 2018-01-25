@@ -437,6 +437,7 @@ begin
       Result:= EncodeDate(wYear, wMonth, wDay)
               +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
 {$ENDIF}
+{$IFDEF POSIX}
 {$IFDEF MACOS}
 var
    systemTime : CFGregorianDate;
@@ -445,6 +446,20 @@ begin
    with systemTime do
       Result := EncodeDate(year, month, day)
                +EncodeTime(hour, minute, Trunc(second), Round((second - Trunc(second)) * MSecsPerSec));
+{$ELSE}
+var
+   systemTime : ptm;
+   t: time_t;
+begin
+   t := time(nil);
+   systemTime := gmtime(t);
+   if systemTime = nil then
+     raise Exception.Create('Error calling gmtime');
+
+   with systemTime^ do
+      Result := EncodeDate(1900 + tm_year, 1 + tm_mon, tm_mday)
+               +EncodeTime(tm_hour, tm_min, tm_sec, 0);
+{$ENDIF}
 {$ENDIF}
 end;
 
@@ -452,7 +467,11 @@ end;
 //
 function UnixTime : Int64;
 begin
+{$IFDEF POSIX}
+   Result := time(nil);
+{$ELSE}
    Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
+{$ENDIF}
 end;
 
 {$IFDEF MSWINDOWS}
