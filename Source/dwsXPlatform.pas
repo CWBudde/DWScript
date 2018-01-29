@@ -48,7 +48,7 @@ uses
    {$ELSE}
       {$IFDEF POSIX}
       Posix.Time, Posix.SysTime, Posix.SysTypes, Posix.Dirent, Posix.Fcntl,
-      Posix.Stdio, DateUtils
+      Posix.Stdio, Posix.Pthread, DateUtils
       {$IFDEF MACOS}
       , Macapi.CoreFoundation, Macapi.Foundation, Macapi.Helpers
       {$ENDIF}
@@ -147,10 +147,10 @@ function GetDecimalSeparator : Char;
 type
    TCollectFileProgressEvent = procedure (const directory : TFileName; var skipScan : Boolean) of object;
 
-{$IFDEF MSWindows}
 procedure CollectFiles(const directory, fileMask : TFileName;
                        list : TStrings; recurseSubdirectories: Boolean = False;
                        onProgress : TCollectFileProgressEvent = nil);
+{$IFDEF MSWindows}
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
 {$ENDIF}
 
@@ -449,7 +449,7 @@ begin
 {$ELSE}
 var
    systemTime : ptm;
-   t: time_t;
+   t : time_t;
 begin
    t := time(nil);
    systemTime := gmtime(t);
@@ -468,7 +468,7 @@ end;
 function UnixTime : Int64;
 begin
 {$IFDEF POSIX}
-   Result := time(nil);
+   Result:=time(nil);
 {$ELSE}
    Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
 {$ENDIF}
@@ -569,7 +569,11 @@ begin
 var
   tim: timespec;
 begin
-   tim.tv_nsec := msec * 1000000;
+   if msec<0 then
+      Exit;
+
+   tim.tv_sec := Trunc(msec * 0.001);
+   tim.tv_nsec := (msec - tim.tv_sec * 1000) * 1000000;
    nanosleep(tim, nil);
 {$ENDIF}
 end;
@@ -647,8 +651,11 @@ begin
 const
    CSTR_EQUAL = 2;
 begin
-//   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+{$IFDEF WINDOWS_XP}
+   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
+{$ELSE}
    Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n1, p2, n2, nil, nil, 0)-CSTR_EQUAL;
+{$ENDIF}
 {$ENDIF}
 end;
 
@@ -1397,9 +1404,8 @@ begin
    SetLength(Result, len);
 {$else}
 var
-   str: CFStringRef;
-   mstr: CFMutableStringRef;
-   Range: CFRange;
+   str : CFStringRef;
+   mstr : CFMutableStringRef;
    nf : Integer;
 begin
    str := CFStringCreateWithCharacters(nil, PWideChar(s), length(S));
@@ -1412,10 +1418,9 @@ begin
    else if form = 'NFKD' then
       nf := kCFStringNormalizationFormKD
    else raise Exception.CreateFmt('Unsupported normalization form "%s"', [form]);
-
    mstr := CFStringCreateMutableCopy(nil, 0, str);
    CFStringNormalize(mstr, nf);
-   Result := NSStrToStr(NSString(mstr));
+   Result := CFStringRefToStr(CFStringRef(mstr));
 {$endif}
 end;
 
@@ -1466,7 +1471,7 @@ end;
 function InterlockedDecrement(var val : Integer) : Integer;
 {$ifdef MACOS}
 begin
-   Result:=System.AtomicIncrement(val);
+   Result:=System.AtomicDecrement(val);
 {$else}
 {$ifndef WIN32_ASM}
 begin
@@ -1553,12 +1558,14 @@ function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPr
 {$ENDIF}
 {$IFDEF MACOS}
 // eventually add an implementation of IsDebuggerPresent here, see:
-// https://gist.github.com/rais38/4758465
+// https://developer.apple.com/library/content/qa/qa1361/_index.html
+// or https://gist.github.com/rais38/4758465
 // yet missing the definition of kinfo_proc though... (could be found in FPC code)
 {$ENDIF}
 
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
+{$IFDEF MSWINDOWS}
 type
    TThreadNameInfo = record
       dwType : Cardinal;      // must be 0x1000
@@ -1569,7 +1576,6 @@ type
 var
    info : TThreadNameInfo;
 begin
-{$IFDEF MSWINDOWS}
    if not IsDebuggerPresent then Exit;
 
    info.dwType:=$1000;
@@ -1582,6 +1588,9 @@ begin
    except
    end;
    {$endif}
+{$ELSE}
+begin
+  pthread_setname_np(threadName);
 {$ENDIF}
 end;
 
@@ -1602,7 +1611,7 @@ procedure WriteToOSEventLog(const logName, logCaption, logDetails : String;
                             const logRawData : RawByteString = '');
 {$IFDEF MACOS}
 begin
-   // yet todo
+   // yet todo, eventually append text to a file in /Library/Logs
    WriteLn(logName, logCaption, logDetails);
 {$ELSE}
 var
@@ -1656,16 +1665,17 @@ begin
    {$ENDIF}
 end;
 
-{$IFDEF MSWINDOWS}
 // CollectFiles
 //
 type
+   TMasks = array of TMask;
+
+{$IFDEF MSWINDOWS}
    TFindDataRec = record
       Handle : THandle;
       Data : TWin32FindDataW;
    end;
-
-   TMasks = array of TMask;
+{$ENDIF}
 
 // CollectFilesMasked
 //
@@ -1673,6 +1683,7 @@ procedure CollectFilesMasked(const directory : TFileName;
                              const masks : TMasks; list : TStrings;
                              recurseSubdirectories: Boolean = False;
                              onProgress : TCollectFileProgressEvent = nil);
+{$IFDEF MSWINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -1727,6 +1738,53 @@ begin
       until not FindNextFileW(searchRec.Handle, searchRec.Data);
       Windows.FindClose(searchRec.Handle);
    end;
+{$ELSE}
+var
+   searchRec : TSearchRec;
+   fileName : TFileName;
+   skipScan, addToList : Boolean;
+   Attr, Done, i : Integer;
+begin
+   if Assigned(onProgress) then begin
+      skipScan:=False;
+      onProgress(directory, skipScan);
+      if skipScan then exit;
+   end;
+
+   Attr := faAnyFile;
+   Done := FindFirst(directory + '*.*', Attr, SearchRec);
+   while Done = 0 do
+   begin
+      if SearchRec.Attr <> faDirectory then
+      begin
+         // check file against mask
+         fileName:=searchRec.Name;
+         addToList := True;
+         for i := 0 to High(masks) do begin
+            addToList := masks[i].Matches(fileName);
+            if addToList then Break;
+         end;
+         if addToList then begin
+            fileName:=directory+fileName;
+            list.Add(fileName);
+         end;
+      end else if recurseSubdirectories then begin
+          // dive in subdirectory
+          if searchRec.Name[1]='.' then begin
+             if searchRec.Name[2]='.' then begin
+                if searchRec.Name[3]=#0 then continue;
+             end else if searchRec.Name[2]=#0 then continue;
+          end;
+
+          // decomposed cast and concatenation to avoid implicit string variable
+          fileName:=directory+searchRec.Name+PathDelim;
+          CollectFilesMasked(fileName, masks, list, True, onProgress);
+       end;
+
+      Done := FindNext(SearchRec);
+   end;
+   FindClose(SearchRec);
+{$ENDIF}
 end;
 
 // CollectFiles
@@ -1765,6 +1823,7 @@ begin
    end;
 end;
 
+{$IFDEF MSWINDOWS}
 // CollectSubDirs
 //
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
@@ -2550,6 +2609,10 @@ var
 begin
    CFStr := CFBundleGetValueForInfoDictionaryKey(CFBundleGetMainBundle,
       kCFBundleVersionKey);
+
+   if CFStr = nil then
+     Exit('unknown');
+
    Range.location := 0;
    Range.length := CFStringGetLength(CFStr);
    SetLength(Result, Range.length);
