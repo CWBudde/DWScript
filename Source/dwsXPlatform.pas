@@ -150,9 +150,7 @@ type
 procedure CollectFiles(const directory, fileMask : TFileName;
                        list : TStrings; recurseSubdirectories: Boolean = False;
                        onProgress : TCollectFileProgressEvent = nil);
-{$IFDEF MSWindows}
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
-{$ENDIF}
 
 type
    {$IFNDEF FPC}
@@ -1823,10 +1821,10 @@ begin
    end;
 end;
 
-{$IFDEF MSWINDOWS}
 // CollectSubDirs
 //
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
+{$IFDEF MSWINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -1859,8 +1857,23 @@ begin
       until not FindNextFileW(searchRec.Handle, searchRec.Data);
       Windows.FindClose(searchRec.Handle);
    end;
-end;
+{$ELSE}
+var
+   searchRec : TSearchRec;
+   Done : Integer;
+begin
+   Done := SysUtils.FindFirst(directory + '*', faAnyFile, SearchRec);
+   while Done = 0 do
+   begin
+      if (faDirectory and searchRec.Attr) <> 0 then
+         if searchRec.Name[1]<>'.' then
+            list.Add(searchRec.Name);
+
+      Done := SysUtils.FindNext(SearchRec);
+   end;
+   SysUtils.FindClose(SearchRec);
 {$ENDIF}
+end;
 
 {$ifdef FPC}
 // VarCopy
