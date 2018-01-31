@@ -2493,6 +2493,10 @@ function GetCurrentUserName : String;
 var
    len : Cardinal;
 begin
+   len:=255;
+   SetLength(Result, len);
+   Windows.GetUserName(PChar(Result), len);
+   SetLength(Result, len-1);
 {$ENDIF}
 {$IFDEF MACOS}
 begin
