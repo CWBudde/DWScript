@@ -2,6 +2,8 @@ unit UJITTests;
 
 interface
 
+{$IF Defined(WIN32)}
+
 uses
    Classes, SysUtils, Variants,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsXPlatform,
@@ -75,6 +77,9 @@ begin
    CollectFiles(ExtractFilePath(ParamStr(0))+'OverloadsPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'HelpersPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'PropertyExpressionsPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'SetOfPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'AssociativePass'+PathDelim, pasFilter, FTests);
+//   CollectFiles(ExtractFilePath(ParamStr(0))+'GenericsPass'+PathDelim, pasFilter, FTests);
 
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsMath'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsString'+PathDelim, pasFilter, FTests);
@@ -393,5 +398,9 @@ initialization
 // ------------------------------------------------------------------
 
    RegisterTest('jitTests', TJITTests);
+
+{$else}
+implementation
+{$ifend}
 
 end.

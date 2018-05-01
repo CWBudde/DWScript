@@ -684,7 +684,9 @@ begin
          Break;
       end;
    until False;
-   Result:=StrToFloat(buf, vJSONFormatSettings);
+
+   if not TryStrToDouble(buf, Result, vJSONFormatSettings) then
+      TdwsJSONValue.RaiseJSONParseError('Invalid number');
 end;
 
 // ParseJSONNumber
@@ -693,7 +695,6 @@ procedure TdwsJSONParserState.ParseJSONNumber(initialChar : WideChar; var result
 var
    bufPtr : PWideChar;
    c : WideChar;
-   resultBuf : Extended;
    buf : array [0..50] of WideChar;
 begin
    buf[0]:=initialChar;
@@ -757,9 +758,9 @@ begin
             end;
          end;
    end;
-   bufPtr^:=#0;
-   TryTextToFloatW(PWideChar(@buf[0]), resultBuf, vJSONFormatSettings);
-   Result:=resultBuf;
+   bufPtr^ := #0;
+   if not TryStrToDouble(PWideChar(@buf[0]), result) then
+      TdwsJSONValue.RaiseJSONParseError('Invalid number');
 end;
 
 // ParseIntegerArray
@@ -1000,13 +1001,15 @@ const
 var
    parserState : TdwsJSONParserState;
 begin
-   Result:=nil;
+   {$ifndef DELPHI_TOKYO_PLUS}
+   Result := nil;
+   {$endif}
    parserState := TdwsJSONParserState.Create(json);
    try
       parserState.UnifyUnicodeStrings := (Length(json) >= cAutoUnifierTreshold);
       try
          parserState.DuplicatesOption:=duplicatesOption;
-         Result:=TdwsJSONValue.Parse(parserState);
+         Result := TdwsJSONValue.Parse(parserState);
       except
          on e : EdwsJSONParseError do
             raise EdwsJSONParseError.CreateFmt('%s, at %s',

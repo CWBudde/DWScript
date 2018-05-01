@@ -19,19 +19,28 @@ unit DSimpleDWScript;
 interface
 
 {.$define LogCompiles}
+{$define ALLOW_JIT}
+
+{$if not Defined(WIN32)}
+   {$undef ALLOW_JIT}
+{$ifend}
 
 uses
    Windows, SysUtils, Classes, StrUtils, Masks,
    dwsFileSystem, dwsGlobalVarsFunctions, dwsExprList,
    dwsCompiler, dwsHtmlFilter, dwsComp, dwsExprs, dwsUtils, dwsXPlatform,
    dwsJSONConnector, dwsJSON, dwsErrors, dwsUnitSymbols, dwsSymbols,
-   dwsJIT, dwsJITx86, dwsJSFilter, dwsJSLibModule, dwsCodeGen,
+   {$ifdef ALLOW_JIT}
+   dwsJIT, dwsJITx86,
+   {$endif}
+   dwsJSFilter, dwsJSLibModule, dwsCodeGen,
    dwsWebEnvironment, dwsSystemInfoLibModule, dwsCPUUsage, dwsWebLibModule,
    dwsWebServerHelpers, dwsZipLibModule, dwsIniFileModule,
    dwsDataBase, dwsDataBaseLibModule, dwsWebServerInfo, dwsWebServerLibModule,
    dwsBackgroundWorkersLibModule, dwsSynapseLibModule, dwsCryptoLibModule,
    dwsEncodingLibModule, dwsComConnector, dwsXXHash, dwsHTTPSysServer,
-   dwsBigIntegerFunctions.GMP, dwsMPIR.Bundle, dwsCompilerContext, dwsFilter;
+   dwsBigIntegerFunctions.GMP, dwsMPIR.Bundle, dwsCompilerContext, dwsFilter,
+   dwsByteBufferFunctions;
 
 type
 
@@ -214,6 +223,8 @@ const
          +'"LibraryPaths": ["%www%\\.lib"],'
          // Paths which scripts are allowed to perform file operations on
          +'"WorkPaths": ["%www%"],'
+         // Conditional Defines that should be preset
+         +'"Conditionals": [],'
          // HTML Filter patterns
          +'"PatternOpen": "<?pas",'
          +'"PatternEval": "=",'
@@ -628,6 +639,8 @@ end;
 procedure TSimpleDWScript.LoadDWScriptOptions(options : TdwsJSONValue);
 var
    dws : TdwsJSONValue;
+   conditionals : TdwsJSONValue;
+   i : Integer;
 begin
    dws:=TdwsJSONValue.ParseString(cDefaultDWScriptOptions);
    try
@@ -636,8 +649,8 @@ begin
       ScriptTimeoutMilliseconds:=dws['TimeoutMSec'].AsInteger;
       WorkerTimeoutMilliseconds:=dws['WorkerTimeoutMSec'].AsInteger;
 
-      DelphiWebScript.Config.MaxDataSize:=dws['StackMaxSize'].AsInteger;
-      DelphiWebScript.Config.MaxRecursionDepth:=dws['MaxRecursionDepth'].AsInteger;
+      DelphiWebScript.Config.MaxDataSize := dws['StackMaxSize'].AsInteger;
+      DelphiWebScript.Config.MaxRecursionDepth := dws['MaxRecursionDepth'].AsInteger;
 
       dwsCompileSystem.Paths.Clear;
       dwsCompileSystem.Paths.Add(IncludeTrailingPathDelimiter(PathVariables.Values['www']));
@@ -647,6 +660,10 @@ begin
       dwsRuntimeFileSystem.Paths.Clear;
       ApplyPathsVariables(dws['WorkPaths'], dwsRuntimeFileSystem.Paths);
       dwsRuntimeFileSystem.Variables := FPathVariables;
+
+      conditionals := dws['Conditionals'];
+      for i := 0 to conditionals.ElementCount-1 do
+         DelphiWebScript.Config.Conditionals.Add(conditionals.Elements[0].AsString);
 
       dwsHtmlFilter.PatternOpen:=dws['PatternOpen'].AsString;
       dwsHtmlFilter.PatternClose:=dws['PatternClose'].AsString;
@@ -696,7 +713,9 @@ procedure TSimpleDWScript.CompileDWS(const fileName : String; var prog : IdwsPro
 var
    code : String;
    cp : TCompiledProgram;
+   {$ifdef ALLOW_JIT}
    jit : TdwsJITx86;
+   {$endif}
 begin
    FCompilerLock.Enter;
    try
@@ -718,6 +737,7 @@ begin
       prog:=DelphiWebScript.Compile(code, fileName);
 
       if not prog.Msgs.HasErrors then begin
+         {$ifdef ALLOW_JIT}
          if FEnableJIT and (typ in [fatDWS, fatPAS]) then begin
             jit:=TdwsJITx86.Create;
             try
@@ -727,6 +747,7 @@ begin
                jit.Free;
             end;
          end;
+         {$endif}
       end else if ErrorLogDirectory<>'' then begin
          LogCompileErrors(fileName, prog.Msgs);
       end;

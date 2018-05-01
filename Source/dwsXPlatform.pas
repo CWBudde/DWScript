@@ -67,7 +67,7 @@ const
 {$ENDIF}
 
    // following is missing from D2010
-   INVALID_HANDLE_VALUE = DWORD(-1);
+   INVALID_HANDLE_VALUE = NativeUInt(-1);
 
    {$ifdef FPC}
    // FreePascal RTL declares this constant, but does not support it,
@@ -246,11 +246,6 @@ procedure OutputDebugString(const msg : String);
 procedure WriteToOSEventLog(const logName, logCaption, logDetails : String;
                             const logRawData : RawByteString = ''); overload;
 
-function TryTextToFloat(const s : PChar; var value : Extended;
-                        const formatSettings : TFormatSettings) : Boolean; {$ifndef FPC} inline; {$endif}
-function TryTextToFloatW(const s : PWideChar; var value : Extended;
-                        const formatSettings : TFormatSettings) : Boolean; {$ifndef FPC} inline; {$endif}
-
 {$ifdef FPC}
 procedure VarCopy(out dest : Variant; const src : Variant); inline;
 {$else}
@@ -338,16 +333,13 @@ type
 {$endif}
 
 {$ifndef SRW_FALLBACK}
-type
-   SRWLOCK = Pointer;
+procedure AcquireSRWLockExclusive(var SRWLock : Pointer); stdcall; external 'kernel32.dll';
+function TryAcquireSRWLockExclusive(var SRWLock : Pointer) : BOOL; stdcall; external 'kernel32.dll';
+procedure ReleaseSRWLockExclusive(var SRWLock : Pointer); stdcall; external 'kernel32.dll';
 
-procedure AcquireSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-function TryAcquireSRWLockExclusive(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
-procedure ReleaseSRWLockExclusive(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-
-procedure AcquireSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
-function TryAcquireSRWLockShared(var SRWLock : SRWLOCK) : BOOL; stdcall; external 'kernel32.dll';
-procedure ReleaseSRWLockShared(var SRWLock : SRWLOCK); stdcall; external 'kernel32.dll';
+procedure AcquireSRWLockShared(var SRWLock : Pointer); stdcall; external 'kernel32.dll';
+function TryAcquireSRWLockShared(var SRWLock : Pointer) : BOOL; stdcall; external 'kernel32.dll';
+procedure ReleaseSRWLockShared(var SRWLock : Pointer); stdcall; external 'kernel32.dll';
 {$endif}
 
 type
@@ -638,6 +630,12 @@ begin
    Result := SysUtils.StringReplace(s, oldPattern, newPattern, flags);
 end;
 
+function CompareStringEx(
+   lpLocaleName: LPCWSTR; dwCmpFlags: DWORD;
+   lpString1: LPCWSTR; cchCount1: Integer;
+   lpString2: LPCWSTR; cchCount2: Integer;
+   lpVersionInformation: Pointer; lpReserved: LPVOID;
+   lParam: LPARAM): Integer; stdcall; external 'kernel32.dll';
 
 // UnicodeCompareP
 //
@@ -667,7 +665,11 @@ begin
 const
    CSTR_EQUAL = 2;
 begin
+{$IFDEF WINDOWS_XP}
    Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n, p2, n)-CSTR_EQUAL;
+{$ELSE}
+   Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n, p2, n, nil, nil, 0)-CSTR_EQUAL;
+{$ENDIF}
 {$ENDIF}
 end;
 
@@ -1382,7 +1384,7 @@ function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLeng
 function NormalizeString(const s, form : String) : String;
 {$ifdef MSWindows}
 var
-   nf, len : Integer;
+   nf, len, n : Integer;
 begin
    if s = '' then Exit('');
    if (form = '') or (form = 'NFC') then
@@ -1394,11 +1396,22 @@ begin
    else if form = 'NFKD' then
       nf := 6
    else raise Exception.CreateFmt('Unsupported normalization form "%s"', [form]);
+   n := 10;
    len := APINormalizeString(nf, Pointer(s), Length(s), nil, 0);
-   SetLength(Result, len);
-   len := APINormalizeString(nf, PWideChar(s), Length(s), Pointer(Result), len);
-   if len <= 0 then
-      RaiseLastOSError;
+   repeat
+      SetLength(Result, len);
+      len := APINormalizeString(nf, PWideChar(s), Length(s), Pointer(Result), len);
+      if len <= 0 then begin
+         if GetLastError <> ERROR_INSUFFICIENT_BUFFER then
+            RaiseLastOSError;
+         Dec(n);
+         if n <= 0 then
+            RaiseLastOSError;
+         len := -len;
+         len := len + (len div 4); // extra margin since estimation failed
+         continue;
+      end;
+   until True;
    SetLength(Result, len);
 {$else}
 var
@@ -1952,7 +1965,9 @@ begin
    Set8087CW(cw);
 {$else}
 begin
-   Result:=TextToFloat(s, value, fvExtended, formatSettings)
+//   Result:=TextToFloat(s, value, fvExtended, formatSettings);
+   Result := TryStrToFloat(s, value, formatSettings);
+//   Result := StrToFloat(s, formatSettings);
 {$endif}
 end;
 
@@ -2102,8 +2117,8 @@ var
    n, nRead : Cardinal;
 begin
    if fileName='' then Exit;
-   hFile:=OpenFileForSequentialReadOnly(fileName);
-   if hFile=INVALID_HANDLE_VALUE then Exit;
+   hFile := OpenFileForSequentialReadOnly(fileName);
+   if hFile = INVALID_HANDLE_VALUE then Exit;
    try
       n:=GetFileSize(hFile, nil);
       if n=INVALID_FILE_SIZE then

@@ -1014,6 +1014,10 @@ function  StrUToInt64(const s : UnicodeString; const default : Int64) : Int64;
 
 function Int64ToHex(val : Int64; digits : Integer) : String; inline;
 
+function TryStrToDouble(const s : String; var val : Double) : Boolean; overload; inline;
+function TryStrToDouble(const s : String; var val : Double; const formatSettings : TFormatSettings) : Boolean; overload; inline;
+function TryStrToDouble(p : PChar; var val : Double; formatSettings : PFormatSettings = nil) : Boolean; overload;
+
 function DivMod10(var dividend : Cardinal) : Cardinal;
 function DivMod100(var dividend : Cardinal) : Cardinal;
 
@@ -1635,6 +1639,207 @@ begin
    FastInt64ToHex(val, digits, Result);
 end;
 
+// TryStrToDouble (string)
+//
+function TryStrToDouble(const s : String; var val : Double) : Boolean;
+begin
+   Result := TryStrToDouble(PChar(s), val);
+end;
+
+// TryStrToDouble (string, fmt)
+//
+function TryStrToDouble(const s : String; var val : Double; const formatSettings : TFormatSettings) : Boolean;
+begin
+   Result := TryStrToDouble(PChar(s), val, @formatSettings);
+end;
+
+// TryStrToDouble (PChar)
+//
+function TryStrToDouble(p : PChar; var val : Double; formatSettings : PFormatSettings = nil) : Boolean;
+const
+   cMaxExponent = 308;
+   cMinExponent = -323;
+   cSignificantDigits = 17;
+
+   cExp10table: array [0..31] of Double = (
+      1e00, 1e01, 1e02, 1e03, 1e04, 1e05, 1e06, 1e07, 1e08, 1e09,
+      1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
+      1e20, 1e21, 1e22, 1e23, 1e24, 1e25, 1e26, 1e27, 1e28, 1e29,
+      1e30, 1e31
+    );
+   cExp10postable32: array [0..9] of Double = (
+      1e00, 1e32, 1e64, 1e96, 1e128, 1e160, 1e192, 1e224, 1e256, 1e288
+    );
+   cExp10negtable32: array [0..10] of Double = (
+      1e-00, 1e-32, 1e-64, 1e-96, 1e-128, 1e-160, 1e-192, 1e-224, 1e-256, 1e-288, 1e-320
+    );
+
+var
+   intMantissa : Int64;
+   mantissaExp, mantissaDigits, exp : Integer;
+   sign, expSign, gotDec, gotFrac : Boolean;
+   mantissa : Double;
+begin
+   if p = nil then Exit(False);
+
+   // skip leading whitespace & tabs
+   while (p^ = ' ') or (p^ = #9) do
+      Inc(p);
+
+   // grab the sign
+   case p^ of
+      '-' : begin
+         sign := True;
+         Inc(p);
+      end;
+      '+' : begin
+         sign := False;
+         Inc(p);
+      end;
+   else
+      sign := False;
+   end;
+
+   mantissaDigits := 0;
+   mantissaExp := 0;
+   case p^ of
+      '0'..'9' : begin
+         gotDec := True;
+         // skip leading zeroes, needed to figure out mantissa exponent
+         while p^ = '0' do
+            Inc(p);
+         if (p^ >= '0') and (p^ <= '9') then begin
+            intMantissa := Ord(p^)-Ord('0');
+            Inc(p);
+            while (p^ >= '0') and (p^ <= '9') do begin
+               if mantissaDigits < cSignificantDigits then begin
+                  intMantissa := intMantissa*10 + (Ord(p^)-Ord('0'));
+                  Inc(mantissaDigits);
+               end else begin
+                  Inc(mantissaExp);
+               end;
+               Inc(p);
+            end;
+         end else begin
+            intMantissa := 0;
+         end;
+      end;
+   else
+      gotDec := False;
+      intMantissa := 0;
+   end;
+
+   if    ((formatSettings = nil) and ((p^ = '.') or (p^ = ',')))
+      or ((formatSettings <> nil) and (p^ = formatSettings.DecimalSeparator)) then begin
+      Inc(p);
+      gotFrac := (p^ >= '0') and (p^ <= '9');
+      if (p^ = '0') and (intMantissa = 0) then begin
+         while p^ = '0' do begin
+            Dec(mantissaExp);
+            Inc(p);
+         end;
+      end;
+      while (p^ >= '0') and (p^ <= '9') do begin
+         if mantissaDigits < cSignificantDigits then begin
+            intMantissa := intMantissa*10 + (Ord(p^)-Ord('0'));
+            Inc(mantissaDigits);
+            Dec(mantissaExp);
+         end;
+         Inc(p);
+      end;
+   end else gotFrac := False;
+
+   // mantissa cannot be empty or a '.'/','
+   if not (gotFrac or gotDec) then
+      Exit(False);
+
+   // grab exponent, if there is one
+   if (p^ = 'e') or (p^ = 'E') then begin
+      Inc(p);
+      case p^ of
+         '-' : begin
+            expSign := True;
+            Inc(p);
+         end;
+         '+' : begin
+            expSign := False;
+            Inc(p);
+         end;
+      else
+         expSign := False;
+      end;
+      case p[0] of
+         '0'..'9' : begin
+            while p^ = '0' do
+               Inc(p);
+            if (p^ >= '0') and (p^ <= '9') then begin
+               exp := Ord(p[0]) - Ord('0');
+               case p[1] of
+                  '0'..'9' : begin
+                     exp := exp * 10 + Ord(p[1]) - Ord('0');
+                     case p[2] of
+                        '0'..'9' : begin
+                           exp := exp * 10 + Ord(p[2]) - Ord('0');
+                           Inc(p, 3);
+                        end
+                     else
+                        Inc(p, 2);
+                     end
+                  end
+               else
+                  Inc(p);
+               end
+            end else begin
+               exp := 0;
+            end;
+         end
+      else
+         Exit(False);
+      end;
+      if expSign then
+         exp := mantissaExp - exp
+      else exp := exp + mantissaExp;
+   end else begin
+      exp := mantissaExp;
+   end;
+
+   case p^ of
+      #0, #9, #13, #10, ' ' : begin
+      end;
+   else
+      Exit(False);
+   end;
+
+   case exp of
+      cMinExponent .. -32 :
+         mantissa := intMantissa * cExp10negtable32[(-exp and not 31) shr 5] / cExp10table[-exp and 31];
+      -31 .. -1 :
+         mantissa := intMantissa / cExp10table[-exp];
+      0 :
+         mantissa := intMantissa;
+      1 .. 31 : begin
+         mantissa := intMantissa;
+         mantissa := mantissa * cExp10table[exp];
+      end;
+      32 .. cMaxExponent : begin
+         if mantissaDigits + exp > cMaxExponent then
+            Exit(False);
+         mantissa := intMantissa * cExp10postable32[(exp and not 31) shr 5] * cExp10table[exp and 31]
+      end;
+   else
+      Exit(False);
+   end;
+
+   if sign then begin
+      // workaround for compiler bug that implements negation as subtraction in Delphi 64,
+      // thus preventing a negative zero (cf. https://en.wikipedia.org/wiki/Signed_zero)
+      PByteArray(@mantissa)[7] := PByteArray(@mantissa)[7] xor $80;
+   end;
+
+   val := mantissa;
+   Result := True;
+end;
+
 // Int32ToStrU
 //
 function Int32ToStrU(val : Integer) : UnicodeString;
@@ -2227,7 +2432,11 @@ begin
       varString :
          writer.WriteString(value);
       varOleStr :
+         {$ifdef DELPHI_TOKYO_PLUS}
+         writer.WriteString(value);
+         {$else}
          writer.WriteWideString(value);
+         {$endif}
       varSingle :
          writer.WriteSingle(value);
       varCurrency :

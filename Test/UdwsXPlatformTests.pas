@@ -81,8 +81,8 @@ procedure TdwsXPlatformTests.DateTimeConversionTest;
 var
    CurrentDateTime : TDateTime;
 begin
-   CurrentDateTime := UTCDateTime;
-   CheckEquals(CurrentDateTime, UTCDateTimeToLocalDateTime(LocalDateTimeToUTCDateTime(Now)));
+   CurrentDateTime := Now;
+   CheckEquals(CurrentDateTime, UTCDateTimeToLocalDateTime(LocalDateTimeToUTCDateTime(CurrentDateTime)));
 end;
 
 
@@ -90,35 +90,35 @@ end;
 //
 procedure TdwsXPlatformTests.DecimalPointTest;
 var
-  OldDecimalSeparator : Char;
+   oldDecimalSeparator : Char;
 begin
-  OldDecimalSeparator := GetDecimalSeparator;
-  SetDecimalSeparator(',');
-  CheckEquals(',', GetDecimalSeparator);
-  SetDecimalSeparator('.');
-  CheckEquals('.', GetDecimalSeparator);
-  SetDecimalSeparator(OldDecimalSeparator);
+   oldDecimalSeparator := GetDecimalSeparator;
+   try
+      SetDecimalSeparator(',');
+      CheckEquals(',', GetDecimalSeparator);
+      SetDecimalSeparator('.');
+      CheckEquals('.', GetDecimalSeparator);
+   finally
+      SetDecimalSeparator(oldDecimalSeparator);
+   end;
 end;
 
 procedure TdwsXPlatformTests.MillisecondsConversionTest;
 var
-   CurrentMilliseconds : Int64;
+   currentMilliseconds : Int64;
 begin
-   CurrentMilliseconds := UnixTime;
-   CheckEquals(CurrentMilliseconds, UnixTimeToSystemMilliseconds(
-     SystemMillisecondsToUnixTime(CurrentMilliseconds)));
+   currentMilliseconds := GetSystemMilliseconds;
+   CheckTrue(Abs(currentMilliseconds - UnixTimeToSystemMilliseconds(SystemMillisecondsToUnixTime(currentMilliseconds))) < 1000);
 end;
-
 
 procedure TdwsXPlatformTests.RawBytesStringTest;
 var
-  Text: RawByteString;
   Bytes: TBytes;
 const
-  CTestString = 'Hello World!';
+  cTestString = 'Hello World!';
 begin
-  Bytes := RawByteStringToBytes(RawByteString(CTestString));
-  CheckEquals(Text, BytesToRawByteString(@Bytes[0], Length(Bytes)));
+  Bytes := RawByteStringToBytes(RawByteString(cTestString));
+  CheckEquals(cTestString, BytesToRawByteString(@Bytes[0], Length(Bytes)));
 end;
 
 // UnicodeLowerAndUpperCaseTest
@@ -181,8 +181,6 @@ const
     'ἀἁἂἃἄἅἆἇἐἑἒἓἔἕἠἡἢἣἤἥἦἧἰἱἲἳἴἵἶἷὀὁὂὃὄὅὑὓὕὗὠὡὢὣὤὥὦὧᾀᾁᾂᾃᾄᾅ';
   TestStringLowerCaseFullWidth =
     'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ';
-var
-   Test: String;
 begin
    CheckEquals(TestStringLowerCaseBasic, UnicodeLowerCase(TestStringUpperCaseBasic));
    CheckEquals(TestStringLowerCaseSupplement, UnicodeLowerCase(TestStringUpperCaseSupplement));

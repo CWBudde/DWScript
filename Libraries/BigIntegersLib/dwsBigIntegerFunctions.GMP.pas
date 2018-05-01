@@ -66,6 +66,7 @@ type
 
          constructor CreateZero;
          constructor CreateInt64(const i : Int64);
+         constructor CreateFloat(const f : Double);
          constructor CreateString(const s : String; base : Integer);
          constructor Wrap(const v : mpz_t);
          destructor Destroy; override;
@@ -172,6 +173,9 @@ type
       procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TConvStringToBigIntegerExpr = class(TBigIntegerUnaryOpExpr)
+      procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
+   end;
+   TConvFloatToBigIntegerExpr = class(TBigIntegerUnaryOpExpr)
       procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
    TConvBigIntegerToIntegerExpr = class(TUnaryOpIntExpr)
@@ -305,9 +309,12 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+const
+   cLimbSize = SizeOf(NativeUInt);
+
 type
-   TCardinalArray = array [0..MaxInt shr 3] of Cardinal;
-   PCardinalArray = ^TCardinalArray;
+   TLimbArray = array [0..1024*1024*1024 div cLimbSize] of NativeUInt;
+   PLimbArray = ^TLimbArray;
 
 // RegisterBigIntegerType                                      
 //
@@ -372,6 +379,7 @@ begin
 
    operators.RegisterCaster(typBigInteger, systemTable.TypInteger, TConvIntegerToBigIntegerExpr);
    operators.RegisterCaster(typBigInteger, systemTable.TypString,  TConvStringToBigIntegerExpr);
+   operators.RegisterCaster(typBigInteger, systemTable.TypFloat,   TConvFloatToBigIntegerExpr);
    operators.RegisterCaster(systemTable.TypInteger, typBigInteger, TConvBigIntegerToIntegerExpr);
    operators.RegisterCaster(systemTable.TypFloat, typBigInteger,   TConvBigIntegerToFloatExpr);
 end;
@@ -481,6 +489,15 @@ constructor TBigIntegerWrapper.CreateInt64(const i : Int64);
 begin
    CreateZero;
    mpz_set_int64(Value, i);
+end;
+
+// CreateFloat
+//
+constructor TBigIntegerWrapper.CreateFloat(const f : Double);
+begin
+   inherited;
+   CreateZero;
+   mpz_set_d(Value, f);
 end;
 
 // CreateString
@@ -863,6 +880,18 @@ begin
    Expr.EvalAsString(exec, s);
    result := TBigIntegerWrapper.CreateString( s, 10 ) as IdwsBigInteger;
 end;
+
+// ------------------
+// ------------------ TConvFloatToBigIntegerExpr ------------------
+// ------------------
+
+// EvalAsInterface
+//
+procedure TConvFloatToBigIntegerExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+begin
+   Result := TBigIntegerWrapper.CreateFloat(Expr.EvalAsFloat(exec)) as IdwsBigInteger;
+end;
+
 // ------------------
 // ------------------ TConvBigIntegerToIntegerExpr ------------------
 // ------------------
@@ -1122,14 +1151,14 @@ begin
    if n = 0 then
       bufString := ''
    else begin
-      SetLength(bufString, n*4+1);
+      SetLength(bufString, n*cLimbSize+1);
       pDest := Pointer(bufString);
       if gmp.mp_size < 0 then begin
          pDest^ := $ff;
          Inc(pDest);
       end;
-      pSrc := @PCardinalArray(gmp.mp_d)^[n-1];
-      Inc(pSrc, 3);
+      pSrc := @PLimbArray(gmp.mp_d)^[n-1];
+      Inc(pSrc, cLimbSize-1);
       // skip zeroes
       while pSrc^ = 0 do begin
          Dec(pSrc);
@@ -1157,11 +1186,11 @@ end;
 //
 procedure TBlobToBigIntegerFunc.DoEvalAsInterface(const args : TExprBaseListExec; var result : IUnknown);
 var
+   bi : TBigIntegerWrapper;
    bufString : RawByteString;
+   nbBytes, nbLimbs : Integer;
    pSrc, pDest : PByte;
    i : Integer;
-   nbBytes, nbDWords : Cardinal;
-   bi : TBigIntegerWrapper;
 begin
    bi := TBigIntegerWrapper.CreateZero;
 
@@ -1177,13 +1206,13 @@ begin
          end
       end;
 
-      nbDWords := (nbBytes+3) div 4;
-      mpz_realloc(bi.Value, nbDWords);
+      nbLimbs := (nbBytes+cLimbSize-1) div cLimbSize;
+      mpz_realloc(bi.Value, nbLimbs);
       if Ord(bufString[1]) = $ff then
-         bi.Value.mp_size := -nbDWords
-      else bi.Value.mp_size := nbDWords;
+         bi.Value.mp_size := -nbLimbs
+      else bi.Value.mp_size := nbLimbs;
 
-      PCardinalArray(bi.Value.mp_d)[nbDWords-1] := 0;
+      PLimbArray(bi.Value.mp_d)[nbLimbs-1] := 0;
       pDest := @PByteArray(bi.Value.mp_d)[nbBytes-1];
       for i := 1 to nbBytes do begin
          pDest^ := pSrc^;
@@ -1299,8 +1328,8 @@ procedure TBigIntegerRandomFunc.DoEvalAsVariant(const args : TExprBaseListExec; 
       bytes[High(bytes)-1] := bytes[High(bytes)-1] and mask;
 
       bi := TBigIntegerWrapper.CreateZero;
-      mpz_realloc(bi.Value, (nb div (8*4))+1);
-      FillChar(bi.Value.mp_d^, bi.Value.mp_alloc*4, 0);
+      mpz_realloc(bi.Value, (nb div (8*cLimbSize))+1);
+      FillChar(bi.Value.mp_d^, bi.Value.mp_alloc*cLimbSize, 0);
       bi.Value.mp_size := bi.Value.mp_alloc;
       System.Move(bytes[0], bi.Value.mp_d^, Length(bytes));
 

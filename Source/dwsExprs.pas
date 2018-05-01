@@ -24,7 +24,7 @@ unit dwsExprs;
 interface
 
 uses
-   Classes, SysUtils, TypInfo,
+   Classes, SysUtils, TypInfo, Variants,
    dwsSymbols, dwsErrors, dwsUtils, dwsDataContext, dwsExprList,
    dwsStrings, dwsStack, SyncObjs, dwsFileSystem, dwsTokenizer, dwsUnitSymbols,
    dwsJSON, dwsXPlatform, dwsInfo, dwsScriptSource, dwsCustomData, dwsSymbolDictionary,
@@ -355,6 +355,8 @@ type
          procedure SetLocalizer(const val : IdwsLocalizer);
          function GetExecutionTimedOut : Boolean;
 
+         function GetFileSystem : IdwsFileSystem;
+
          procedure RaiseMaxRecursionReached;
          procedure SetCurrentProg(const val : TdwsProgram); inline;
 
@@ -409,7 +411,7 @@ type
 
          property Parameters : TData read FParameters;
          property Result : TdwsResult read FResult;
-         property FileSystem : IdwsFileSystem read FFileSystem;
+         property FileSystem : IdwsFileSystem read GetFileSystem;
          property Environment : IdwsEnvironment read GetEnvironment write SetEnvironment;
          property CustomStates : TdwsCustomStates read GetCustomStates;
          function HasCustomStates : Boolean;
@@ -747,6 +749,7 @@ type
 
          function IsOfType(typSym : TTypeSymbol) : Boolean;
          function IsGeneric : Boolean; virtual;
+         function AssignsAsDataExpr : Boolean; virtual;
 
          function SameDataExpr(expr : TTypedExpr) : Boolean; virtual;
 
@@ -854,6 +857,7 @@ type
 
          function IsWritable : Boolean; virtual;
          function IsExternal : Boolean; virtual;
+         function AssignsAsDataExpr : Boolean; override;
 
          function DataSymbol : TDataSymbol; virtual;
 
@@ -2279,11 +2283,9 @@ end;
 //
 function TdwsProgramExecution.ValidateFileName(const path : String) : String;
 begin
-   if Assigned(FileSystem) then
-      Result:=FileSystem.ValidateFileName(path)
-   else Result:='';
-   if Result='' then
-      Result:=inherited ValidateFileName(path);
+   Result := FileSystem.ValidateFileName(path);
+   if Result = '' then
+      raise EScriptException.CreateFmt(RTE_UnauthorizedFilePath, [path]);
 end;
 
 // HasCustomStates
@@ -2473,6 +2475,18 @@ end;
 function TdwsProgramExecution.GetExecutionTimedOut : Boolean;
 begin
    Result := FExecutionTimedOut;
+end;
+
+// GetFileSystem
+//
+function TdwsProgramExecution.GetFileSystem : IdwsFileSystem;
+begin
+   if FFileSystem = nil then begin
+      if FProg.RuntimeFileSystem <> nil then
+         FFileSystem := FProg.RuntimeFileSystem.AllocateFileSystem
+      else FFileSystem := TdwsOSFileSystem.Create;
+   end;
+   Result := FFileSystem;
 end;
 
 // GetMsgs
@@ -4117,6 +4131,13 @@ begin
    Result := (Typ <> nil) and (Typ.IsGeneric);
 end;
 
+// AssignsAsDataExpr
+//
+function TTypedExpr.AssignsAsDataExpr : Boolean;
+begin
+   Result := False;
+end;
+
 // SameDataExpr
 //
 function TTypedExpr.SameDataExpr(expr : TTypedExpr) : Boolean;
@@ -4391,6 +4412,13 @@ end;
 function TDataExpr.IsExternal : Boolean;
 begin
    Result:=False;
+end;
+
+// AssignsAsDataExpr
+//
+function TDataExpr.AssignsAsDataExpr : Boolean;
+begin
+   Result := Typ.AssignsAsDataExpr;
 end;
 
 // DataSymbol

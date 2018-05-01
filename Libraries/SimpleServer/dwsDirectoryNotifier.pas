@@ -84,10 +84,10 @@ type
          FMode : TdwsDirectoryNotifierMode;
          FDirectoryHandle : THandle;
          FNotificationBuffer : TdwsFileNotifierBuffer;
-         FNotifyFilter : DWORD;
+         FNotifyFilter : Cardinal;
          FOverlapped : TOverlapped;
          FPOverlapped : POverlapped;
-         FBytesWritten : DWORD;
+         FBytesWritten : Cardinal;
          FChangeCP : THandle;
          FLastChange : TDateTime;
          FActive : Boolean;

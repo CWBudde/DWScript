@@ -14,7 +14,7 @@ uses
   Windows,
   TestFrameWork,
   GUITestRunner,
-  SysUtils,
+  SysUtils, Math,
   dwsXPlatform,
   dwsMathComplexFunctions in '..\Source\dwsMathComplexFunctions.pas',
   dwsMath3DFunctions in '..\Source\dwsMath3DFunctions.pas',
@@ -53,13 +53,13 @@ uses
   ULanguageExtensionTests in 'ULanguageExtensionTests.pas',
   UJITTests in 'UJITTests.pas',
   UJITx86Tests in 'UJITx86Tests.pas',
+  UdwsCryptoTests in 'UdwsCryptoTests.pas',
+  UdwsGraphicsTests in 'UdwsGraphicsTests.pas',
   dwsSymbolsLibModule in '..\Libraries\SymbolsLib\dwsSymbolsLibModule.pas',
   UExternalFunctionTests in 'UExternalFunctionTests.pas',
-  UdwsCryptoTests in 'UdwsCryptoTests.pas',
   UdwsEncodingTests in 'UdwsEncodingTests.pas',
   UInstantiateTests in 'UInstantiateTests.pas',
   UdwsWebUtilsTests in 'UdwsWebUtilsTests.pas',
-  UdwsGraphicsTests in 'UdwsGraphicsTests.pas',
   dwsJSONPath in '..\Source\dwsJSONPath.pas',
   dwsDateTime in '..\Source\dwsDateTime.pas',
   dwsGlobalVars in '..\Source\dwsGlobalVars.pas',
@@ -81,7 +81,9 @@ uses
   dwsUnicode in '..\Source\dwsUnicode.pas',
   UdwsSystemInfoTests in 'UdwsSystemInfoTests.pas',
   dwsSHA512 in '..\Libraries\CryptoLib\dwsSHA512.pas',
-  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas';
+  dwsXXHash in '..\Source\dwsXXHash.pas',
+  dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas',
+  dwsJPEGEncoderOptions in '..\Libraries\GraphicsLib\dwsJPEGEncoderOptions.pas';
 
 {$R *.res}
 
@@ -93,7 +95,11 @@ var
 {$IFEND}
 begin
    ReportMemoryLeaksOnShutdown:=True;
+   {$IF RTLVersion >= 23}
+   SetExceptionMask(GetExceptionMask + [TArithmeticException.exZeroDivide, TArithmeticException.exInvalidOp]);
+   {$else}
    DirectSet8087CW($133F);
+   {$IFEND}
    GetProcessAffinityMask(GetCurrentProcess, procAffinity, systAffinity);
    SetProcessAffinityMask(GetCurrentProcess, systAffinity);
    Application.Initialize;

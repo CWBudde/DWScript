@@ -6816,7 +6816,7 @@ begin
          Result:=GetMethodExpr(methodSym, nil, rkClassOfRef, FTok.HotPos, options);
       end else begin
          Result:=GetMethodExpr(methodSym,
-                               GetVarExpr(FTok.HotPos, progMeth.SelfSym),
+                               GetSelfParamExpr(FTok.HotPos, progMeth.SelfSym),
                                rkObjRef, FTok.HotPos, options);
       end;
    end else begin
@@ -8384,13 +8384,16 @@ begin
       if not FTok.TestName then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_ClassRefExpected);
 
-      nameToken:=FTok.GetToken;
-      hotPos:=FTok.HotPos;
+      nameToken := FTok.GetToken;
+      hotPos := FTok.HotPos;
       if asAttribute then
-         sym:=FindAsAttribute(CurrentProg.Table, nameToken.AsString)
-      else sym:=nil;
-      if sym=nil then
-         sym:=CurrentProg.Table.FindSymbol(nameToken.AsString, cvPrivate);
+         sym := FindAsAttribute(CurrentProg.Table, nameToken.AsString)
+      else sym := nil;
+      if sym = nil then
+         sym := CurrentProg.Table.FindSymbol(nameToken.AsString, cvPrivate);
+      if sym <> nil then
+         CheckMatchingDeclarationCase(nameToken.AsString, sym, hotPos);
+
       FTok.KillToken;
 
       if (sym <> nil) and (sym.ClassType = TGenericSymbol) then
@@ -10502,14 +10505,24 @@ begin
                case tt of
                   ttIS : begin
 
-                     if not (Result.Typ is TClassSymbol) then
-                        FMsgs.AddCompilerError(hotPos, CPE_ObjectExpected)
-                     else if not (rightTyp is TClassOfSymbol) then
-                        FMsgs.AddCompilerError(hotPos, CPE_ClassRefExpected)
-                     else if not (   TClassSymbol(rightTyp.Typ).IsOfType(Result.Typ)
-                                  or TClassSymbol(Result.Typ).IsOfType(rightTyp.Typ)) then
-                        IncompatibleTypesWarn(hotPos, CPE_IncompatibleTypes, Result.Typ, rightTyp.Typ);
-                     Result:=TIsOpExpr.Create(FCompilerContext, hotPos, tt, Result, right)
+                     if Result.IsOfType(FCompilerContext.TypBoolean) and right.IsOfType(FCompilerContext.TypBoolean) then begin
+                        if right.ClassType = TConstBooleanExpr then begin
+                           if not TConstBooleanExpr(right).Value then
+                              Result := TNotBoolExpr.Create(FCompilerContext, hotPos, Result);
+                           right.Free;
+                        end else begin
+                           Result := TRelEqualBoolExpr.Create(FCompilerContext, hotPos, ttIS, Result, right);
+                        end;
+                     end else begin
+                        if not (Result.Typ is TClassSymbol) then
+                           FMsgs.AddCompilerError(hotPos, CPE_ObjectExpected)
+                        else if not (rightTyp is TClassOfSymbol) then
+                           FMsgs.AddCompilerError(hotPos, CPE_ClassRefExpected)
+                        else if not (   TClassSymbol(rightTyp.Typ).IsOfType(Result.Typ)
+                                     or TClassSymbol(Result.Typ).IsOfType(rightTyp.Typ)) then
+                           IncompatibleTypesWarn(hotPos, CPE_IncompatibleTypes, Result.Typ, rightTyp.Typ);
+                        Result := TIsOpExpr.Create(FCompilerContext, hotPos, tt, Result, right)
+                     end;
 
                   end;
                   ttIMPLEMENTS : begin
@@ -10526,7 +10539,7 @@ begin
 
                   end;
                else
-                  opExpr:=CreateTypedOperatorExpr(tt, hotPos, Result, right);
+                  opExpr := CreateTypedOperatorExpr(tt, hotPos, Result, right);
                   if opExpr=nil then begin
                      if     ((tt=ttEQ) or (tt=ttNOTEQ))
                         and (rightTyp<>nil)
@@ -12464,7 +12477,7 @@ begin
    else if ct=TVarParamSymbol then
       Result:=GetVarParamExpr(TVarParamSymbol(selfSym))
    else begin
-      Assert((ct=TSelfSymbol) or (ct=TParamSymbol));
+      Assert((ct=TSelfSymbol) or (ct=TParamSymbol) or (ct=TConstByValueParamSymbol));
       Result:=GetVarExpr(aScriptPos, selfSym);
    end;
 end;
@@ -13261,36 +13274,64 @@ function TdwsCompiler.CreateSetOperatorExpr(token : TTokenType; const scriptPos 
                                             aLeft, aRight : TTypedExpr) : TTypedExpr;
 var
    leftData, rightData : TDataExpr;
+   convertedData : TDataExpr;
+   leftTyp, rightTyp : TTypeSymbol;
+   setTyp : TSetOfSymbol;
 begin
    Result := nil;
    if (aLeft.Typ = nil) or (aRight.Typ = nil) then Exit;
 
-   if aLeft.Typ.UnAliasedTypeIs(TSetOfSymbol) then begin
-      if aRight.Typ.UnAliasedType = aLeft.Typ.UnAliasedType then begin
-         leftData := aLeft as TDataExpr;
-         rightData := aRight as TDataExpr;
-         case token of
-            ttPLUS :
-               Result := TSetOfAddExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
-            ttMINUS :
-               Result := TSetOfSubExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
-            ttTIMES :
-               Result := TSetOfMultExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
-            ttEQ :
-               Result := TSetOfEqualExpr.Create(FCompilerContext, scriptPos, ttEQ, leftData, rightData);
-            ttNOTEQ :
-               Result := TNotBoolExpr.Create(FCompilerContext, scriptPos,
-                  TSetOfEqualExpr.Create(FCompilerContext, scriptPos, ttEQ, leftData, rightData)
-               );
-            ttLESSEQ :
-               Result := TSetOfLeftContainedInRightExpr.Create(FCompilerContext, scriptPos, ttLESSEQ, leftData, rightData);
-            ttGTREQ :
-               Result := TSetOfLeftContainedInRightExpr.Create(FCompilerContext, scriptPos, ttGTREQ, rightData, leftData);
-         end;
+   leftTyp := aLeft.Typ.UnAliasedType;
+   rightTyp := aRight.Typ.UnAliasedType;
+
+   convertedData := nil;
+   if leftTyp.ClassType = TSetOfSymbol then begin
+      setTyp := TSetOfSymbol(leftTyp);
+      if rightTyp <> leftTyp then begin
+         if     (aRight.ClassType = TArrayConstantExpr)
+            and CompilerUtils.CanConvertArrayToSetOf(FCompilerContext, aRight, setTyp) then begin
+            convertedData := TConvStaticArrayToSetOfExpr.Create(aRight.ScriptPos, TArrayConstantExpr(aRight), setTyp);
+            aRight := convertedData;
+         end else Exit;
       end;
+   end else if rightTyp.ClassType = TSetOfSymbol then begin
+      setTyp := TSetOfSymbol(rightTyp);
+      if     (aLeft.ClassType = TArrayConstantExpr)
+         and CompilerUtils.CanConvertArrayToSetOf(FCompilerContext, aLeft, setTyp) then begin
+         convertedData := TConvStaticArrayToSetOfExpr.Create(aLeft.ScriptPos, TArrayConstantExpr(aLeft), setTyp);
+         aLeft := convertedData;
+      end else Exit;
+   end else Exit;
+
+   try
+      leftData := aLeft as TDataExpr;
+      rightData := aRight as TDataExpr;
+      case token of
+         ttPLUS :
+            Result := TSetOfAddExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
+         ttMINUS :
+            Result := TSetOfSubExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
+         ttTIMES :
+            Result := TSetOfMultExpr.Create(FCompilerContext, scriptPos, token, leftData, rightData);
+         ttEQ :
+            Result := TSetOfEqualExpr.Create(FCompilerContext, scriptPos, ttEQ, leftData, rightData);
+         ttNOTEQ :
+            Result := TNotBoolExpr.Create(FCompilerContext, scriptPos,
+               TSetOfEqualExpr.Create(FCompilerContext, scriptPos, ttEQ, leftData, rightData)
+            );
+         ttLESSEQ :
+            Result := TSetOfLeftContainedInRightExpr.Create(FCompilerContext, scriptPos, ttLESSEQ, leftData, rightData);
+         ttGTREQ :
+            Result := TSetOfLeftContainedInRightExpr.Create(FCompilerContext, scriptPos, ttGTREQ, rightData, leftData);
+      end;
+   except
+      convertedData.Free;
+      raise;
    end;
 
-   if (Result <> nil) and Optimize then
+   if Result = nil then
+      convertedData.Free
+   else if Optimize then
       Result:=Result.OptimizeToTypedExpr(FCompilerContext, scriptPos);
 end;
 

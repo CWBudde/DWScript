@@ -23,7 +23,7 @@ interface
 uses
    SysUtils, TypInfo,
    dwsErrors, dwsStrings, dwsXPlatform, dwsUtils, dwsScriptSource,
-   dwsSymbols, dwsUnitSymbols, dwsCompilerContext,
+   dwsSymbols, dwsUnitSymbols, dwsCompilerContext, dwsExprList,
    dwsExprs, dwsCoreExprs, dwsConstExprs, dwsMethodExprs, dwsMagicExprs,
    dwsConvExprs, dwsTokenizer, dwsOperators, dwsConnectorSymbols;
 
@@ -39,6 +39,9 @@ type
                         context : TdwsCompilerContext; expr : TTypedExpr; toTyp : TTypeSymbol;
                         const hotPos : TScriptPos;
                         const msg : String = CPE_IncompatibleTypes) : TTypedExpr; static;
+
+         class function CanConvertArrayToSetOf(context : TdwsCompilerContext;
+                                               expr : TTypedExpr; setOf : TSetOfSymbol) : Boolean;
 
          class procedure AddProcHelper(const name : String;
                                        table : TSymbolTable; func : TFuncSymbol;
@@ -174,6 +177,7 @@ end;
 function CreateAssignExpr(context : TdwsCompilerContext;
                           const scriptPos : TScriptPos; token : TTokenType;
                           left : TDataExpr; right : TTypedExpr) : TProgramExpr;
+
 var
    classOpSymbol : TClassOperatorSymbol;
    classOpExpr : TFuncExprBase;
@@ -227,11 +231,7 @@ begin
                   end else begin
                      Result:=TAssignExpr.Create(context, scriptPos, left, right);
                   end;
-               end else if     right.InheritsFrom(TDataExpr)
-                           and (   (right.Typ.Size<>1)
-                                or (right.Typ is TArraySymbol)
-                                or (right.Typ is TRecordSymbol)
-                                or (right.Typ is TSetOfSymbol)) then begin
+               end else if left.AssignsAsDataExpr then begin
                   if right.InheritsFrom(TFuncExpr) then
                      TFuncExpr(right).SetResultAddr(context.Prog as TdwsProgram, nil);
                   if right.InheritsFrom(TArrayConstantExpr) and (left.Typ is TArraySymbol) then
@@ -419,12 +419,11 @@ var
 begin
    if meth is TAliasMethodSymbol then begin
 
-      Result:=CreateSimpleFuncExpr(context, scriptPos, TAliasMethodSymbol(meth).Alias);
+      Result := CreateSimpleFuncExpr(context, scriptPos, TAliasMethodSymbol(meth).Alias);
       Result.AddArg(expr);
       Exit;
 
    end;
-
 
    // Create the correct TExpr for a method symbol
    Result := nil;
@@ -749,8 +748,8 @@ var
 begin
    Result := nil;
    if (aLeft=nil) or (aRight=nil) then Exit;
-   opSym:=ResolveOperatorFor(context.Prog as TdwsProgram, token, aLeft.Typ, aRight.Typ);
-   if opSym=nil then Exit;
+   opSym := ResolveOperatorFor(context.Prog as TdwsProgram, token, aLeft.Typ, aRight.Typ);
+   if opSym = nil then Exit;
 
    if opSym.OperatorExprClass <> nil then begin
       Result := TBinaryOpExprClass(opSym.OperatorExprClass).Create(context, scriptPos, token, aLeft, aRight);
@@ -911,7 +910,7 @@ begin
 
    if     (expr.ClassType=TArrayConstantExpr)
       and toTyp.UnAliasedTypeIs(TSetOfSymbol)
-      and exprTyp.Typ.IsCompatible(toTyp.Typ) then begin
+      and CanConvertArrayToSetOf(context, expr, toTyp.UnAliasedType as TSetOfSymbol) then begin
 
       Result := TConvStaticArrayToSetOfExpr.Create(hotPos, TArrayConstantExpr(expr), toTyp.UnAliasedType as TSetOfSymbol);
 
@@ -929,6 +928,30 @@ begin
       IncompatibleTypes(context, hotPos, msg, toTyp, exprTyp);
       Result := TConvInvalidExpr.Create(context, hotPos, expr, toTyp);
 
+   end;
+end;
+
+// CanConvertArrayToSetOf
+//
+class function CompilerUtils.CanConvertArrayToSetOf(context : TdwsCompilerContext;
+                                                    expr : TTypedExpr; setOf : TSetOfSymbol) : Boolean;
+var
+   i : Integer;
+   val : Int64;
+   elem : TTypedExpr;
+begin
+   Result :=     (expr.ClassType=TArrayConstantExpr)
+             and expr.Typ.Typ.IsCompatible(setOf.Typ);
+   if not Result then Exit;
+
+   // perform range check on elements
+   for i := 0 to TArrayConstantExpr(expr).ElementCount-1 do begin
+      elem := TArrayConstantExpr(expr).Elements[i];
+      val := elem.EvalAsInteger(context.Execution);
+      if Cardinal(val - setOf.MinValue) >= Cardinal(setOf.CountValue) then begin
+         context.Msgs.AddCompilerError(elem.ScriptPos, CPE_ElementOutOfSetBound);
+         Break;
+      end;
    end;
 end;
 

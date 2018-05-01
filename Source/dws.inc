@@ -38,6 +38,8 @@
 {$T-} // typed addr off - otherwise you'll get problems with ComSupport
       // <<.CreateResFmt(@SNoMethod, [Names]);>>
 
+{$WARN DUPLICATE_CTOR_DTOR OFF}
+
 {$IFNDEF FPC}
    {$IFNDEF VER200}  // D2009
       {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
@@ -56,6 +58,9 @@
    {$IFEND}
    {$IF CompilerVersion>23.0}
       {$DEFINE DELPHI_XE3_PLUS}
+   {$IFEND}
+   {$IF CompilerVersion>=32.0}
+      {$DEFINE DELPHI_TOKYO_PLUS}
    {$IFEND}
 {$ELSE}
    {$mode delphi}

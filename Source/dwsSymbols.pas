@@ -99,6 +99,9 @@ type
       function GetCallStack : TdwsExprLocationArray;
       function GetLastScriptErrorExpr : TExprBase;
 
+      procedure SuspendDebug;
+      procedure ResumeDebug;
+
       property ProgramState : TProgramState read GetProgramState;
       property Sleeping : Boolean read GetSleeping;
       property Stack : TStack read GetStack;
@@ -673,6 +676,7 @@ type
          function SameType(typSym : TTypeSymbol) : Boolean; virtual;
          function HasMetaSymbol : Boolean; virtual;
          function IsForwarded : Boolean; virtual;
+         function AssignsAsDataExpr : Boolean; virtual;
 
          function Specialize(const context : ISpecializationContext) : TSymbol; override; final;
          function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; virtual;
@@ -1101,6 +1105,8 @@ type
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          procedure InitData(const data : TData; offset : Integer); override;
 
+         function AssignsAsDataExpr : Boolean; override;
+
          function ValueToOffsetMask(value : Integer; var mask : Int64) : Integer; inline;
          function ValueToByteOffsetMask(value : Integer; var mask : Byte) : Integer; inline;
 
@@ -1123,6 +1129,8 @@ type
          destructor Destroy; override;
 
          class function DynamicInitialization : Boolean; override;
+
+         function AssignsAsDataExpr : Boolean; override;
 
          function SortFunctionType(integerType : TTypeSymbol) : TFuncSymbol; virtual;
          function MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol; virtual;
@@ -1450,6 +1458,7 @@ type
 
          procedure InitData(const data : TData; offset : Integer); override;
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
+         function AssignsAsDataExpr : Boolean; override;
 
          function SpecializeType(const context : ISpecializationContext) : TTypeSymbol; override;
 
@@ -1856,6 +1865,7 @@ type
 
          FDebugger : IDebugger;
          FIsDebugging : Boolean;
+         FDebugSuspended : Integer;
 
          FSleepTime : Integer;
          FSleeping : Boolean;
@@ -1918,6 +1928,9 @@ type
          function CallStackLastExpr : TExprBase; virtual; abstract;
          function CallStackLastProg : TObject; virtual; abstract;
          function CallStackDepth : Integer; virtual; abstract;
+
+         procedure SuspendDebug;
+         procedure ResumeDebug;
 
          procedure DataContext_Create(const data : TData; addr : Integer; var Result : IDataContext); inline;
          procedure DataContext_CreateEmpty(size : Integer; var Result : IDataContext); inline;
@@ -3012,6 +3025,13 @@ begin
       Exit(True);
 
    Result:=False;
+end;
+
+// AssignsAsDataExpr
+//
+function TRecordSymbol.AssignsAsDataExpr : Boolean;
+begin
+   Result := True;
 end;
 
 // SpecializeType
@@ -6846,6 +6866,13 @@ begin
       data[i]:=cZero64;
 end;
 
+// AssignsAsDataExpr
+//
+function TSetOfSymbol.AssignsAsDataExpr : Boolean;
+begin
+   Result := True;
+end;
+
 // ValueToOffsetMask
 //
 function TSetOfSymbol.ValueToOffsetMask(value : Integer; var mask : Int64) : Integer;
@@ -6893,6 +6920,13 @@ end;
 // DynamicInitialization
 //
 class function TArraySymbol.DynamicInitialization : Boolean;
+begin
+   Result := True;
+end;
+
+// AssignsAsDataExpr
+//
+function TArraySymbol.AssignsAsDataExpr : Boolean;
 begin
    Result := True;
 end;
@@ -7538,6 +7572,13 @@ begin
    Result := False;
 end;
 
+// AssignsAsDataExpr
+//
+function TTypeSymbol.AssignsAsDataExpr : Boolean;
+begin
+   Result := (Size <> 1);
+end;
+
 // Specialize
 //
 function TTypeSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
@@ -7966,6 +8007,38 @@ end;
 function TdwsExecution.GetStackPData : PData;
 begin
    Result := FStack.GetPData;
+end;
+
+// SuspendDebug
+//
+procedure TdwsExecution.SuspendDebug;
+begin
+   if FDebugSuspended = 0 then begin
+      if FIsDebugging then
+         FDebugSuspended := 1
+      else FDebugSuspended := -1;
+      FIsDebugging := False;
+   end else if FDebugSuspended > 0 then
+      Inc(FDebugSuspended)
+   else Dec(FDebugSuspended);
+end;
+
+// ResumeDebug
+//
+procedure TdwsExecution.ResumeDebug;
+begin
+   case FDebugSuspended of
+      0 : Assert(False);
+      1 : begin
+         FDebugSuspended := 0;
+         FIsDebugging := True;
+      end;
+      -1 : FDebugSuspended := 0;
+   else
+      if FDebugSuspended > 0 then
+         Dec(FDebugSuspended)
+      else Inc(FDebugSuspended);
+   end;
 end;
 
 // ------------------

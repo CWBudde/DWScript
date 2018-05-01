@@ -316,6 +316,10 @@ type
     procedure DoEvalAsString(const args : TExprBaseListExec; var Result : String); override;
   end;
 
+  TByteSizeToStrFunc = class(TInternalMagicStringFunction)
+    procedure DoEvalAsString(const args : TExprBaseListExec; var Result : String); override;
+  end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -347,6 +351,25 @@ begin
    Result:=0;
 end;
 
+// ByteSizeToString
+//
+function ByteSizeToString(const size : Int64; const unitName : String = 'B') : String;
+var
+   floatSize : Double;
+begin
+   floatSize := size;
+   if Abs(size) < 1024 then
+      Result := Format('%d ', [ size ])
+   else if Abs(size) < 1024*1024 then
+      Result := Format('%.1f k', [ floatSize*(1/1024) ])
+   else if Abs(size) < 1024*1024*1024 then
+      Result := Format('%.2f M', [ floatSize*(1/(1024*1024)) ])
+   else if Abs(floatSize) < 1024*1024*1024*1024.0 then
+      Result := Format('%.2f G', [ floatSize*(1/(1024*1024*1024)) ])
+   else Result := Format('%.3f T', [ floatSize*(1/(1024*1024*1024*1024.0)) ]);
+   Result := Result + unitName;
+end;
+
 { TChrFunc }
 
 // DoEvalAsString
@@ -368,8 +391,14 @@ end;
 { TStrToIntFunc }
 
 function TStrToIntFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
+var
+   s : String;
+   e : Integer;
 begin
-   Result := StrToInt64(String(args.AsString[0]));
+   s := args.AsString[0];
+   Val(s, Result, e);
+   if e <> 0 then
+      raise EConvertError.CreateFmt(CPE_InvalidIntegerFormat, [ s ]);
 end;
 
 { TStrToIntDefFunc }
@@ -487,26 +516,26 @@ end;
 { TStrToFloatFunc }
 
 procedure TStrToFloatFunc.DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double);
+var
+   s : String;
 begin
-   {$ifdef FPC}
-   Result:=StrToFloat(UTF8Encode(args.AsString[0]));
-   {$else}
-   Result:=StrToFloat(args.AsString[0]);
-   {$endif}
+   s := args.AsString[0];
+   if not TryStrToDouble(PChar(s), Result) then
+      raise EConvertError.CreateFmt(CPE_InvalidFloatFormat, [ s ]);
 end;
 
 { TStrToFloatDefFunc }
 
 procedure TStrToFloatDefFunc.DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double);
+var
+   s : String;
 begin
-   {$ifdef FPC}
-   Result:=StrToFloatDef(UTF8Encode(args.AsString[0]), args.AsFloat[1]);
-   {$else}
-   Result:=StrToFloatDef(args.AsString[0], args.AsFloat[1]);
-   {$endif}
+   s := args.AsString[0];
+   if not TryStrToDouble(PChar(s), Result) then
+      Result := args.AsFloat[1];
 end;
 
-{ TStrToFloatDefFunc }
+{ TVarToFloatDefFunc }
 
 procedure TVarToFloatDefFunc.DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double);
 var
@@ -1218,6 +1247,13 @@ begin
    Result := StripAccents(args.AsString[0]);
 end;
 
+{ TByteSizeToStrFunc }
+
+procedure TByteSizeToStrFunc.DoEvalAsString(const args : TExprBaseListExec; var Result : String);
+begin
+   Result:=ByteSizeToString(args.AsInteger[0]);
+end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -1328,6 +1364,8 @@ initialization
    RegisterInternalStringFunction(TStripAccentsFunc, 'StripAccents', ['str', SYS_STRING], [iffStateLess], 'StripAccents');
 
    RegisterInternalStringFunction(TGetTextFunc, '_', ['str', SYS_STRING], []);
+
+   RegisterInternalStringFunction(TByteSizeToStrFunc, 'ByteSizeToStr', ['size', SYS_INTEGER], [iffStateLess]);
 
 end.
 
