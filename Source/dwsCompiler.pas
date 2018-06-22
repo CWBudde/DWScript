@@ -42,7 +42,7 @@ const
    cDefaultStackChunkSize = 4096;  // 64 kB in 32bit Delphi, each stack entry is a Variant
 
    // compiler version is date in YYYYMMDD format, dot subversion number
-   cCompilerVersion = 20171121.0;
+   cCompilerVersion = 20180623.0;
 
 type
    TdwsCompiler = class;
@@ -191,7 +191,8 @@ type
                          siFilterLong, siFilterShort,
                          siResourceLong, siResourceShort,
                          siDefine, siUndef,
-                         siIfDef, siIfNDef, siIf, siEndIf, siElse,
+                         siIfDef, siIfNDef, siElseIfDef, siElseIfNDef,
+                         siIf, siEndIf, siElse,
                          siHint, siHints, siWarning, siWarnings,
                          siError, siFatal,
                          siRegion, siEndRegion,
@@ -893,7 +894,8 @@ const
       SWI_FILTER_LONG, SWI_FILTER_SHORT,
       SWI_RESOURCE_LONG, SWI_RESOURCE_SHORT,
       SWI_DEFINE, SWI_UNDEF,
-      SWI_IFDEF, SWI_IFNDEF, SWI_IF, SWI_ENDIF, SWI_ELSE,
+      SWI_IFDEF, SWI_IFNDEF, SWI_ELSEIFDEF, SWI_ELSEIFNDEF,
+      SWI_IF, SWI_ENDIF, SWI_ELSE,
       SWI_HINT, SWI_HINTS, SWI_WARNING, SWI_WARNINGS, SWI_ERROR, SWI_FATAL,
       SWI_REGION, SWI_ENDREGION,
       SWI_CODEGEN
@@ -12013,6 +12015,46 @@ begin
          end;
 
       end;
+      siElseIfDef, siElseIfNDef : begin
+
+         if FTok.ConditionalDepth.Count=0 then
+            FMsgs.AddCompilerError(switchPos, CPE_UnbalancedConditionalDirective)
+         else begin
+            if FTok.ConditionalDepth.Peek.Conditional=tcElse then
+               FMsgs.AddCompilerStop(switchPos, CPE_UnfinishedConditionalDirective);
+
+            FTok.ConditionalDepth.Pop;
+         end;
+
+         conditionalTrue:=True;
+         case switch of
+            siElseIfDef, siElseIfNDef : begin
+               if not FTok.Test(ttNAME) then begin
+                  FMsgs.AddCompilerError(FTok.HotPos, CPE_NameExpected);
+                  // skip in attempt to recover from error
+                  SkipUntilToken(ttCRIGHT);
+               end else begin
+                  conditionalTrue:=    (FTok.ConditionalDefines.Value.IndexOf(FTok.GetToken.AsString)>=0)
+                                   xor (switch = siElseIfNDef);
+                  FTok.KillToken;
+               end;
+            end
+         end;
+
+         condInfo.ScriptPos:=switchPos;
+         if conditionalTrue then begin
+            condInfo.Conditional:=tcIf;
+            FTok.ConditionalDepth.Push(condInfo);
+         end else begin
+            if ReadUntilEndOrElseSwitch(True) then begin
+               condInfo.Conditional:=tcElse;
+               FTok.ConditionalDepth.Push(condInfo);
+            end;
+            if not FTok.HasTokens then
+               FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
+         end;
+
+      end;
       siElse : begin
          if FTok.ConditionalDepth.Count=0 then
             FMsgs.AddCompilerError(switchPos, CPE_UnbalancedConditionalDirective)
@@ -12241,6 +12283,20 @@ begin
                FTok.KillToken;
             Inc(innerDepth);
 
+         end;
+         siElseIfDef, siElseIfNDef : begin
+
+            if innerDepth=0 then begin
+               if not allowElse then
+                  FMsgs.AddCompilerStop(startPos, CPE_UnfinishedConditionalDirective);
+               Result:=True;
+
+               while FTok.HasTokens and not FTok.Test(ttCRIGHT) do
+                  FTok.KillToken;
+               Inc(innerDepth);
+
+               Break;
+            end;
          end;
       else
          while FTok.HasTokens and not FTok.Test(ttCRIGHT) do
