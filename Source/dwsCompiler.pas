@@ -568,7 +568,7 @@ type
          function ReadIf : TProgramExpr;
          function ReadInherited(isWrite : Boolean) : TProgramExpr;
          function ReadInstr : TProgramExpr;
-         function ReadUntilEndOrElseSwitch(allowElse : Boolean) : Boolean;
+         function ReadUntilEndOrElseSwitch(allowElse : Boolean) : TSwitchInstruction;
          function ReadIntfMethodDecl(intfSym : TInterfaceSymbol; funcKind : TFuncKind) : TSourceMethodSymbol;
          function ReadMethodDecl(const hotPos : TScriptPos;
                                  ownerSym : TCompositeTypeSymbol; funcKind : TFuncKind;
@@ -11852,6 +11852,37 @@ var
    includeSymbol : TIncludeSymbol;
    condInfo : TTokenizerConditionalInfo;
    filter : TdwsFilter;
+
+   procedure HandleElseIf;
+   begin
+      if not FTok.Test(ttNAME) then begin
+         FMsgs.AddCompilerError(FTok.HotPos, CPE_NameExpected);
+         // skip in attempt to recover from error
+         SkipUntilToken(ttCRIGHT);
+      end else begin
+         conditionalTrue:=    (FTok.ConditionalDefines.Value.IndexOf(FTok.GetToken.AsString)>=0)
+                          xor (switch = siIfNDef);
+         FTok.KillToken;
+      end;
+
+      condInfo.ScriptPos:=switchPos;
+      if conditionalTrue then begin
+         condInfo.Conditional:=tcIf;
+         FTok.ConditionalDepth.Push(condInfo);
+      end else begin
+         case ReadUntilEndOrElseSwitch(True) of
+            siElse: begin
+               condInfo.Conditional:=tcElse;
+               FTok.ConditionalDepth.Push(condInfo);
+            end;
+            siElseIfDef, siElseIfNDef:
+               HandleElseIf;
+         end;
+         if not FTok.HasTokens then
+            FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
+      end;
+   end;
+
 begin
    Result:=True;
    if Assigned(FOnReadInstrSwitch) then begin
@@ -12006,9 +12037,13 @@ begin
             condInfo.Conditional:=tcIf;
             FTok.ConditionalDepth.Push(condInfo);
          end else begin
-            if ReadUntilEndOrElseSwitch(True) then begin
-               condInfo.Conditional:=tcElse;
-               FTok.ConditionalDepth.Push(condInfo);
+            case ReadUntilEndOrElseSwitch(True) of
+               siElse: begin
+                  condInfo.Conditional:=tcElse;
+                  FTok.ConditionalDepth.Push(condInfo);
+               end;
+               siElseIfDef, siElseIfNDef:
+                  HandleElseIf;
             end;
             if not FTok.HasTokens then
                FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
@@ -12016,40 +12051,22 @@ begin
 
       end;
       siElseIfDef, siElseIfNDef : begin
-
          if FTok.ConditionalDepth.Count=0 then
             FMsgs.AddCompilerError(switchPos, CPE_UnbalancedConditionalDirective)
          else begin
             if FTok.ConditionalDepth.Peek.Conditional=tcElse then
                FMsgs.AddCompilerStop(switchPos, CPE_UnfinishedConditionalDirective);
 
-            FTok.ConditionalDepth.Pop;
-         end;
-
-         conditionalTrue:=True;
-         case switch of
-            siElseIfDef, siElseIfNDef : begin
-               if not FTok.Test(ttNAME) then begin
-                  FMsgs.AddCompilerError(FTok.HotPos, CPE_NameExpected);
-                  // skip in attempt to recover from error
-                  SkipUntilToken(ttCRIGHT);
-               end else begin
-                  conditionalTrue:=    (FTok.ConditionalDefines.Value.IndexOf(FTok.GetToken.AsString)>=0)
-                                   xor (switch = siElseIfNDef);
-                  FTok.KillToken;
-               end;
+            if not FTok.Test(ttNAME) then begin
+               FMsgs.AddCompilerError(FTok.HotPos, CPE_NameExpected);
+               // skip in attempt to recover from error
+               SkipUntilToken(ttCRIGHT);
             end
-         end;
+            else
+              FTok.KillToken;
 
-         condInfo.ScriptPos:=switchPos;
-         if conditionalTrue then begin
-            condInfo.Conditional:=tcIf;
-            FTok.ConditionalDepth.Push(condInfo);
-         end else begin
-            if ReadUntilEndOrElseSwitch(True) then begin
-               condInfo.Conditional:=tcElse;
-               FTok.ConditionalDepth.Push(condInfo);
-            end;
+            FTok.ConditionalDepth.Pop;
+            ReadUntilEndOrElseSwitch(False);
             if not FTok.HasTokens then
                FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
          end;
@@ -12227,7 +12244,7 @@ end;
 
 // ReadUntilEndOrElseSwitch
 //
-function TdwsCompiler.ReadUntilEndOrElseSwitch(allowElse : Boolean) : Boolean;
+function TdwsCompiler.ReadUntilEndOrElseSwitch(allowElse : Boolean) : TSwitchInstruction;
 var
    startPos : TScriptPos;
    switch : TSwitchInstruction;
@@ -12240,7 +12257,7 @@ begin
       FMsgs.AddCompilerStop(FTok.HotPos, CPE_CurlyRightExpected);
 
    innerDepth:=0;
-   Result:=False;
+   Result:=siNone;
 
    FTok.SwitchProcessor:=nil;
 
@@ -12264,15 +12281,18 @@ begin
             // tolerate junk after endif
             SkipUntilToken(ttCRIGHT);
             Dec(innerDepth);
-            if innerDepth<0 then Break;
+            if innerDepth<0 then begin
+               Result:=siEndIf;
+               Break;
+            end;
 
          end;
-         siElse : begin
+         siElse, siElseIfDef, siElseIfNDef : begin
 
             if innerDepth=0 then begin
                if not allowElse then
                   FMsgs.AddCompilerStop(startPos, CPE_UnfinishedConditionalDirective);
-               Result:=True;
+               Result:=switch;
                Break;
             end;
 
@@ -12283,20 +12303,6 @@ begin
                FTok.KillToken;
             Inc(innerDepth);
 
-         end;
-         siElseIfDef, siElseIfNDef : begin
-
-            if innerDepth=0 then begin
-               if not allowElse then
-                  FMsgs.AddCompilerStop(startPos, CPE_UnfinishedConditionalDirective);
-               Result:=True;
-
-               while FTok.HasTokens and not FTok.Test(ttCRIGHT) do
-                  FTok.KillToken;
-               Inc(innerDepth);
-
-               Break;
-            end;
          end;
       else
          while FTok.HasTokens and not FTok.Test(ttCRIGHT) do

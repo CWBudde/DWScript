@@ -1,2 +1,4 @@
 Foo
+Foo
 Bar
+FooBar
