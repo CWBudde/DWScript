@@ -568,7 +568,7 @@ type
          function ReadIf : TProgramExpr;
          function ReadInherited(isWrite : Boolean) : TProgramExpr;
          function ReadInstr : TProgramExpr;
-         function ReadUntilEndOrElseSwitch(allowElse : Boolean) : TSwitchInstruction;
+         function ReadUntilEndOrElseSwitch(allowElse, skipElse : Boolean) : TSwitchInstruction;
          function ReadIntfMethodDecl(intfSym : TInterfaceSymbol; funcKind : TFuncKind) : TSourceMethodSymbol;
          function ReadMethodDecl(const hotPos : TScriptPos;
                                  ownerSym : TCompositeTypeSymbol; funcKind : TFuncKind;
@@ -11870,7 +11870,7 @@ var
          condInfo.Conditional:=tcIf;
          FTok.ConditionalDepth.Push(condInfo);
       end else begin
-         case ReadUntilEndOrElseSwitch(True) of
+         case ReadUntilEndOrElseSwitch(True, False) of
             siElse: begin
                condInfo.Conditional:=tcElse;
                FTok.ConditionalDepth.Push(condInfo);
@@ -12037,7 +12037,7 @@ begin
             condInfo.Conditional:=tcIf;
             FTok.ConditionalDepth.Push(condInfo);
          end else begin
-            case ReadUntilEndOrElseSwitch(True) of
+            case ReadUntilEndOrElseSwitch(True, False) of
                siElse: begin
                   condInfo.Conditional:=tcElse;
                   FTok.ConditionalDepth.Push(condInfo);
@@ -12066,7 +12066,7 @@ begin
               FTok.KillToken;
 
             FTok.ConditionalDepth.Pop;
-            ReadUntilEndOrElseSwitch(False);
+            ReadUntilEndOrElseSwitch(False, True);
             if not FTok.HasTokens then
                FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
          end;
@@ -12080,7 +12080,7 @@ begin
                FMsgs.AddCompilerStop(switchPos, CPE_UnfinishedConditionalDirective);
 
             FTok.ConditionalDepth.Pop;
-            ReadUntilEndOrElseSwitch(False);
+            ReadUntilEndOrElseSwitch(False, False);
             if not FTok.HasTokens then
                FMsgs.AddCompilerStop(switchPos, CPE_UnbalancedConditionalDirective);
          end;
@@ -12244,7 +12244,7 @@ end;
 
 // ReadUntilEndOrElseSwitch
 //
-function TdwsCompiler.ReadUntilEndOrElseSwitch(allowElse : Boolean) : TSwitchInstruction;
+function TdwsCompiler.ReadUntilEndOrElseSwitch(allowElse, skipElse : Boolean) : TSwitchInstruction;
 var
    startPos : TScriptPos;
    switch : TSwitchInstruction;
@@ -12290,10 +12290,22 @@ begin
          siElse, siElseIfDef, siElseIfNDef : begin
 
             if innerDepth=0 then begin
-               if not allowElse then
-                  FMsgs.AddCompilerStop(startPos, CPE_UnfinishedConditionalDirective);
-               Result:=switch;
-               Break;
+               if not skipElse then begin
+                  if not allowElse then
+                     FMsgs.AddCompilerStop(startPos, CPE_UnfinishedConditionalDirective);
+                  Result:=switch;
+                  Break;
+               end else
+               if switch in [siElseIfDef, siElseIfNDef] then begin
+                  if not FTok.Test(ttNAME) then begin
+                     FMsgs.AddCompilerError(FTok.HotPos, CPE_NameExpected);
+                     // skip in attempt to recover from error
+                     SkipUntilToken(ttCRIGHT);
+                  end
+                  else
+                     FTok.KillToken;
+               end;
+
             end;
 
          end;

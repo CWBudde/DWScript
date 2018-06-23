@@ -34,3 +34,13 @@
 {$ELSEIFDEF FooBar}
    PrintLn('FooBar');
 {$ENDIF}
+
+{$UNDEF FooBar}
+{$DEFINE Foo}
+{$IFDEF Foo}
+   PrintLn('Foo');
+{$ELSEIFDEF Bar}
+   PrintLn('Bar');
+{$ELSEIFDEF FooBar}
+   PrintLn('FooBar');
+{$ENDIF}
