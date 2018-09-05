@@ -366,7 +366,7 @@ begin
       Result := Format('%.2f M', [ floatSize*(1/(1024*1024)) ])
    else if Abs(floatSize) < 1024*1024*1024*1024.0 then
       Result := Format('%.2f G', [ floatSize*(1/(1024*1024*1024)) ])
-   else Result := Format('%.3f T', [ floatSize*(1/(1024*1024*1024*1024.0)) ]);
+   else Result := Format('%.2f T', [ floatSize*(1/(1024*1024*1024*1024.0)) ]);
    Result := Result + unitName;
 end;
 
@@ -470,20 +470,7 @@ var
    s : String;
 begin
    args.EvalAsString(0, s);
-
-   case Length(s) of
-      1 : begin
-         case s[1] of
-            '1', 'T', 't', 'Y', 'y' : Result:=True;
-         else
-            Result:=False;
-         end;
-      end;
-      3 : Result:=UnicodeSameText(s, 'Yes');
-      4 : Result:=UnicodeSameText(s, 'True');
-   else
-      Result:=False;
-   end;
+   Result := StringToBoolean(s);
 end;
 
 { TFloatToStrFunc }
@@ -543,7 +530,9 @@ var
 begin
    args.EvalAsVariant(0, v);
    try
-      Result := VariantToFloat(v);
+      if TVarData(v).VType = varEmpty then
+         Result := args.AsFloat[1]
+      else Result := VariantToFloat(v);
    except
       Result := args.AsFloat[1];
    end;
@@ -1104,6 +1093,19 @@ end;
 { TFormatFunc }
 
 procedure TFormatFunc.DoEvalAsString(const args : TExprBaseListExec; var Result : String);
+
+   function PrepareVarRecsFromByRefParam(expr : TByRefParamExpr) : TVarRecArrayContainer;
+   var
+      i : Integer;
+      dc : IDataContext;
+   begin
+      dc := expr.DataPtr[args.Exec];
+      Result := TVarRecArrayContainer.Create;
+      for i := 0 to dc.DataLength-1 do
+         Result.Add(dc.AsVariant[i]);
+      Result.Initialize;
+   end;
+
 var
    expr : TExprBase;
    varRecs : TVarRecArrayContainer;
@@ -1113,8 +1115,8 @@ begin
    if expr.ClassType=TArrayConstantExpr then
       varRecs:=TArrayConstantExpr(expr).EvalAsVarRecArray(args.Exec)
    else if expr is TByRefParamExpr then begin
-      if TByRefParamExpr(expr).Typ is TOpenArraySymbol then
-         varRecs:=TVarRecArrayContainer.Create(TByRefParamExpr(expr).DataPtr[args.Exec].AsPData^)
+      if TByRefParamExpr(expr).Typ.ClassType=TOpenArraySymbol then
+         varRecs := PrepareVarRecsFromByRefParam(TByRefParamExpr(expr))
    end;
    // current implementation, limitations may be relaxed later
    if varRecs=nil then

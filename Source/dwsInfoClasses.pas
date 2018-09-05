@@ -296,8 +296,8 @@ type
          function GetSize: Integer;
       public
          constructor Create(Caller: TdwsProgramExecution; Sym: TSymbol);
-         procedure Read(exec : TdwsExecution; const Data: TData); virtual;
-         procedure Write(exec : TdwsExecution; const Data: TData); virtual;
+         procedure Read(exec : TdwsExecution; const data : TData); virtual; abstract;
+         procedure Write(exec : TdwsExecution; const data : TData); virtual; abstract;
    end;
 
    TExternalVarDataMaster = class(TDataMaster)
@@ -838,7 +838,7 @@ begin
       raise Exception.CreateFmt(RTE_NoMemberOfClass, [s, FTypeSym.Caption]);
 
    if member is TFieldSymbol then begin
-      FProgramInfo.Execution.DataContext_Create(FScriptObj.AsData, TFieldSymbol(member).Offset, locData);
+      FProgramInfo.Execution.DataContext_CreateOffset(FScriptObj, TFieldSymbol(member).Offset, locData);
       SetChild(Result, FProgramInfo, member.Typ, locData);
    end else if member is TPropertySymbol then
       Result:=TInfoProperty.Create(FProgramInfo, member.Typ, FProgramInfo.Execution.DataContext_Nil,
@@ -980,7 +980,7 @@ begin
                   try
                      // Result-space is just behind the temporary-params
                      // (Calculated relative to the basepointer of the caller!)
-                     funcExpr.SetResultAddr(FExec.CurrentProg, FExec, FExec.Stack.StackPointer-funcExpr.Typ.Size);
+                     funcExpr.SetResultAddr(FExec.Stack.StackPointer-funcExpr.Typ.Size);
 
                      // Execute function.
                      // Result is stored on the stack
@@ -1057,7 +1057,7 @@ begin
             FExec.Stack.Push(funcExpr.Typ.Size);
             try
                // Result-space is just behind the temporary-params
-               funcExpr.SetResultAddr(FExec.CurrentProg, FExec, FExec.Stack.StackPointer-FParamSize);
+               funcExpr.SetResultAddr(FExec.Stack.StackPointer-FParamSize);
 
                // Execute function.
                // Result is stored on the stack
@@ -1370,7 +1370,7 @@ begin
       end;
    end;
 
-   FProgramInfo.Execution.DataContext_Create(dynArray.AsData, elemOff, locData);
+   FProgramInfo.Execution.DataContext_CreateOffset(dynArray, elemOff, locData);
    SetChild(Result, FProgramInfo, elemTyp, locData, FDataMaster);
 end;
 
@@ -1398,7 +1398,7 @@ end;
 //
 function TInfoDynamicArray.GetData : TData;
 begin
-   Result:=SelfDynArray.AsData;
+   Result := SelfDynArray.AsPData^;
 end;
 
 // SetData
@@ -1629,9 +1629,8 @@ begin
     AssignIndices(func, FPropSym.ReadSym.AsFuncSymbol.Params);
     result := func.Call.Data;
   end
-  else if FPropSym.ReadSym is TFieldSymbol then
-  begin
-    FProgramInfo.Execution.DataContext_Create(FScriptObj.AsData, TFieldSymbol(FPropSym.ReadSym).Offset, locData);
+  else if FPropSym.ReadSym is TFieldSymbol then begin
+    FProgramInfo.Execution.DataContext_CreateOffset(FScriptObj, TFieldSymbol(FPropSym.ReadSym).Offset, locData);
     SetChild(func, FProgramInfo,FPropSym.ReadSym.Typ, locData);
     result := func.Data;
 {
@@ -1666,7 +1665,7 @@ begin
   end
   else if FPropSym.WriteSym is TFieldSymbol then
   begin
-    FProgramInfo.Execution.DataContext_Create(FScriptObj.AsData, TFieldSymbol(FPropSym.WriteSym).Offset, locData);
+    FProgramInfo.Execution.DataContext_CreateOffset(FScriptObj, TFieldSymbol(FPropSym.WriteSym).Offset, locData);
     SetChild(func, FProgramInfo,FPropSym.WriteSym.Typ, locData);
     func.Data := Value;
   end
@@ -1762,14 +1761,6 @@ begin
   Result := FSym.Size;
 end;
 
-procedure TDataMaster.Read(exec : TdwsExecution; const Data: TData);
-begin
-end;
-
-procedure TDataMaster.Write(exec : TdwsExecution; const Data: TData);
-begin
-end;
-
 { TExternalVarDataMaster }
 
 // Read
@@ -1778,17 +1769,15 @@ procedure TExternalVarDataMaster.Read(exec : TdwsExecution; const Data: TData);
 var
    resultDataPtr : IDataContext;
    funcExpr : TFuncExprBase;
-   prog : TdwsProgram;
 begin
    // Read an external var
    if TExternalVarSymbol(FSym).ReadFunc<>nil then begin
       funcExpr := TFuncSimpleExpr.Create((exec as TdwsProgramExecution).CompilerContext,
                                          cNullPos, TExternalVarSymbol(FSym).ReadFunc);
       try
-         prog:=(exec as TdwsProgramExecution).Prog;
          funcExpr.Initialize((exec as TdwsProgramExecution).CompilerContext);
          if funcExpr.Typ.Size > 1 then begin // !! > 1 untested !!
-            funcExpr.SetResultAddr(prog, exec, FCaller.Stack.FrameSize);
+            funcExpr.SetResultAddr(FCaller.Stack.FrameSize);
             // Allocate space on the stack to store the Result value
             FCaller.Stack.Push(funcExpr.Typ.Size);
             try

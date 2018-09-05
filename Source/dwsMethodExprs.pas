@@ -27,7 +27,7 @@ uses
    Variants,
    dwsErrors, dwsStrings, dwsUtils, dwsScriptSource, dwsCompilerContext,
    dwsSymbols, dwsDataContext, dwsStack, dwsFunctions,
-   dwsExprs, dwsExprList, dwsMagicExprs;
+   dwsExprs, dwsExprList;
 
 type
 
@@ -136,13 +136,13 @@ type
    end;
 
    // Class methods (non virtual)
-   TClassMethodStaticExpr = class(TMethodStaticExpr)
+   TClassMethodStaticExpr = class (TMethodStaticExpr)
       protected
          function PreCall(exec : TdwsExecution) : TFuncSymbol; override;
    end;
 
    // Call to a virtual class method
-   TClassMethodVirtualExpr = class(TClassMethodStaticExpr)
+   TClassMethodVirtualExpr = class sealed (TClassMethodStaticExpr)
       protected
          function FindVirtualMethod(exec : TdwsExecution) : TMethodSymbol;
          function PreCall(exec : TdwsExecution) : TFuncSymbol; override;
@@ -357,7 +357,9 @@ constructor TMethodExpr.Create(context : TdwsCompilerContext; const scriptPos: T
 begin
    inherited Create(context, scriptPos, Func);
    FBaseExpr:=BaseExpr;
-   FSelfAddr:=Func.SelfSym.StackAddr;
+   if Func.SelfSym <> nil then
+      FSelfAddr := Func.SelfSym.StackAddr
+   else FSelfAddr := MaxInt;
 end;
 
 // Destroy

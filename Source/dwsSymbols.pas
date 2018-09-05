@@ -59,6 +59,7 @@ type
    EScriptError = class;
    EScriptErrorClass = class of EScriptError;
    TFuncSymbol = class;
+   TdwsBaseSymbolsContext = class;
 
    TdwsExprLocation = record
       Expr : TExprBase;
@@ -84,6 +85,11 @@ type
 
    TProgramState = (psUndefined, psReadyToRun, psRunning, psRunningStopped, psTerminated);
 
+   // Attached and owned by its program execution
+   IdwsEnvironment = interface (IGetSelf)
+      ['{CCAA438D-76F4-49C2-A3A2-82445BC2976A}']
+   end;
+
    IdwsExecution = interface (dwsUtils.IGetSelf)
       ['{8F2D1D7E-9954-4391-B919-86EF1EE21C8C}']
       function GetMsgs : TdwsRuntimeMessageList;
@@ -102,6 +108,9 @@ type
       procedure SuspendDebug;
       procedure ResumeDebug;
 
+      function GetEnvironment : IdwsEnvironment;
+      procedure SetEnvironment(const env : IdwsEnvironment);
+
       property ProgramState : TProgramState read GetProgramState;
       property Sleeping : Boolean read GetSleeping;
       property Stack : TStack read GetStack;
@@ -109,6 +118,7 @@ type
       property Debugger : IDebugger read GetDebugger write SetDebugger;
       property ExecutionObject : TdwsExecution read GetExecutionObject;
       property UserObject : TObject read GetUserObject write SetUserObject;
+      property Environment : IdwsEnvironment read GetEnvironment write SetEnvironment;
    end;
 
    ISpecializationContext = interface (IGetSelf)
@@ -139,6 +149,7 @@ type
       function UnitSymbol : TSymbol;
       function Msgs : TdwsCompileMessageList;
       function Optimize : Boolean;
+      function BaseSymbols : TdwsBaseSymbolsContext;
 
       procedure EnterComposite(sym : TCompositeTypeSymbol);
       procedure LeaveComposite;
@@ -220,6 +231,9 @@ type
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); virtual; abstract;
          procedure EvalAsScriptAssociativeArray(exec : TdwsExecution; var result : IScriptAssociativeArray); virtual; abstract;
          procedure EvalNoResult(exec : TdwsExecution); virtual;
+
+         procedure EvalAsSafeScriptObj(exec : TdwsExecution; var result : IScriptObj); overload;
+         function  EvalAsSafeScriptObj(exec : TdwsExecution) : IScriptObj; overload; inline;
 
          procedure AssignValue(exec : TdwsExecution; const value : Variant); virtual; abstract;
          procedure AssignValueAsInteger(exec : TdwsExecution; const value : Int64); virtual; abstract;
@@ -661,7 +675,7 @@ type
 
       public
          procedure InitData(const data : TData; offset : Integer); overload; virtual;
-         procedure InitData(const data : IDataContext); overload; inline;
+         procedure InitDataContext(const data : IDataContext); overload; inline;
          class function DynamicInitialization : Boolean; virtual;
 
          function IsType : Boolean; override;
@@ -1853,6 +1867,29 @@ type
       TypAnyType : TAnyTypeSymbol;
    end;
 
+   TdwsBaseSymbolsContext = class
+      private
+         FBaseTypes : TdwsBaseSymbolTypes;
+
+      protected
+         procedure SetBaseTypes(const bt : TdwsBaseSymbolTypes);
+
+      public
+         function FindType(const typName : String) : TTypeSymbol; virtual; abstract;
+
+         property TypBoolean: TBaseBooleanSymbol read FBaseTypes.TypBoolean;
+         property TypFloat: TBaseFloatSymbol read FBaseTypes.TypFloat;
+         property TypInteger: TBaseIntegerSymbol read FBaseTypes.TypInteger;
+         property TypNil: TNilSymbol read FBaseTypes.TypNil;
+         property TypObject: TClassSymbol read FBaseTypes.TypObject;
+         property TypTObject: TClassSymbol read FBaseTypes.TypTObject;
+         property TypString: TBaseStringSymbol read FBaseTypes.TypString;
+         property TypVariant: TBaseVariantSymbol read FBaseTypes.TypVariant;
+         property TypException: TClassSymbol read FBaseTypes.TypException;
+         property TypInterface : TInterfaceSymbol read FBaseTypes.TypInterface;
+         property TypAnyType: TAnyTypeSymbol read FBaseTypes.TypAnyType;
+   end;
+
    // TdwsExecution
    //
    TdwsExecution = class abstract (TInterfacedSelfObject, IdwsExecution)
@@ -1870,8 +1907,13 @@ type
          FSleepTime : Integer;
          FSleeping : Boolean;
 
+         FEnvironment : IdwsEnvironment;
+
       protected
          FProgramState : TProgramState;  // here to reduce its offset
+
+         function GetEnvironment : IdwsEnvironment;
+         procedure SetEnvironment(const val : IdwsEnvironment);
 
       private
          FExternalObject : TObject;
@@ -1937,6 +1979,7 @@ type
          procedure DataContext_CreateValue(const value : Variant; var Result : IDataContext); inline;
          procedure DataContext_CreateBase(addr : Integer; var Result : IDataContext); inline;
          procedure DataContext_CreateLevel(level, addr : Integer; var Result : IDataContext); inline;
+         procedure DataContext_CreateOffset(const data : IDataContext; offset : Integer; var Result : IDataContext); inline;
          function  DataContext_Nil : IDataContext; inline;
 
          function  GetStackPData : PData;
@@ -1978,6 +2021,9 @@ type
 
          // user object, to attach to an execution
          property UserObject : TObject read GetUserObject write SetUserObject;
+
+         // user environment
+         property Environment : IdwsEnvironment read FEnvironment write FEnvironment;
    end;
 
    // IScriptObj
@@ -2242,10 +2288,11 @@ var
    exc : Exception;
    e : EScriptError;
 begin
-   Assert(ExceptObject is Exception);
-   exc:=Exception(ExceptObject);
-   e:=EScriptError.Create(exc.Message);
-   e.RawClassName:=exc.ClassName;
+   if (ExceptObject is EScriptError) or (ExceptObject is EScriptException) then
+      raise AcquireExceptionObject;
+   exc := ExceptObject as Exception;
+   e := EScriptError.Create(exc.Message);
+   e.RawClassName := exc.ClassName;
    RaiseScriptError(exec, e);
 end;
 
@@ -2298,6 +2345,24 @@ end;
 function TExprBase.FuncSymQualifiedName : String;
 begin
    Result:='';
+end;
+
+// EvalAsSafeScriptObj
+//
+procedure TExprBase.EvalAsSafeScriptObj(exec : TdwsExecution; var result : IScriptObj);
+begin
+   EvalAsScriptObj(exec, result);
+   if result = nil then
+      RaiseObjectNotInstantiated(exec)
+   else if result.Destroyed then
+      RaiseObjectAlreadyDestroyed(exec);
+end;
+
+// EvalAsSafeScriptObj
+//
+function TExprBase.EvalAsSafeScriptObj(exec : TdwsExecution) : IScriptObj;
+begin
+   EvalAsSafeScriptObj(exec, Result);
 end;
 
 // ------------------
@@ -3879,7 +3944,7 @@ begin
       context.RegisterSpecialization(Params[i], specializedParam);
    end;
 
-   // specialize reamining parameters
+   // specialize remaining parameters
    for i := destination.Params.Count to Params.Count-1 do begin
       param := Params[i];
       specializedParam := param.Specialize(context);
@@ -4123,7 +4188,7 @@ begin
    GenerateParams(Table, MethParams);
 
    // Check if name is already used
-   if overloaded then begin
+   if overloaded or (maOverride in Attributes) then begin
       enumerator:=TPerfectMatchEnumerator.Create;
       try
          enumerator.FuncSym:=Self;
@@ -4151,7 +4216,7 @@ begin
    end;
 
    if overloaded then
-      IsOverloaded:=True;
+      IsOverloaded := True;
    if Assigned(meth) then
       SetOverlap(TMethodSymbol(meth));
 
@@ -6395,7 +6460,8 @@ begin
             Result := TOperatorSymbol(sym);
             if     (Result.Token = ttIMPLICIT)
                and (Result.Typ = toType)
-               and (Result.Params[0] = fromType) then Exit;
+               and (Result.Params[0] = fromType)
+               and (Result.UsesSym <> nil) then Exit;
          end;
       end;
    end;
@@ -7608,9 +7674,9 @@ begin
    Assert(False);
 end;
 
-// InitData
+// InitDataContext
 //
-procedure TTypeSymbol.InitData(const data : IDataContext);
+procedure TTypeSymbol.InitDataContext(const data : IDataContext);
 begin
    InitData(data.AsPData^, data.Addr);
 end;
@@ -7679,6 +7745,17 @@ begin
    inherited Create(msgString);
    FExceptObj:=anExceptionObj;
    FScriptPos:=aScriptPos;
+end;
+
+// ------------------
+// ------------------ TdwsBaseSymbolsContext ------------------
+// ------------------
+
+// SetBaseTypes
+//
+procedure TdwsBaseSymbolsContext.SetBaseTypes(const bt : TdwsBaseSymbolTypes);
+begin
+   FBaseTypes := bt;
 end;
 
 // ------------------
@@ -7995,6 +8072,13 @@ begin
    FStack.InitDataPtrLevel(Result, level, addr);
 end;
 
+// DataContext_CreateOffset
+//
+procedure TdwsExecution.DataContext_CreateOffset(const data : IDataContext; offset : Integer; var Result : IDataContext);
+begin
+   Result := FStack.CreateDataContext(data.AsPData^, offset);
+end;
+
 // DataContext_Nil
 //
 function TdwsExecution.DataContext_Nil : IDataContext;
@@ -8039,6 +8123,20 @@ begin
          Dec(FDebugSuspended)
       else Inc(FDebugSuspended);
    end;
+end;
+
+// GetEnvironment
+//
+function TdwsExecution.GetEnvironment : IdwsEnvironment;
+begin
+   Result := FEnvironment;
+end;
+
+// SetEnvironment
+//
+procedure TdwsExecution.SetEnvironment(const val : IdwsEnvironment);
+begin
+   FEnvironment := val;
 end;
 
 // ------------------

@@ -183,10 +183,9 @@ type
 
          procedure EvalNoResult(exec : TdwsExecution); override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
-         function EvalAsTData(exec : TdwsExecution) : TData; overload; inline;
-         procedure EvalAsTData(exec : TdwsExecution; var result : TData); overload;
+         procedure EvalAsTData(exec : TdwsExecution; var result : TData);
          procedure EvalToTData(exec : TdwsExecution; var result : TData; offset : Integer);
-         function EvalAsVarRecArray(exec : TdwsExecution) : TVarRecArrayContainer;
+         function  EvalAsVarRecArray(exec : TdwsExecution) : TVarRecArrayContainer;
 
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
          function IsWritable : Boolean; override;
@@ -650,8 +649,7 @@ end;
 //
 procedure TArrayConstantExpr.Prepare(context : TdwsCompilerContext; elementTyp : TTypeSymbol);
 var
-   x : Integer;
-   elemExpr : TTypedExpr;
+   elemExpr : TRefCountedObject;
 begin
    if (elementTyp<>nil) and (FTyp.Typ<>elementTyp) then begin
       if  (elementTyp.UnAliasedTypeIs(TBaseFloatSymbol) and FTyp.Typ.UnAliasedTypeIs(TBaseIntegerSymbol)) then begin
@@ -661,11 +659,9 @@ begin
       end;
    end;
 
-   for x := 0 to FElementExprs.Count - 1 do begin
-      elemExpr:=TTypedExpr(FElementExprs.List[x]);
-      if elemExpr is TArrayConstantExpr then
+   for elemExpr in FElementExprs do
+      if elemExpr.ClassType = TArrayConstantExpr then
          TArrayConstantExpr(elemExpr).Prepare(context, FTyp.Typ);
-   end;
 end;
 
 // GetDataPtr
@@ -739,7 +735,7 @@ procedure TArrayConstantExpr.EvalNoResult(exec : TdwsExecution);
          addr:=0;
          for x:=0 to FElementExprs.Count-1 do begin
             dataExpr:=FElementExprs.List[x] as TDataExpr;
-            dataExpr.DataPtr[exec].CopyData(FArrayData.AsPData^, addr, elemSize);
+            FArrayData.WriteData(addr, dataExpr.DataPtr[exec], elemSize);
             Inc(addr, elemSize);
          end;
       end;
@@ -764,13 +760,6 @@ end;
 
 // EvalAsTData
 //
-function TArrayConstantExpr.EvalAsTData(exec : TdwsExecution) : TData;
-begin
-   EvalAsTData(exec, Result);
-end;
-
-// EvalAsTData
-//
 procedure TArrayConstantExpr.EvalAsTData(exec : TdwsExecution; var result : TData);
 begin
    SetLength(result, Size);
@@ -782,18 +771,20 @@ end;
 //
 procedure TArrayConstantExpr.EvalToTData(exec : TdwsExecution; var result : TData; offset : Integer);
 var
-   i, p : Integer;
-   expr : TTypedExpr;
+   p, s : Integer;
+   expr : TRefCountedObject;
 begin
-   p:=offset;
-   for i:=0 to FElementExprs.Count-1 do begin
-      expr:=TTypedExpr(FElementExprs.List[i]);
+   p := offset;
+   for expr in FElementExprs do begin
+      s := TTypedExpr(expr).Typ.Size;
       if expr.ClassType=TArrayConstantExpr then
          TArrayConstantExpr(expr).EvalToTData(exec, result, p)
       else if expr is TConstExpr then
-         DWSCopyData(TConstExpr(expr).Data, 0, result, p, expr.Typ.Size)
-      else expr.EvalAsVariant(exec, result[p]);
-      Inc(p, expr.Typ.Size);
+         DWSCopyData(TConstExpr(expr).Data, 0, result, p, s)
+      else if s = 1 then
+         TTypedExpr(expr).EvalAsVariant(exec, result[p])
+      else (expr as TDataExpr).DataPtr[exec].CopyData(result, p, s);
+      Inc(p, s);
    end;
 end;
 
@@ -801,14 +792,12 @@ end;
 //
 function TArrayConstantExpr.EvalAsVarRecArray(exec : TdwsExecution) : TVarRecArrayContainer;
 var
-   i : Integer;
-   expr : TTypedExpr;
+   element : TRefCountedObject;
    buf : Variant;
 begin
-   Result:=TVarRecArrayContainer.Create;
-   for i:=0 to FElementExprs.Count-1 do begin
-      expr:=TTypedExpr(FElementExprs.List[i]);
-      expr.EvalAsVariant(exec, buf);
+   Result := TVarRecArrayContainer.Create;
+   for element in FElementExprs do begin
+      TTypedExpr(element).EvalAsVariant(exec, buf);
       Result.Add(buf);
    end;
    Result.Initialize;
@@ -832,12 +821,12 @@ end;
 //
 function TArrayConstantExpr.GetIsConstant : Boolean;
 var
-   i : Integer;
+   elem : TRefCountedObject;
 begin
-   for i:=0 to FElementExprs.Count-1 do
-      if not TTypedExpr(FElementExprs.List[i]).IsConstant then
+   for elem in FElementExprs do
+      if not TTypedExpr(elem).IsConstant then
          Exit(False);
-   Result:=True;
+   Result := True;
 end;
 
 // IsWritable

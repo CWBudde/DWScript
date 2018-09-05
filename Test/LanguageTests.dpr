@@ -1,6 +1,6 @@
 program LanguageTests;
 
-{$SetPEFlags $0001}
+{$SetPEFlags $0020}
 
 {$IFNDEF VER200}
 {.$WEAKLINKRTTI ON}
@@ -14,7 +14,9 @@ uses
   Windows,
   TestFrameWork,
   GUITestRunner,
-  SysUtils, Math,
+  TextTestRunner,
+  SysUtils,
+  Math,
   dwsXPlatform,
   dwsMathComplexFunctions in '..\Source\dwsMathComplexFunctions.pas',
   dwsMath3DFunctions in '..\Source\dwsMath3DFunctions.pas',
@@ -83,7 +85,9 @@ uses
   dwsSHA512 in '..\Libraries\CryptoLib\dwsSHA512.pas',
   dwsXXHash in '..\Source\dwsXXHash.pas',
   dwsArrayElementContext in '..\Source\dwsArrayElementContext.pas',
-  dwsJPEGEncoderOptions in '..\Libraries\GraphicsLib\dwsJPEGEncoderOptions.pas';
+  dwsJPEGEncoderOptions in '..\Libraries\GraphicsLib\dwsJPEGEncoderOptions.pas',
+  UdwsWebLibModuleTest in 'UdwsWebLibModuleTest.pas',
+  BeaEngineDelphi in '..\Tools\BeaEngine\BeaEngineDelphi.pas';
 
 {$R *.res}
 
@@ -105,6 +109,9 @@ begin
    Application.Initialize;
    Application.UpdateFormatSettings := False;
    SetDecimalSeparator('.');
-   GUITestRunner.RunRegisteredTests;
+   if ParamStr(1)='/text' then begin
+      AllocConsole;
+      TextTestRunner.RunRegisteredTests
+   end else GUITestRunner.RunRegisteredTests;
 end.
 

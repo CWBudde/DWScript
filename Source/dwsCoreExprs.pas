@@ -744,25 +744,6 @@ type
          property LengthExpr : TTypedExpr read FLengthExpr;
    end;
 
-   // Swap two elements of a dynamic array
-   TArraySwapExpr = class(TArrayPseudoMethodExpr)
-      private
-         FIndex1Expr : TTypedExpr;
-         FIndex2Expr : TTypedExpr;
-
-      protected
-         function GetSubExpr(i : Integer) : TExprBase; override;
-         function GetSubExprCount : Integer; override;
-
-      public
-         constructor Create(const scriptPos: TScriptPos; aBase, aIndex1, aIndex2 : TTypedExpr);
-         destructor Destroy; override;
-         procedure EvalNoResult(exec : TdwsExecution); override;
-
-         property Index1Expr : TTypedExpr read FIndex1Expr;
-         property Index2Expr : TTypedExpr read FIndex2Expr;
-   end;
-
    // TypedExpr for dynamic array
    TArrayTypedExpr = class(TTypedExpr)
       private
@@ -786,6 +767,28 @@ type
                             aBaseExpr : TTypedExpr);
 
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+         procedure EvalNoResult(exec : TdwsExecution); override;
+   end;
+
+   // Swap two elements of a dynamic array
+   TArraySwapExpr = class(TArrayTypedFluentExpr)
+      private
+         FIndex1Expr : TTypedExpr;
+         FIndex2Expr : TTypedExpr;
+
+      protected
+         function GetSubExpr(i : Integer) : TExprBase; override;
+         function GetSubExprCount : Integer; override;
+
+      public
+         constructor Create(context : TdwsCompilerContext; const scriptPos: TScriptPos;
+                            aBase, aIndex1, aIndex2 : TTypedExpr);
+         destructor Destroy; override;
+
+         procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
+
+         property Index1Expr : TTypedExpr read FIndex1Expr;
+         property Index2Expr : TTypedExpr read FIndex2Expr;
    end;
 
    // Sort a dynamic array
@@ -852,9 +855,9 @@ type
    end;
 
    // Reverse a dynamic array
-   TArrayReverseExpr = class(TArrayPseudoMethodExpr)
+   TArrayReverseExpr = class(TArrayTypedFluentExpr)
       public
-         procedure EvalNoResult(exec : TdwsExecution); override;
+         procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
    end;
 
    // Add an item to a dynamic array
@@ -963,19 +966,36 @@ type
          property CountExpr : TTypedExpr read FCountExpr;
    end;
 
-   TArrayIndexOfMethod = function (exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer of object;
-
    // Find element in a dynamic array (shallow comparison)
    TArrayIndexOfExpr = class(TArrayTypedExpr)
       private
          FItemExpr : TTypedExpr;
          FFromIndexExpr : TTypedExpr;
-         FMethod : TArrayIndexOfMethod;
 
       protected
          function GetSubExpr(i : Integer) : TExprBase; override;
          function GetSubExprCount : Integer; override;
 
+      public
+         constructor Create(context : TdwsCompilerContext; const scriptPos : TScriptPos;
+                            aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr); reintroduce; virtual;
+         destructor Destroy; override;
+
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+
+         property ItemExpr : TTypedExpr read FItemExpr;
+         property FromIndexExpr : TTypedExpr read FFromIndexExpr;
+   end;
+
+   TArrayIndexOfExprClass = class of TArrayIndexOfExpr;
+
+   TDynamicArrayIndexOfMethod = function (exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer of object;
+
+   TDynamicArrayIndexOfExpr = class(TArrayIndexOfExpr)
+      private
+         FMethod : TDynamicArrayIndexOfMethod;
+
+      protected
          function DoEvalValue(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
          function DoEvalString(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
          function DoEvalInteger(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
@@ -984,18 +1004,23 @@ type
 
       public
          constructor Create(context : TdwsCompilerContext; const scriptPos : TScriptPos;
-                            aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr);
-         destructor Destroy; override;
+                            aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr); override;
 
-         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+         function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
+   end;
+
+   TStaticArrayIndexOfExpr = class(TArrayIndexOfExpr)
+      private
+         FForceZeroBased : Boolean;
+
+      public
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
 
-         property ItemExpr : TTypedExpr read FItemExpr;
-         property FromIndexExpr : TTypedExpr read FFromIndexExpr;
+         property ForceZeroBased : Boolean read FForceZeroBased write FForceZeroBased;
    end;
 
    // Remove an element in a dynamic array (shallow comparison)
-   TArrayRemoveExpr = class(TArrayIndexOfExpr)
+   TArrayRemoveExpr = class(TDynamicArrayIndexOfExpr)
       public
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
    end;
@@ -1092,7 +1117,7 @@ type
 
    TAssociativeArrayKeysExpr = class (TUnaryOpExpr)
       public
-         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
+         constructor Create(context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
 
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override; final;
          procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
@@ -1676,6 +1701,11 @@ type
      procedure EvalNoResult(exec : TdwsExecution); override;
    end;
 
+   // (int var) += (const inst)
+   TIncIntVarWithConstExpr = class(TIncIntVarExpr)
+     procedure EvalNoResult(exec : TdwsExecution); override;
+   end;
+
    // Abs(v) (int)
    TAbsIntExpr = class(TUnaryOpIntExpr)
       function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
@@ -1711,7 +1741,7 @@ type
          function EvalElement(exec : TdwsExecution) : TElementSymbol;
 
       public
-         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
+         constructor Create(context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos; expr : TTypedExpr); override;
          procedure EvalAsString(exec : TdwsExecution; var result : String); override;
    end;
 
@@ -1806,7 +1836,7 @@ type
    end;
 
    // value := if FCond then FTrue else FFalse
-   TIfThenElseValueExpr = class(TTypedExpr)
+   TIfThenElseValueExpr = class sealed (TDataExpr)
       private
          FScriptPos : TScriptPos;
          FCondExpr : TTypedExpr;
@@ -1826,7 +1856,14 @@ type
          destructor Destroy; override;
 
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+         function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
+         function  EvalAsFloat(exec : TdwsExecution) : Double; override;
+         procedure EvalAsString(exec : TdwsExecution; var result : String); override;
+         procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
+
+         function ScriptPos : TScriptPos; override;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
+         function SpecializeDataExpr(const context : ISpecializationContext) : TDataExpr; override;
 
          property CondExpr : TTypedExpr read FCondExpr write FCondExpr;
          property TrueExpr : TTypedExpr read FTrueExpr write FTrueExpr;
@@ -1836,7 +1873,6 @@ type
    // Part of a case statement
    TCaseCondition = class (TRefCountedObject)
       private
-         FOwnsTrueExpr : Boolean;
          FTrueExpr : TProgramExpr;
          FScriptPos : TScriptPos;
 
@@ -1860,7 +1896,6 @@ type
          property ScriptPos : TScriptPos read FScriptPos;
 
          property TrueExpr : TProgramExpr read FTrueExpr write FTrueExpr;
-         property OwnsTrueExpr : Boolean read FOwnsTrueExpr write FOwnsTrueExpr;
    end;
 
    TCaseConditionClass = class of TCaseCondition;
@@ -2409,7 +2444,7 @@ implementation
 
 uses
    dwsStringFunctions, dwsExternalSymbols, dwsSpecializationContext,
-   dwsArrayElementContext;
+   dwsArrayElementContext, dwsCompilerUtils;
 
 type
    // this needs to be in a helper (or more precisely implemented at the top of this unit)
@@ -3216,6 +3251,15 @@ begin
    Result := dyn;
 end;
 
+// EvalNoResult
+//
+procedure TArrayTypedFluentExpr.EvalNoResult(exec : TdwsExecution);
+var
+   dyn : IScriptDynArray;
+begin
+   EvalAsScriptDynArray(exec, dyn);
+end;
+
 // ------------------
 // ------------------ TDynamicArrayDataExpr ------------------
 // ------------------
@@ -3613,7 +3657,7 @@ begin
    index:=IndexExpr.EvalAsInteger(exec);
    BoundsCheck(exec, base.ArrayLength, index);
 
-   exec.DataContext_Create(base.AsData, index*FElementSize, Result);
+   exec.DataContext_CreateOffset(base, index*FElementSize, Result);
 end;
 
 // EvalItem
@@ -3879,9 +3923,8 @@ begin
    index:=IndexExpr.EvalAsInteger(exec);
    BoundsCheck(exec, dynArray.ArrayLength, index);
 
-   dataExpr:=(ValueExpr as TDataExpr);
-   dataExpr.DataPtr[exec].CopyData(dynArray.AsData, index*dynArray.ElementSize,
-                                   dynArray.ElementSize);
+   dataExpr := (ValueExpr as TDataExpr);
+   dynArray.WriteData(index*dynArray.ElementSize, dataExpr.DataPtr[exec], dynArray.ElementSize);
 end;
 
 // ------------------
@@ -4330,10 +4373,10 @@ end;
 //
 procedure TInitDataExpr.EvalNoResult(exec : TdwsExecution);
 var
-   dataPtr : IDataContext;
+   dc : IDataContext;
 begin
-   dataPtr:=FExpr.DataPtr[exec];
-   FExpr.Typ.InitData(dataPtr.AsPData^, dataPtr.Addr);
+   FExpr.GetDataPtr(exec, dc);
+   FExpr.Typ.InitDataContext(dc);
 end;
 
 // GetSubExpr
@@ -4521,7 +4564,7 @@ end;
 //
 procedure TFieldExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
 begin
-   exec.DataContext_Create(GetScriptObj(exec).AsData, FieldSym.Offset, result);
+   exec.DataContext_CreateOffset(GetScriptObj(exec), FieldSym.Offset, result);
 end;
 
 // SameDataExpr
@@ -4623,7 +4666,7 @@ var
 begin
    p:=PIScriptObj(exec.Stack.PointerToInterfaceValue_BaseRelative(TObjectVarExpr(FObjectExpr).StackAddr));
    CheckScriptObject(exec, p^);
-   exec.DataContext_Create(p^.AsPData^, FieldSym.Offset, result);
+   exec.DataContext_CreateOffset(p^, FieldSym.Offset, result);
 end;
 
 // SpecializeDataExpr
@@ -5123,7 +5166,7 @@ end;
 
 // Create
 //
-constructor TEnumerationElementNameExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
+constructor TEnumerationElementNameExpr.Create(context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 begin
    inherited;
    Assert(expr.Typ is TEnumerationSymbol);
@@ -6460,16 +6503,16 @@ begin
    end;
 
    Result:=Self;
-   rightClassType:=FRight.ClassType;
+   rightClassType := FRight.ClassType;
    if FLeft.InheritsFrom(TVarExpr)then begin
-      leftVarExpr:=TVarExpr(FLeft);
-      if leftVarExpr.ClassType=TIntVarExpr then begin
-         if rightClassType=TAddIntExpr then begin
-            addIntExpr:=TAddIntExpr(FRight);
+      leftVarExpr := TVarExpr(FLeft);
+      if leftVarExpr.ClassType = TIntVarExpr then begin
+         if rightClassType = TAddIntExpr then begin
+            addIntExpr := TAddIntExpr(FRight);
             if addIntExpr.Left.SameDataExpr(leftVarExpr) then begin
-               Result:=TIncIntVarExpr.Create(context, FScriptPos, FLeft, addIntExpr.Right);
-               FLeft:=nil;
-               addIntExpr.Right:=nil;
+               Result := TIncIntVarExpr.Create(context, FScriptPos, FLeft, addIntExpr.Right);
+               FLeft := nil;
+               addIntExpr.Right := nil;
                Free;
                Exit;
             end;
@@ -6565,11 +6608,18 @@ end;
 //
 function TAssignExpr.SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr;
 begin
-   Result := TAssignExprClass(ClassType).Create(
+   Result := CreateAssignExpr(
       CompilerContextFromSpecialization(context), ScriptPos,
+      ttASSIGN,
       FLeft.SpecializeDataExpr(context),
       FRight.SpecializeTypedExpr(context)
-      );
+   );
+//
+//   Result := TAssignExprClass(ClassType).Create(
+//      CompilerContextFromSpecialization(context), ScriptPos,
+//      FLeft.SpecializeDataExpr(context),
+//      FRight.SpecializeTypedExpr(context)
+//      );
 end;
 
 // GetSubExpr
@@ -6672,8 +6722,8 @@ var
    srcData : TData;
    dataPtr : IDataContext;
 begin
-   srcData:=TArrayConstantExpr(FRight).EvalAsTData(exec);
-   if FLeft.Typ is TDynamicArraySymbol then begin
+   TArrayConstantExpr(FRight).EvalAsTData(exec, srcData);
+   if FLeft.Typ.ClassType = TDynamicArraySymbol then begin
       // to dynamic array
       FLeft.EvalAsScriptDynArray(exec, dynIntf);
       if dynIntf=nil then begin
@@ -6683,7 +6733,8 @@ begin
       end else begin
          dynObj:=TScriptDynamicArray(dynIntf.GetSelf);
       end;
-      dynObj.RawCopy(srcData, 0, Length(srcData));
+      dynObj.ArrayLength := Length(srcData) div dynObj.ElementSize;
+      dynObj.WriteData(srcData, 0, Length(srcData));
    end else begin
       // to static array
       exec.DataContext_Create(srcData, 0, dataPtr);
@@ -6951,7 +7002,7 @@ var
    dataPtr : IDataContext;
 begin
    TVarExpr(FLeft).GetDataPtr(exec, dataPtr);
-   FLeft.Typ.InitData(dataPtr.AsPData^, dataPtr.Addr);
+   FLeft.Typ.InitDataContext(dataPtr);
 end;
 
 // ------------------
@@ -6997,9 +7048,13 @@ function TPlusAssignIntExpr.Optimize(context : TdwsCompilerContext) : TProgramEx
 begin
    Result:=Self;
    if FLeft is TIntVarExpr then begin
-      Result:=TIncIntVarExpr.Create(context, FScriptPos, FLeft, FRight);
-      FLeft:=nil;
-      FRight:=nil;
+      if FRight.ClassType = TConstIntExpr then begin
+         Result := TIncIntVarWithConstExpr.Create(context, FScriptPos, FLeft, FRight);
+      end else begin
+         Result := TIncIntVarExpr.Create(context, FScriptPos, FLeft, FRight);
+      end;
+      FLeft := nil;
+      FRight := nil;
       Orphan(context);
    end;
 end;
@@ -7163,6 +7218,16 @@ begin
    TIntVarExpr(FLeft).IncValue(exec, -FRight.EvalAsInteger(exec));
 end;
 
+// ------------------
+// ------------------ TIncIntVarWithConstExpr ------------------
+// ------------------
+
+// EvalNoResult
+//
+procedure TIncIntVarWithConstExpr.EvalNoResult(exec : TdwsExecution);
+begin
+   TIntVarExpr(FLeft).IncValue(exec, TConstIntExpr(FRight).Value);
+end;
 
 // ------------------
 // ------------------ TAbsIntExpr ------------------
@@ -7823,8 +7888,7 @@ end;
 //
 destructor TCaseCondition.Destroy;
 begin
-   if FOwnsTrueExpr then
-      FTrueExpr.Free;
+   FTrueExpr.Free;
    inherited;
 end;
 
@@ -9265,10 +9329,10 @@ end;
 
 // Create
 //
-constructor TArraySwapExpr.Create(const scriptPos: TScriptPos;
+constructor TArraySwapExpr.Create(context : TdwsCompilerContext; const scriptPos: TScriptPos;
                                   aBase, aIndex1, aIndex2 : TTypedExpr);
 begin
-   inherited Create(scriptPos, aBase);
+   inherited Create(context, scriptPos, aBase);
    FIndex1Expr:=aIndex1;
    FIndex2Expr:=aIndex2;
 end;
@@ -9282,16 +9346,15 @@ begin
    FIndex2Expr.Free;
 end;
 
-// EvalNoResult
+// EvalAsScriptDynArray
 //
-procedure TArraySwapExpr.EvalNoResult(exec : TdwsExecution);
+procedure TArraySwapExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
 var
-   base : IScriptDynArray;
    dyn : TScriptDynamicArray;
    i1, i2 : Integer;
 begin
-   BaseExpr.EvalAsScriptDynArray(exec, base);
-   dyn:=TScriptDynamicArray(base.GetSelf);
+   BaseExpr.EvalAsScriptDynArray(exec, result);
+   dyn:=TScriptDynamicArray(result.GetSelf);
    i1:=Index1Expr.EvalAsInteger(exec);
    i2:=Index2Expr.EvalAsInteger(exec);
    BoundsCheck(exec, dyn.ArrayLength, i1);
@@ -9342,7 +9405,7 @@ constructor TArraySortComparer.Create(exec : TdwsExecution; dyn : TScriptDynamic
 begin
    FExec:=exec;
    FDyn:=dyn;
-   FData:=dyn.AsData;
+   FData:=dyn.AsPData^;
    FLeftAddr:=exec.Stack.BasePointer+(compareFunc.Args[0] as TVarExpr).StackAddr;
    FRightAddr:=exec.Stack.BasePointer+(compareFunc.Args[1] as TVarExpr).StackAddr;
    FFunc:=compareFunc;
@@ -9524,7 +9587,7 @@ begin
       FItem:=TScriptDataSymbol.Create('', elemTyp);
       context.Table.AddSymbol(FItem);
       FMapFuncExpr.AddArg(TVarExpr.CreateTyped(context, FItem));
-      FMapFuncExpr.SetResultAddr(context.Prog as TdwsProgram, nil);
+      FMapFuncExpr.InitializeResultAddr(context.Prog as TdwsProgram);
    end;
 end;
 
@@ -9570,15 +9633,14 @@ begin
    newPData:=newArray.AsPData;
 
    itemAddr:=exec.Stack.BasePointer+FItem.StackAddr;
-   if (newArray.ElementSize or dyn.ElementSize)=1 then begin
-      for i:=0 to dyn.ArrayLength-1 do begin
-         exec.Stack.WriteValue(itemAddr, oldPData^[i]);
-         funcPointer.EvalAsVariant(exec, MapFuncExpr, newPData^[i]);
-      end;
-   end else begin
-      for i:=0 to dyn.ArrayLength-1 do begin
-         DWSCopyData(oldPData^, i*dyn.ElementSize, exec.Stack.Data, itemAddr, dyn.ElementSize);
-         dc:=funcPointer.EvalDataPtr(exec,  MapFuncExpr);
+   for i:=0 to dyn.ArrayLength-1 do begin
+      if dyn.ElementSize = 1 then
+         exec.Stack.WriteValue(itemAddr, oldPData^[i])
+      else dyn.CopyData(i*dyn.ElementSize, exec.Stack.Data, itemAddr, dyn.ElementSize);
+      if newArray.ElementSize = 1 then
+         funcPointer.EvalAsVariant(exec, MapFuncExpr, newPData^[i])
+      else begin
+         dc:=funcPointer.EvalDataPtr(exec,  MapFuncExpr, MapFuncExpr.ResultAddr);
          dc.CopyData(newPData^, i*newArray.ElementSize, newArray.ElementSize);
       end;
    end;
@@ -9604,14 +9666,12 @@ end;
 // ------------------ TArrayReverseExpr ------------------
 // ------------------
 
-// EvalNoResult
+// EvalAsScriptDynArray
 //
-procedure TArrayReverseExpr.EvalNoResult(exec : TdwsExecution);
-var
-   dyn : IScriptDynArray;
+procedure TArrayReverseExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
 begin
-   BaseExpr.EvalAsScriptDynArray(exec, dyn);
-   dyn.Reverse;
+   BaseExpr.EvalAsScriptDynArray(exec, result);
+   result.Reverse;
 end;
 
 // ------------------
@@ -9661,7 +9721,7 @@ begin
          dyn.ArrayLength:=n+1;
          if arg.Typ.Size>1 then begin
             argData:=(arg as TDataExpr);
-            argData.DataPtr[exec].CopyData(dyn.AsData, n*dyn.ElementSize, dyn.ElementSize);
+            dyn.WriteData(n*dyn.ElementSize, argData.DataPtr[exec], dyn.ElementSize);
          end else arg.EvalAsVariant(exec, dyn.AsPVariant(n)^);
 
       end else if arg.Typ.ClassType=TDynamicArraySymbol then begin
@@ -9681,7 +9741,7 @@ begin
             dyn.ArrayLength:=n+k;
             if arg is TArrayConstantExpr then
                TArrayConstantExpr(arg).EvalToTData(exec, dyn.AsPData^, n*dyn.ElementSize)
-            else (arg as TDataExpr).DataPtr[exec].CopyData(dyn.AsData, n*dyn.ElementSize, k*dyn.ElementSize);
+            else dyn.WriteData(n*dyn.ElementSize, (arg as TDataExpr).DataPtr[exec], k*dyn.ElementSize);
          end;
 
       end;
@@ -9731,9 +9791,15 @@ begin
    for i := 0 to ArgCount-1 do begin
       arg := ArgExpr[i].SpecializeTypedExpr(context);
       if (arg <> nil) and (not arg.Typ.IsOfType(elemTyp)) then
-         context.AddCompilerErrorFmt(CPE_IncompatibleParameterTypes,
-                                     [elemTyp.Caption, arg.Typ.Caption]);
-      specialized.AddArg(arg);
+         specialized.AddArg(
+            CompilerUtils.WrapWithImplicitConversion(
+               (context.BaseSymbols as TdwsCompilerContext),
+               arg, elemTyp,
+               arg.ScriptPos,
+               CPE_IncompatibleParameterTypes
+            )
+         )
+      else specialized.AddArg(arg);
    end;
 end;
 
@@ -9825,14 +9891,16 @@ var
    dyn : TScriptDynamicArray;
    idx : Integer;
 begin
-   dyn:=GetBaseDynArray(exec);
-   if dyn.ArrayLength=0 then
+   dyn := GetBaseDynArray(exec);
+   idx := dyn.ArrayLength - 1;
+   if idx < 0 then
       RaiseUpperExceeded(exec, 0);
 
-   idx:=(dyn.ArrayLength-1)*dyn.ElementSize;
-   DWSCopyData(dyn.AsData, idx,
-               exec.Stack.Data, exec.Stack.BasePointer+FResultAddr,
-               dyn.ElementSize);
+   if dyn.ElementSize = 1 then begin
+      dyn.EvalAsVariant(idx, exec.Stack.Data[exec.Stack.BasePointer+FResultAddr]);
+   end else begin
+      dyn.CopyData(idx*dyn.ElementSize, exec.Stack.Data, exec.Stack.BasePointer+FResultAddr, dyn.ElementSize);
+   end;
 end;
 
 // SpecializeDataExpr
@@ -10024,29 +10092,12 @@ end;
 // Create
 //
 constructor TArrayIndexOfExpr.Create(context : TdwsCompilerContext; const scriptPos : TScriptPos;
-                                     aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr);
-var
-   arrayItemTyp : TTypeSymbol;
+                                            aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr);
 begin
    inherited Create(context, scriptPos, aBase);
    FItemExpr:=aItem;
    FFromIndexExpr:=aFromIndex;
    Typ:=context.TypInteger;
-   // resolve internal method depending on array and item type
-   if (FItemExpr<>nil) and (FItemExpr.Typ.AsFuncSymbol<>nil) then
-      FMethod:=DoEvalFuncPtr
-   else if (FBaseExpr<>nil) and (FBaseExpr.Typ<>nil) then begin
-      arrayItemTyp:=FBaseExpr.Typ.Typ;
-      if arrayItemTyp<>nil then begin
-         if arrayItemTyp.Size>1 then
-            FMethod:=DoEvalData
-         else if arrayItemTyp.IsOfType(context.TypString) then
-            FMethod:=DoEvalString
-         else if arrayItemTyp.IsOfType(context.TypInteger) then
-            FMethod:=DoEvalInteger
-         else FMethod:=DoEvalValue;
-      end;
-   end;
 end;
 
 // Destroy
@@ -10063,84 +10114,6 @@ end;
 procedure TArrayIndexOfExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
 begin
    VarCopySafe(Result, EvalAsInteger(exec));
-end;
-
-// EvalAsInteger
-//
-function TArrayIndexOfExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
-var
-   base : IScriptDynArray;
-   dyn : TScriptDynamicArray;
-begin
-   BaseExpr.EvalAsScriptDynArray(exec, base);
-   dyn:=TScriptDynamicArray(base.GetSelf);
-   Result:=FMethod(exec, dyn);
-end;
-
-// DoEvalValue
-//
-function TArrayIndexOfExpr.DoEvalValue(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
-var
-   fromIndex : Integer;
-   v : Variant;
-begin
-   if FFromIndexExpr<>nil then
-      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
-   else fromIndex:=0;
-   FItemExpr.EvalAsVariant(exec, v);
-   Result:=dyn.IndexOfValue(v, fromIndex);
-end;
-
-// DoEvalString
-//
-function TArrayIndexOfExpr.DoEvalString(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
-var
-   fromIndex : Integer;
-   v : String;
-begin
-   if FFromIndexExpr<>nil then
-      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
-   else fromIndex:=0;
-   FItemExpr.EvalAsString(exec, v);
-   Result:=dyn.IndexOfString(v, fromIndex);
-end;
-
-// DoEvalInteger
-//
-function TArrayIndexOfExpr.DoEvalInteger(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
-var
-   fromIndex : Integer;
-begin
-   if FFromIndexExpr<>nil then
-      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
-   else fromIndex:=0;
-   Result:=dyn.IndexOfInteger(FItemExpr.EvalAsInteger(exec), fromIndex);
-end;
-
-// DoEvalFuncPtr
-//
-function TArrayIndexOfExpr.DoEvalFuncPtr(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
-var
-   fromIndex : Integer;
-   v : Variant;
-begin
-   if FFromIndexExpr<>nil then
-      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
-   else fromIndex:=0;
-   FItemExpr.EvalAsVariant(exec, v);
-   Result:=dyn.IndexOfFuncPtr(v, fromIndex)
-end;
-
-// DoEvalData
-//
-function TArrayIndexOfExpr.DoEvalData(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
-var
-   fromIndex : Integer;
-begin
-   if FFromIndexExpr<>nil then
-      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
-   else fromIndex:=0;
-   Result:=dyn.IndexOfData(TDataExpr(FItemExpr).DataPtr[exec], fromIndex)
 end;
 
 // GetSubExpr
@@ -10160,6 +10133,152 @@ end;
 function TArrayIndexOfExpr.GetSubExprCount : Integer;
 begin
    Result:=3
+end;
+
+// ------------------
+// ------------------ TDynamicArrayIndexOfExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TDynamicArrayIndexOfExpr.Create(context : TdwsCompilerContext; const scriptPos : TScriptPos;
+                                            aBase : TTypedExpr; aItem : TTypedExpr; aFromIndex : TTypedExpr);
+var
+   arrayItemTyp : TTypeSymbol;
+begin
+   inherited Create(context, scriptPos, aBase, aItem, aFromIndex);
+   // resolve internal method depending on array and item type
+   if (FItemExpr<>nil) and (FItemExpr.Typ.AsFuncSymbol<>nil) then
+      FMethod:=DoEvalFuncPtr
+   else if (FBaseExpr<>nil) and (FBaseExpr.Typ<>nil) then begin
+      arrayItemTyp:=FBaseExpr.Typ.Typ;
+      if arrayItemTyp<>nil then begin
+         if arrayItemTyp.Size>1 then
+            FMethod:=DoEvalData
+         else if arrayItemTyp.IsOfType(context.TypString) then
+            FMethod:=DoEvalString
+         else if arrayItemTyp.IsOfType(context.TypInteger) then
+            FMethod:=DoEvalInteger
+         else FMethod:=DoEvalValue;
+      end;
+   end;
+end;
+
+// EvalAsInteger
+//
+function TDynamicArrayIndexOfExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+var
+   base : IScriptDynArray;
+   dyn : TScriptDynamicArray;
+begin
+   BaseExpr.EvalAsScriptDynArray(exec, base);
+   dyn:=TScriptDynamicArray(base.GetSelf);
+   Result:=FMethod(exec, dyn);
+end;
+
+// DoEvalValue
+//
+function TDynamicArrayIndexOfExpr.DoEvalValue(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
+var
+   fromIndex : Integer;
+   v : Variant;
+begin
+   if FFromIndexExpr<>nil then
+      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
+   else fromIndex:=0;
+   FItemExpr.EvalAsVariant(exec, v);
+   Result:=dyn.IndexOfValue(v, fromIndex, dyn.ArrayLength-1);
+end;
+
+// DoEvalString
+//
+function TDynamicArrayIndexOfExpr.DoEvalString(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
+var
+   fromIndex : Integer;
+   v : String;
+begin
+   if FFromIndexExpr<>nil then
+      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
+   else fromIndex:=0;
+   FItemExpr.EvalAsString(exec, v);
+   Result:=dyn.IndexOfString(v, fromIndex);
+end;
+
+// DoEvalInteger
+//
+function TDynamicArrayIndexOfExpr.DoEvalInteger(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
+var
+   fromIndex : Integer;
+begin
+   if FFromIndexExpr<>nil then
+      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
+   else fromIndex:=0;
+   Result:=dyn.IndexOfInteger(FItemExpr.EvalAsInteger(exec), fromIndex);
+end;
+
+// DoEvalFuncPtr
+//
+function TDynamicArrayIndexOfExpr.DoEvalFuncPtr(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
+var
+   fromIndex : Integer;
+   v : Variant;
+begin
+   if FFromIndexExpr<>nil then
+      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
+   else fromIndex:=0;
+   FItemExpr.EvalAsVariant(exec, v);
+   Result:=dyn.IndexOfFuncPtr(v, fromIndex)
+end;
+
+// DoEvalData
+//
+function TDynamicArrayIndexOfExpr.DoEvalData(exec : TdwsExecution; dyn : TScriptDynamicArray) : Integer;
+var
+   fromIndex : Integer;
+begin
+   if FFromIndexExpr<>nil then
+      fromIndex:=FFromIndexExpr.EvalAsInteger(exec)
+   else fromIndex:=0;
+   Result:=dyn.IndexOfData(TDataExpr(FItemExpr).DataPtr[exec], fromIndex, dyn.ArrayLength-1, FItemExpr.Typ.Size)
+end;
+
+// ------------------
+// ------------------ TStaticArrayIndexOfExpr ------------------
+// ------------------
+
+// EvalAsInteger
+//
+function TStaticArrayIndexOfExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+var
+   fromIndex : Integer;
+   arrayDC : IDataContext;
+   dc : TDataContext;
+   value : Variant;
+   arrayTyp : TStaticArraySymbol;
+begin
+   arrayTyp := BaseExpr.Typ as TStaticArraySymbol;
+   if FFromIndexExpr<>nil then begin
+      fromIndex := FFromIndexExpr.EvalAsInteger(exec);
+      if fromIndex < arrayTyp.LowBound then
+         fromIndex := arrayTyp.LowBound;
+   end else fromIndex := arrayTyp.LowBound;
+
+   arrayDC := (BaseExpr as TDataExpr).DataPtr[exec];
+   dc := (arrayDC.GetSelf as TDataContext);
+
+   if FItemExpr.Typ.Size = 1 then begin
+      FItemExpr.EvalAsVariant(exec, value);
+      Result := dc.IndexOfValue(value, fromIndex - arrayTyp.LowBound, arrayTyp.ElementCount - 1);
+   end else begin
+      Result := TDataContext(arrayDC.GetSelf).IndexOfData(
+         TDataExpr(FItemExpr).DataPtr[exec],
+         fromIndex - arrayTyp.LowBound, arrayTyp.ElementCount - 1,
+         FItemExpr.Typ.Size
+      );
+   end;
+   if not ForceZeroBased then
+      if (Result >= 0) or (arrayTyp.LowBound < 0) then
+         Result := Result + arrayTyp.LowBound;
 end;
 
 // ------------------
@@ -10226,9 +10345,9 @@ begin
       dyn.Insert(index);
    end;
 
-   if ItemExpr.Typ.Size>1 then begin
-      (ItemExpr as TDataExpr).DataPtr[exec].CopyData(dyn.AsData, index*dyn.ElementSize, dyn.ElementSize);
-   end else ItemExpr.EvalAsVariant(exec, dyn.AsPVariant(index)^);
+   if ItemExpr.Typ.Size>1 then
+      dyn.WriteData(index*dyn.ElementSize, (ItemExpr as TDataExpr).DataPtr[exec], dyn.ElementSize)
+   else ItemExpr.EvalAsVariant(exec, dyn.AsPVariant(index)^);
 end;
 
 // GetSubExpr
@@ -10626,9 +10745,8 @@ constructor TIfThenElseValueExpr.Create(context : TdwsCompilerContext; const aPo
                                         aTyp : TTypeSymbol;
                                         condExpr, trueExpr, falseExpr : TTypedExpr);
 begin
-   inherited Create;
+   inherited Create(aTyp);
    FScriptPos:=aPos;
-   Typ:=aTyp;
    FCondExpr:=condExpr;
    FTrueExpr:=trueExpr;
    FFalseExpr:=falseExpr;
@@ -10647,13 +10765,49 @@ end;
 // EvalAsVariant
 //
 procedure TIfThenElseValueExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
-var
-   buf : Variant;
 begin
    if FCondExpr.EvalAsBoolean(exec) then
-      FTrueExpr.EvalAsVariant(exec, buf)
-   else FFalseExpr.EvalAsVariant(exec, buf);
-   VarCopySafe(Result, buf);
+      FTrueExpr.EvalAsVariant(exec, Result)
+   else FFalseExpr.EvalAsVariant(exec, Result);
+end;
+
+// EvalAsInteger
+//
+function TIfThenElseValueExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+begin
+   if FCondExpr.EvalAsBoolean(exec) then
+      Result := FTrueExpr.EvalAsInteger(exec)
+   else Result := FFalseExpr.EvalAsInteger(exec);
+end;
+
+// EvalAsFloat
+//
+function TIfThenElseValueExpr.EvalAsFloat(exec : TdwsExecution) : Double;
+begin
+   if FCondExpr.EvalAsBoolean(exec) then
+      Result := FTrueExpr.EvalAsFloat(exec)
+   else Result := FFalseExpr.EvalAsFloat(exec);
+end;
+
+// EvalAsString
+//
+procedure TIfThenElseValueExpr.EvalAsString(exec : TdwsExecution; var result : String);
+begin
+   if FCondExpr.EvalAsBoolean(exec) then
+      FTrueExpr.EvalAsString(exec, result)
+   else FFalseExpr.EvalAsString(exec, result);
+end;
+
+// GetDataPtr
+//
+procedure TIfThenElseValueExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
+var
+   e : TTypedExpr;
+begin
+   if FCondExpr.EvalAsBoolean(exec) then
+      e := FTrueExpr
+   else e := FFalseExpr;
+   (e as TDataExpr).GetDataPtr(exec, result);
 end;
 
 // GetIsConstant
@@ -10693,6 +10847,19 @@ begin
    end;
 end;
 
+// SpecializeDataExpr
+//
+function TIfThenElseValueExpr.SpecializeDataExpr(const context : ISpecializationContext) : TDataExpr;
+begin
+   Result := TIfThenElseValueExpr.Create(
+      CompilerContextFromSpecialization(context), ScriptPos,
+      context.SpecializeType(Typ),
+      CondExpr.SpecializeBooleanExpr(context),
+      TrueExpr.SpecializeTypedExpr(context),
+      FalseExpr.SpecializeTypedExpr(context)
+   );
+end;
+
 // GetSubExpr
 //
 function TIfThenElseValueExpr.GetSubExpr(i : Integer) : TExprBase;
@@ -10710,6 +10877,13 @@ end;
 function TIfThenElseValueExpr.GetSubExprCount : Integer;
 begin
    Result:=3;
+end;
+
+// ScriptPos
+//
+function TIfThenElseValueExpr.ScriptPos : TScriptPos;
+begin
+   Result := FScriptPos;
 end;
 
 // ------------------
@@ -10869,7 +11043,7 @@ end;
 
 // Create
 //
-constructor TAssociativeArrayKeysExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
+constructor TAssociativeArrayKeysExpr.Create(context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos; expr : TTypedExpr);
 var
    a : TAssociativeArraySymbol;
 begin

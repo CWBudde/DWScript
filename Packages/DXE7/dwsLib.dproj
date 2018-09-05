@@ -77,7 +77,6 @@
         </DelphiCompile>
         <DCCReference Include="designide.dcp"/>
         <DCCReference Include="vcl.dcp"/>
-        <DCCReference Include="rtl.dcp"/>
         <DCCReference Include="dwsLibRuntime.dcp"/>
         <DCCReference Include="..\..\Source\dwsRegister.pas"/>
         <DCCReference Include="..\..\Source\dwsExperts.pas"/>

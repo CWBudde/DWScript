@@ -54,7 +54,6 @@ type
       property AsVariant[addr : Integer] : Variant read GetAsVariant write SetAsVariant; default;
 
       function AsPData : PData;
-      function AsData : TData;
       function AsPVariant(addr : Integer) : PVariant;
 
       procedure CreateOffset(offset : Integer; var result : IDataContext);
@@ -71,8 +70,9 @@ type
 
       procedure CopyData(const destData : TData; destAddr, size : Integer);
       procedure WriteData(const src : IDataContext; size : Integer); overload;
+      procedure WriteData(destAddr : Integer; const src : IDataContext; size : Integer); overload;
       procedure WriteData(const srcData : TData; srcAddr, size : Integer); overload;
-      function SameData(addr : Integer; const otherData : TData; otherAddr, size : Integer) : Boolean; overload;
+      function  SameData(addr : Integer; const otherData : TData; otherAddr, size : Integer) : Boolean;
 
       function  HashCode(size : Integer) : Cardinal;
    end;
@@ -138,7 +138,6 @@ type
 
          property AsVariant[addr : Integer] : Variant read GetAsVariant write SetAsVariant; default;
          function AsPData : PData; inline;
-         function AsData : TData;
          function AsPVariant(addr : Integer) : PVariant; inline;
          function Addr : Integer;
          function DataLength : Integer; inline;
@@ -157,12 +156,24 @@ type
          property  AsInterface[addr : Integer] : IUnknown read GetAsInterface write SetAsInterface;
 
          procedure InternalCopyData(sourceAddr, destAddr, size : Integer); inline;
-         procedure CopyData(const destData : TData; destAddr, size : Integer); inline;
+
+         procedure CopyData(const destData : TData; destAddr, size : Integer); overload; inline;
+         procedure CopyData(addr : Integer; const destData : TData; destAddr, size : Integer); overload; inline;
+
          procedure WriteData(const src : IDataContext; size : Integer); overload; inline;
+         procedure WriteData(const src : IDataContext; srcAddr, size : Integer); overload; inline;
          procedure WriteData(destAddr : Integer; const src : IDataContext; size : Integer); overload; inline;
          procedure WriteData(const srcData : TData; srcAddr, size : Integer); overload; inline;
+
+         procedure MoveData(srcAddr, destAddr, size : Integer); inline;
+
          function  SameData(addr : Integer; const otherData : TData; otherAddr, size : Integer) : Boolean; overload; inline;
          function  SameData(addr : Integer; const otherData : IDataContext; size : Integer) : Boolean; overload; inline;
+
+         function IndexOfData(const item : IDataContext; fromIndex, toIndex, itemSize : Integer) : Integer;
+         function IndexOfValue(const item : Variant; fromIndex, toIndex : Integer) : Integer;
+         function IndexOfString(const item : String; fromIndex : Integer) : Integer;
+         function IndexOfInteger(const item : Int64; fromIndex : Integer) : Integer;
 
          procedure ReplaceData(const newData : TData); virtual;
          procedure ClearData; virtual;
@@ -200,7 +211,6 @@ type
          function DataLength : Integer;
 
          function AsPData : PData;
-         function AsData : TData;
          function AsPVariant(addr : Integer) : PVariant;
 
          procedure CreateOffset(offset : Integer; var result : IDataContext);
@@ -211,6 +221,7 @@ type
 
          procedure CopyData(const destData : TData; destAddr, size : Integer);
          procedure WriteData(const src : IDataContext; size : Integer); overload;
+         procedure WriteData(destAddr : Integer; const src : IDataContext; size : Integer); overload;
          procedure WriteData(const srcData : TData; srcAddr, size : Integer); overload;
          function SameData(addr : Integer; const otherData : TData; otherAddr, size : Integer) : Boolean; overload;
 
@@ -568,7 +579,7 @@ end;
 //
 function TDataContext.GetAsVariant(addr : Integer) : Variant;
 begin
-   Result:=FData[FAddr+addr];
+   VarCopySafe(Result, FData[FAddr+addr]);
 end;
 
 // SetAsVariant
@@ -705,13 +716,6 @@ begin
    Result:=@FData;
 end;
 
-// AsData
-//
-function TDataContext.AsData : TData;
-begin
-   Result:=FData;
-end;
-
 // AsPVariant
 //
 function TDataContext.AsPVariant(addr : Integer) : PVariant;
@@ -808,11 +812,25 @@ begin
    DWSCopyData(FData, FAddr, destData, destAddr, size);
 end;
 
+// CopyData
+//
+procedure TDataContext.CopyData(addr : Integer; const destData : TData; destAddr, size : Integer);
+begin
+   DWSCopyData(FData, FAddr+addr, destData, destAddr, size);
+end;
+
 // WriteData
 //
 procedure TDataContext.WriteData(const src : IDataContext; size : Integer);
 begin
    DWSCopyPVariants(src.AsPVariant(0), @FData[FAddr], size);
+end;
+
+// WriteData
+//
+procedure TDataContext.WriteData(const src : IDataContext; srcAddr, size : Integer);
+begin
+   DWSCopyData(src.AsPData^, srcAddr, Fdata, FAddr, size);
 end;
 
 // WriteData
@@ -829,6 +847,13 @@ begin
    DWSCopyData(srcData, srcAddr, FData, FAddr, size);
 end;
 
+// MoveData
+//
+procedure TDataContext.MoveData(srcAddr, destAddr, size : Integer);
+begin
+   DWSMoveData(FData, srcAddr, destAddr, size);
+end;
+
 // SameData
 //
 function TDataContext.SameData(addr : Integer; const otherData : TData; otherAddr, size : Integer) : Boolean;
@@ -841,6 +866,78 @@ end;
 function TDataContext.SameData(addr : Integer; const otherData : IDataContext; size : Integer) : Boolean;
 begin
    Result:=DWSSameData(FData, otherData.AsPData^, FAddr+addr, otherData.Addr, size);
+end;
+
+// IndexOfData
+//
+function TDataContext.IndexOfData(const item : IDataContext; fromIndex, toIndex, itemSize : Integer) : Integer;
+var
+   i : Integer;
+   data : PData;
+begin
+   data := AsPData;
+   for i:=fromIndex to toIndex do
+      if item.SameData(0, data^, Addr+i*itemSize, itemSize) then
+         Exit(i);
+   Result:=-1;
+end;
+
+// IndexOfValue
+//
+function TDataContext.IndexOfValue(const item : Variant; fromIndex, toIndex : Integer) : Integer;
+var
+   i : Integer;
+   data : PData;
+begin
+   data:=AsPData;
+   for i:=fromIndex to toIndex do
+      if DWSSameVariant(data^[Addr+i], item) then
+         Exit(i);
+   Result:=-1;
+end;
+
+// IndexOfString
+//
+function TDataContext.IndexOfString(const item : String; fromIndex : Integer) : Integer;
+var
+   i : Integer;
+   varData : PVarData;
+begin
+   if fromIndex<DataLength then begin
+      varData:=@AsPData^[fromIndex];
+      for i:=fromIndex to DataLength-1 do begin
+         {$ifdef FPC}
+         Assert(varData^.VType=varString);
+         if String(varData^.VString)=item then
+            Exit(i);
+         {$else}
+         Assert(varData^.VType=varUString);
+         if String(varData^.VUString)=item then
+            Exit(i);
+         {$endif}
+         Inc(varData);
+      end;
+   end;
+   Result:=-1;
+end;
+
+// IndexOfInteger
+//
+function TDataContext.IndexOfInteger(const item : Int64; fromIndex : Integer) : Integer;
+var
+   i : Integer;
+   varData : PVarData;
+begin
+   if fromIndex<DataLength then begin
+      varData:=@AsPData^[fromIndex];
+      for i:=fromIndex to DataLength-1 do begin
+         Assert(varData^.VType=varInt64);
+         if varData^.VInt64=item then
+            Exit(i);
+         Inc(varData);
+      end;
+   end;
+   Result:=-1;
 end;
 
 // ReplaceData
@@ -996,13 +1093,6 @@ begin
    Result:=FGetPData;
 end;
 
-// AsData
-//
-function TRelativeDataContext.AsData : TData;
-begin
-   Result:=FGetPData^;
-end;
-
 // AsPVariant
 //
 function TRelativeDataContext.AsPVariant(addr : Integer) : PVariant;
@@ -1050,6 +1140,13 @@ end;
 procedure TRelativeDataContext.WriteData(const src : IDataContext; size : Integer);
 begin
    DWSCopyData(src.AsPData^, src.Addr, FGetPData^, FAddr, size);
+end;
+
+// WriteData
+//
+procedure TRelativeDataContext.WriteData(destAddr : Integer; const src : IDataContext; size : Integer);
+begin
+   DWSCopyData(src.AsPData^, src.Addr, FGetPData^, FAddr+destAddr, size);
 end;
 
 // WriteData

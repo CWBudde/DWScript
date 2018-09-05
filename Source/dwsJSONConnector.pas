@@ -54,6 +54,7 @@ type
          FLowCall, FHighCall, FLengthCall : IConnectorCall;
          FIndexReadCall, FIndexWriteCall : IConnectorCall;
          FTypeNameCall : IConnectorCall;
+         FDefinedCall : IConnectorCall;
          FElementNameCall : IConnectorCall;
          FCloneCall : IConnectorCall;
          FExtendCall : IConnectorCall;
@@ -108,6 +109,11 @@ type
    end;
 
    TdwsJSONElementNameCall = class (TdwsJSONFastCallBase, IConnectorFastCall)
+      public
+         procedure FastCall(const args : TExprBaseListExec; var result : Variant);
+   end;
+
+   TdwsJSONDefinedCall = class (TdwsJSONFastCallBase, IConnectorFastCall)
       public
          procedure FastCall(const args : TExprBaseListExec; var result : Variant);
    end;
@@ -641,6 +647,7 @@ begin
    FIndexReadCall:=TdwsJSONIndexReadCall.Create('');
    FIndexWriteCall:=TdwsJSONIndexWriteCall.Create('');
    FTypeNameCall:=TdwsJSONTypeNameCall.Create;
+   FDefinedCall:=TdwsJSONDefinedCall.Create;
    FElementNameCall:=TdwsJSONElementNameCall.Create;
    FCloneCall:=TdwsJSONCloneCall.Create;
    FExtendCall:=TdwsJSONExtendCall.Create;
@@ -688,7 +695,14 @@ var
    paramTyp : TTypeSymbol;
    i : Integer;
 begin
-   if UnicodeSameText(methodName, 'typename') then begin
+   if UnicodeSameText(methodName, 'defined') then begin
+
+      Result:=FDefinedCall;
+      typSym:=FTable.TypBoolean;
+      if Length(params)<>0 then
+         raise ECompileException.Create(CPE_NoParamsExpected);
+
+   end else if UnicodeSameText(methodName, 'typename') then begin
 
       Result:=FTypeNameCall;
       typSym:=FTable.TypString;
@@ -919,6 +933,22 @@ begin
    if v<>nil then
       VarCopySafe(result, v.Names[args.AsInteger[1]])
    else VarCopySafe(result, '');
+end;
+
+// ------------------
+// ------------------ TdwsJSONDefinedCall ------------------
+// ------------------
+
+// FastCall
+//
+procedure TdwsJSONDefinedCall.FastCall(const args : TExprBaseListExec; var result : Variant);
+var
+   base : Variant;
+   v : TdwsJSONValue;
+begin
+   args.EvalAsVariant(0, base);
+   v := TBoxedJSONValue.UnBox(base);
+   Result := (v.ValueType <> jvtUndefined);
 end;
 
 // ------------------
@@ -1401,23 +1431,20 @@ var
    values : TSimpleInt64List;
    i : Integer;
    newArray : TScriptDynamicArray;
-   newPData : PData;
-   s : UnicodeString;
+   s : String;
 begin
-   s := UnicodeString(args.AsString[0]);
-
-   tokenizer:=TdwsJSONParserState.Create(s);
-   values:=TSimpleInt64List.Create;
+   args.EvalAsString(0, s);
+   tokenizer := TdwsJSONParserState.Create(s);
+   values := TSimpleInt64List.Create;
    try
       tokenizer.ParseIntegerArray(values);
 
-      newArray:=TScriptDynamicArray.CreateNew((args.Exec as TdwsProgramExecution).CompilerContext.TypInteger);
+      newArray := TScriptDynamicArray.CreateNew((args.Exec as TdwsProgramExecution).CompilerContext.TypInteger);
       VarCopySafe(result, IScriptDynArray(newArray));
-      newArray.ArrayLength:=values.Count;
-      newPData:=newArray.AsPData;
+      newArray.ArrayLength := values.Count;
 
-      for i:=0 to newArray.ArrayLength-1 do
-         newPData^[i]:=values[i];
+      for i := 0 to newArray.ArrayLength-1 do
+         newArray.AsInteger[i] := values[i];
    finally
       values.Free;
       tokenizer.Free;
@@ -1436,11 +1463,9 @@ var
    values : TSimpleDoubleList;
    i : Integer;
    newArray : TScriptDynamicArray;
-   newPData : PData;
-   s : UnicodeString;
+   s : String;
 begin
-   s := UnicodeString(args.AsString[0]);
-
+   args.EvalAsString(0, s);
    tokenizer:=TdwsJSONParserState.Create(s);
    values:=TSimpleDoubleList.Create;
    try
@@ -1449,10 +1474,9 @@ begin
       newArray:=TScriptDynamicArray.CreateNew((args.Exec as TdwsProgramExecution).CompilerContext.TypInteger);
       VarCopySafe(result, IScriptDynArray(newArray));
       newArray.ArrayLength:=values.Count;
-      newPData:=newArray.AsPData;
 
       for i:=0 to newArray.ArrayLength-1 do
-         newPData^[i]:=values[i];
+         newArray.AsFloat[i] := values[i];
    finally
       values.Free;
       tokenizer.Free;
@@ -1471,10 +1495,9 @@ var
    values : TUnicodeStringList;
    i : Integer;
    newArray : TScriptDynamicArray;
-   newPData : PData;
-   s : UnicodeString;
+   s : String;
 begin
-   s := UnicodeString(args.AsString[0]);
+   args.EvalAsString(0, s);
 
    tokenizer:=TdwsJSONParserState.Create(s);
    values := TUnicodeStringList.Create;
@@ -1484,10 +1507,9 @@ begin
       newArray:=TScriptDynamicArray.CreateNew((args.Exec as TdwsProgramExecution).CompilerContext.TypString);
       VarCopySafe(result, IScriptDynArray(newArray));
       newArray.ArrayLength:=values.Count;
-      newPData:=newArray.AsPData;
 
       for i:=0 to newArray.ArrayLength-1 do
-         newPData^[i]:=values[i];
+         newArray.AsString[i] := values[i];
    finally
       values.Free;
       tokenizer.Free;

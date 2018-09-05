@@ -148,9 +148,6 @@ type
       public
          VarRecArray : array of TVarRec;
 
-         constructor Create; overload;
-         constructor Create(const variantArray : array of Variant); overload;
-
          procedure Add(const v : Variant);
          procedure AddBoolean(const b : Boolean);
          procedure AddInteger(const i : Int64);
@@ -173,16 +170,23 @@ type
          FList : PObjectTightList;
 
          procedure RaiseIndexOutOfBounds;
-         function GetList : PObjectTightList; inline;
+
+         type TTightListEnumerator = record
+            FIter : PPointer;
+            FTail : PPointer;
+            function MoveNext : Boolean; inline;
+            function GetCurrent : TRefCountedObject; inline;
+            property Current : TRefCountedObject read GetCurrent;
+         end;
 
       public
          FCount : Integer;     // exposed so it can be used for direct property access
 
-         property List : PObjectTightList read GetList;
+         function List : PObjectTightList; inline;
          property Count : Integer read FCount;
 
          procedure Initialize; // in case of use as a local variable
-         procedure Free; // to posture as a regular TList
+         procedure Free; inline; // to posture as a regular TList
          procedure Clean;  // clear the list and free the item objects
          procedure Clear;  // clear the list without freeing the items
          function Add(item : TRefCountedObject) : Integer;
@@ -194,7 +198,10 @@ type
          procedure MoveItem(curIndex, newIndex : Integer); // Note: D2009 fails if this method is called Move (!) - HV
          procedure Exchange(index1, index2 : Integer);
          function ItemsAllOfClass(aClass : TClass) : Boolean;
+
+         function GetEnumerator : TTightListEnumerator;
    end;
+   PTightList = ^TTightList;
 
    // TTightStack
    //
@@ -1018,6 +1025,8 @@ function TryStrToDouble(const s : String; var val : Double) : Boolean; overload;
 function TryStrToDouble(const s : String; var val : Double; const formatSettings : TFormatSettings) : Boolean; overload; inline;
 function TryStrToDouble(p : PChar; var val : Double; formatSettings : PFormatSettings = nil) : Boolean; overload;
 
+function StringToBoolean(const s : String) : Boolean;
+
 function DivMod10(var dividend : Cardinal) : Cardinal;
 function DivMod100(var dividend : Cardinal) : Cardinal;
 
@@ -1078,6 +1087,8 @@ function CoalesceableIsFalsey(const unk : IUnknown) : Boolean;
 
 function ApplyStringVariables(const str : TFilename; const variables : TStrings;
                               const delimiter : String = '%') : TFilename;
+
+function ScanMemory(p : Pointer; size : IntPtr; const pattern : TBytes) : Pointer;
 
 type
    TTwoChars = packed array [0..1] of Char;
@@ -1840,6 +1851,51 @@ begin
    Result := True;
 end;
 
+// StringToBoolean
+//
+function StringToBoolean(const s : String) : Boolean;
+var
+   p : PChar;
+begin
+   if s = '' then Exit(False);
+   p := Pointer(s);
+   case Length(s) of
+      1 : case p[0] of
+         '1', 'T', 't', 'Y', 'y' : Exit(True);
+      end;
+      3 : begin
+         Exit(    ((p[0] = 'Y') or (p[0] = 'y'))
+              and ((p[1] = 'E') or (p[1] = 'e'))
+              and ((p[2] = 'S') or (p[2] = 's')));
+      end;
+      4 : begin
+         Exit(    ((p[0] = 'T') or (p[0] = 't'))
+              and ((p[1] = 'R') or (p[1] = 'r'))
+              and ((p[2] = 'U') or (p[2] = 'u'))
+              and ((p[3] = 'E') or (p[3] = 'e')));
+      end;
+   end;
+   // special case of integer: zero is false, everything else is true
+   Result := False;
+   case p^ of
+      '0'..'9' : begin
+         Inc(p);
+         repeat
+            case p^ of
+               '0' :  Inc(p);
+               '1'..'9' : begin
+                  Inc(p);
+                  Result := True;
+               end;
+               #0 : Exit;
+            else
+               Exit(False);
+            end;
+         until False;
+      end;
+   end;
+end;
+
 // Int32ToStrU
 //
 function Int32ToStrU(val : Integer) : UnicodeString;
@@ -2101,10 +2157,10 @@ begin
          Result := not CoalesceableIsFalsey(IUnknown(TVarData(v).VUnknown));
       {$ifdef FPC}
       varString :
-         Result := TVarData(v).VString <> nil;
+         Result := StringToBoolean(String(TVarData(v).VString));
       {$else}
       varUString :
-         Result := TVarData(v).VUString <> nil;
+         Result := StringToBoolean(String(TVarData(v).VUString));
       {$endif}
       varDouble :
          Result := TVarData(v).VDouble <> 0;
@@ -2142,6 +2198,9 @@ begin
          Result := 0;
       varUnknown :
          UnknownAsFloat(IUnknown(TVarData(v).VUnknown), Result);
+      varUString :
+         if not TryStrToDouble(PChar(TVarData(v).VUString), Result) then
+            raise EConvertError.CreateFmt(CPE_InvalidFloatFormat, [ String(TVarData(v).VUString) ]);
    else
       Result := v;
    end;
@@ -3599,24 +3658,6 @@ end;
 // ------------------ TVarRecArrayContainer ------------------
 // ------------------
 
-// Create
-//
-constructor TVarRecArrayContainer.Create;
-begin
-end;
-
-// Create
-//
-constructor TVarRecArrayContainer.Create(const variantArray : array of Variant);
-var
-   i : Integer;
-begin
-   Create;
-   for i:=Low(variantArray) to High(variantArray) do
-      Add(variantArray[i]);
-   Initialize;
-end;
-
 // AddVarRec
 //
 function TVarRecArrayContainer.AddVarRec : PVarRec;
@@ -3770,9 +3811,9 @@ begin
    Clear;
 end;
 
-// GetList
+// List
 //
-function TTightList.GetList : PObjectTightList;
+function TTightList.List : PObjectTightList;
 begin
    if Count=1 then
       Result:=@FList
@@ -3952,9 +3993,13 @@ function TTightList.ItemsAllOfClass(aClass : TClass) : Boolean;
 var
    i : Integer;
 begin
-   for i:=0 to FCount-1 do
-      if List[i].ClassType<>aClass then Exit(False);
-   Result:=True;
+   if FCount = 1 then
+      Result := (TRefCountedObject(FList).ClassType = aClass)
+   else begin
+      for i := 0 to FCount-1 do
+         if FList[i].ClassType <> aClass then Exit(False);
+      Result := True;
+   end;
 end;
 
 // RaiseIndexOutOfBounds
@@ -3962,6 +4007,43 @@ end;
 procedure TTightList.RaiseIndexOutOfBounds;
 begin
    raise ETightListOutOfBound.Create('List index out of bounds');
+end;
+
+// GetEnumerator
+//
+function TTightList.GetEnumerator : TTightListEnumerator;
+begin
+   case FCount of
+      0 : begin
+         Result.FIter := nil;
+         Result.FTail := nil;
+      end;
+      1 : begin
+         Result.FIter := @FList;
+         Dec(Result.FIter);
+         Result.FTail := @FList;
+      end;
+   else
+      Result.FIter := PPointer(IntPtr(@FList[0])-SizeOf(Pointer));
+      Result.FTail := @PObjectTightList(Result.FIter)[FCount];
+   end;
+end;
+
+// TTightListEnumerator.MoveNext
+//
+function TTightList.TTightListEnumerator.MoveNext : Boolean;
+begin
+   if FIter <> FTail then begin
+      Inc(FIter);
+      Result := True;
+   end else Result := False;
+end;
+
+// TTightListEnumerator.Current
+//
+function TTightList.TTightListEnumerator.GetCurrent : TRefCountedObject;
+begin
+   Result := FIter^;
 end;
 
 // ------------------
@@ -4462,6 +4544,7 @@ begin
    // if we reach here, everything fits in current block
    dest:=@PByteArray(@FCurrentBlock[2])[FBlockRemaining^];
    Inc(FBlockRemaining^, count);
+   {$ifdef WIN32}
    case Cardinal(count) of
       0 : ;
       1 : dest[0]:=source[0];
@@ -4475,6 +4558,10 @@ begin
    else
       System.Move(source^, dest^, count);
    end;
+   {$else}
+   // "case of" got nerfed in non-32bit compilers, while System.Move was improved
+   System.Move(source^, dest^, count);
+   {$endif}
 end;
 
 // Write
@@ -6941,6 +7028,28 @@ begin
       Dec(FCount);
       FPool[FCount].Free;
    end;
+end;
+
+// ScanMemory
+//
+function ScanMemory(p : Pointer; size : IntPtr; const pattern : TBytes) : Pointer;
+var
+   n : IntPtr;
+   tail : UIntPtr;
+   iter : PByte;
+begin
+   n := Length(pattern);
+   if n <= 0 then Exit(nil);
+   tail := UIntPtr(@PByte(p)[size - n]);
+   iter := p;
+   while UIntPtr(iter) <= tail do begin
+      if iter^ = pattern[0] then begin
+         if CompareMem(iter, pattern, n) then
+            Exit(iter);
+      end;
+      Inc(iter);
+   end;
+   Result := nil;
 end;
 
 // ------------------------------------------------------------------

@@ -22,7 +22,8 @@ interface
 uses
    Classes, SysUtils, StrUtils, DateUtils,
    SynCrtSock, SynCommons,
-   dwsExprs, dwsUtils, dwsWebUtils, dwsWebServerUtils, dwsWebServerHelpers;
+   dwsExprs, dwsUtils, dwsWebUtils, dwsWebServerUtils, dwsWebServerHelpers,
+   dwsSymbols, dwsExprList;
 
 type
    TWebRequestAuthentication = (
@@ -234,6 +235,12 @@ type
       function WebResponse : TWebResponse; inline;
    end;
 
+   TWebEnvironmentRecordHelper = record helper for TExprBaseListExec
+      function WebEnvironment : IWebEnvironment; inline;
+      function WebRequest : TWebRequest; inline;
+      function WebResponse : TWebResponse; inline;
+   end;
+
    TWebStaticCacheEntry = class (TInterfacedSelfObject)
       private
          FStatusCode : Integer;
@@ -259,6 +266,7 @@ type
 
    TEmptyWebRequest = class(TWebRequest)
       protected
+         FMethod : String;
          FHeaders : TStringList;
 
          function GetHeaders : TStrings; override;
@@ -280,6 +288,8 @@ type
          function ContentLength : Integer; override;
          function ContentData : RawByteString; override;
          function ContentType : RawByteString; override;
+
+         property DirectMethod : String read FMethod write FMethod;
    end;
 
 const
@@ -287,13 +297,16 @@ const
       'None', 'Failed', 'Basic', 'Digest', 'NTLM', 'Negotiate', 'Kerberos', 'Header'
    );
 
-const
-   cWebRequestMethodVerbs : array [TWebRequestMethodVerb] of String = (
+
+const
+
+   cWebRequestMethodVerbs : array [TWebRequestMethodVerb] of String = (
       '?', 'OPTIONS', 'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'TRACE',
       'CONNECT', 'TRACK', 'MOVE', 'COPY', 'PROPFIND', 'PROPPATCH',
       'MKCOL', 'LOCK', 'UNLOCK', 'SEARCH' );
 
-   cHTMTL_UTF8_CONTENT_TYPE = 'text/html; charset=utf-8';
+
+   cHTMTL_UTF8_CONTENT_TYPE = 'text/html; charset=utf-8';
 
 implementation
 
@@ -305,21 +318,46 @@ implementation
 //
 function TWebEnvironmentHelper.WebEnvironment : IWebEnvironment;
 begin
-   Result:=(Execution.Environment as IWebEnvironment);
+   Result := (Execution.Environment as IWebEnvironment);
 end;
 
 // WebRequest
 //
 function TWebEnvironmentHelper.WebRequest : TWebRequest;
 begin
-   Result:=WebEnvironment.WebRequest;
+   Result := (Execution.Environment as IWebEnvironment).WebRequest;
 end;
 
 // WebResponse
 //
 function TWebEnvironmentHelper.WebResponse : TWebResponse;
 begin
-   Result:=WebEnvironment.WebResponse;
+   Result := (Execution.Environment as IWebEnvironment).WebResponse;
+end;
+
+// ------------------
+// ------------------ TWebEnvironmentRecordHelper ------------------
+// ------------------
+
+// WebEnvironment
+//
+function TWebEnvironmentRecordHelper.WebEnvironment : IWebEnvironment;
+begin
+   Result := (Exec.Environment as IWebEnvironment);
+end;
+
+// WebRequest
+//
+function TWebEnvironmentRecordHelper.WebRequest : TWebRequest;
+begin
+   Result := (Exec.Environment as IWebEnvironment).WebRequest;
+end;
+
+// WebResponse
+//
+function TWebEnvironmentRecordHelper.WebResponse : TWebResponse;
+begin
+   Result := (Exec.Environment as IWebEnvironment).WebResponse;
 end;
 
 // ------------------
@@ -399,7 +437,6 @@ begin
    Result:=TFastCompareTextList.Create;
 
    cookieField:=Header('Cookie');
-   p:=0;
    base:=1;
    while True do begin
       p:=StrUtils.PosEx('=', cookieField, base);
@@ -820,7 +857,7 @@ end;
 
 function TEmptyWebRequest.Method : String;
 begin
-   Result := '';
+   Result := FMethod;
 end;
 
 function TEmptyWebRequest.MethodVerb : TWebRequestMethodVerb;

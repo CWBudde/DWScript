@@ -17,7 +17,7 @@ unit dwsJITx86;
 {$I ../dws.inc}
 
 interface
-
+{$ifdef WIN32}
 {
    TODO:
    - range checking
@@ -762,6 +762,7 @@ begin
    RegisterJITter(TArrayAddExpr,                FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayInsertExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayIndexOfExpr,            FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfExpr,     FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayRemoveExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayDeleteExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayPopExpr,                FInterpretedJITter.IncRefCount);
@@ -882,6 +883,7 @@ begin
 
    RegisterJITter(TIncIntVarExpr,               Tx86IncIntVar.Create(Self));
    RegisterJITter(TDecIntVarExpr,               Tx86DecIntVar.Create(Self));
+   RegisterJITter(TIncIntVarWithConstExpr,      Tx86IncIntVar.Create(Self));
 
    RegisterJITter(TIncVarFuncExpr,              Tx86IncVarFunc.Create(Self));
    RegisterJITter(TDecVarFuncExpr,              Tx86DecVarFunc.Create(Self));
@@ -3969,7 +3971,7 @@ var
    e : TIncIntVarExpr;
 begin
    e:=TIncIntVarExpr(expr);
-   DoCompileStatement(e.Left as TIntVarExpr, e.Right);;
+   DoCompileStatement(e.Left as TIntVarExpr, e.Right);
 end;
 
 // ------------------
@@ -4850,5 +4852,9 @@ begin
 
    Result:=0;
 end;
+
+{$else}
+implementation
+{$endif}
 
 end.

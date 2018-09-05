@@ -233,7 +233,7 @@ begin
                   end;
                end else if left.AssignsAsDataExpr then begin
                   if right.InheritsFrom(TFuncExpr) then
-                     TFuncExpr(right).SetResultAddr(context.Prog as TdwsProgram, nil);
+                     TFuncExpr(right).InitializeResultAddr(context.Prog as TdwsProgram);
                   if right.InheritsFrom(TArrayConstantExpr) and (left.Typ is TArraySymbol) then
                      Result:=TAssignArrayConstantExpr.Create(context, scriptPos, left, TArrayConstantExpr(right))
                   else Result:=TAssignDataExpr.Create(context, scriptPos, left, right)
@@ -309,8 +309,8 @@ begin
 
    end else begin
 
-      left.Orphan(context);
-      right.Orphan(context);
+      context.OrphanObject(left);
+      context.OrphanObject(right);
       context.Msgs.AddCompilerError(scriptPos, CPE_RightSideNeedsReturnType);
       Result:=TNullExpr.Create(scriptPos);
 
@@ -434,7 +434,10 @@ begin
          dwsFreeAndNil(expr);
          internalFunc:=TMagicStaticMethodSymbol(meth).InternalFunction;
          Result:=internalFunc.MagicFuncExprClass.Create(context, scriptPos, meth, internalFunc);
-      end else Assert(False, 'not supported yet');
+      end else begin
+         Result := TMagicMethodExpr.Create(context, scriptPos, meth, expr);
+         TMagicMethodExpr(Result).OnFastEval := TMagicMethodSymbol(meth).OnFastEval;
+      end;
 
    end else if meth.StructSymbol is TInterfaceSymbol then begin
 
@@ -451,7 +454,7 @@ begin
          Result:=TFuncSimpleExpr.Create(context, scriptPos, meth);
          expr.Free;
          if (meth.Typ<>nil) and (meth.Typ.Size>1) then
-            Result.SetResultAddr(context.Prog as TdwsProgram, nil);
+            Result.InitializeResultAddr(context.Prog as TdwsProgram);
          Exit;
 
       end else if (expr.Typ is TClassOfSymbol) then begin
@@ -551,7 +554,7 @@ begin
    expr:=nil;
 
    if (meth.Typ<>nil) and (meth.Typ.Size>1) then
-      Result.SetResultAddr(context.Prog as TdwsProgram, nil);
+      Result.InitializeResultAddr(context.Prog as TdwsProgram);
 end;
 
 // TypeCheckArguments

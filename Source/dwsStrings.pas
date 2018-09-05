@@ -303,6 +303,7 @@ const
   CPE_ArrayBoundsOfDifferentTypes = 'Array bounds are of different types';
   CPE_ArrayIndexMismatch = 'Array index expected "%s" but got "%s"';
   CPE_ArrayMethodRestrictedToDynamicArrays = 'Array method "%s" is restricted to dynamic arrays';
+  CPE_ArrayMethodNotAvailableOnOpenArrays = 'Array method "%s" not available on open arrays';
   CPE_ArrayDoesNotHaveNaturalSortOrder = 'Array does not have a natural sort order';
 
   // Sets
@@ -504,6 +505,7 @@ const
   CPE_UnitExpected = '"unit" expected';
   CPE_UnitNotFound = 'Unit "%s" referenced in unit "%s" not found';
   CPE_UnitNameDoesntMatch = 'Unit name does not match file name';
+  CPH_UnitNameCaseDoesntMatch = 'Unit name case does not match file name';
   CPE_UnitCircularReference = 'Circular referencing units detected';
   CPE_FilterDependsOnUnit = 'The filter "%s" depends on unit "%s" that is not available.';
   CPE_ResultTypeDependsOnUnit = 'The result-type "%s" depends on unit "%s" that is not available.';
@@ -674,6 +676,7 @@ const
   UNT_CantChangeUnitname = 'Cannot change UnitName while property "Script" is assigned';
 
   UNT_InstancesNotSupportedInStaticUnits = 'Instances are not supported in static units';
+  UNT_FastEvalNotSupportedForVirtualMethods = 'FastEval not supported for virtual methods';
 
   ADP_ChainIsFormingLoop = 'Adapter chain is forming a loop';
   ADP_IncompatibleAdapters = 'Incompatible Adapters: %s -> %s';

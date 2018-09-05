@@ -33,7 +33,6 @@ package dwsLib;
 requires
   designide,
   vcl,
-  rtl,
   dwsLibRuntime;
 
 contains

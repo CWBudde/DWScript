@@ -344,8 +344,7 @@ type
 const
    /// used by THttpApi2Server.Request for http.sys to send a static file
    // - the OutCustomHeader should contain the proper 'Content-type: ....'
-   // corresponding to the file (e.g. by calling GetMimeContentType() function
-   // from SynCommons supplyings the file name)
+   // corresponding to the file
    HTTP_RESP_STATICFILE = '!STATICFILE';
 
 function RegURL(aRoot : String; aPort : Integer; isHttps : boolean;
@@ -365,23 +364,21 @@ const
 var
    vWsaDataOnce : TWSADATA;
 
-function GetNextItemUInt64(var P : PAnsiChar) : Int64;
+function GetNextItemInt64(var p : PAnsiChar) : Int64;
 var
-   c : PtrUInt;
+   c : Integer;
 begin
-   if P = nil then begin
-      result := 0;
-      exit;
-   end;
-   result := byte(P^)-48;  // caller ensured that P^ in ['0'..'9']
-   inc(P);
+   if p = nil then
+      Exit(0);
+   Result := Byte(P^)-Ord('0');  // caller ensured that P^ in ['0'..'9']
+   Inc(p);
    repeat
-      c := byte(P^)-48;
-      if c>9 then
-         break
-      else result := result*10+c;
-      inc(P);
-   until false;
+      c := Byte(p^)-Ord('0');
+      if c > 9 then
+         Break
+      else Result := Result*10 + c;
+      Inc(p);
+   until False;
 end; // P^ will point to the first non digit char
 
 function GetCardinal(P, PEnd : PAnsiChar) : cardinal; overload;
@@ -509,7 +506,7 @@ end;
 function RegURL(aRoot : String; aPort : Integer; isHttps : boolean;
    aDomainName : String) : String;
 const
-   Prefix : array[boolean] of String = ('http://', 'https://');
+   cPrefix : array [Boolean] of String = ('http://', 'https://');
 begin
    if aPort=0 then
       aPort := 80;
@@ -527,7 +524,7 @@ begin
    end else begin
       aRoot := '/'; // allow for instance 'http://*:2869/'
    end;
-   result := Prefix[isHttps]+aDomainName+':'+IntToStr(aPort)+aRoot;
+   result := cPrefix[isHttps]+aDomainName+':'+IntToStr(aPort)+aRoot;
 end;
 
 // ToString
@@ -671,13 +668,13 @@ begin
             and (pRawValue[6] in ['0'..'9']) then begin
             SetString(contentRange, pRawValue+6, RawValueLength-6); // need #0 end
             R := pointer(contentRange);
-            rangeStart := GetNextItemUInt64(R);
+            rangeStart := GetNextItemInt64(R);
             if R^ = '-' then begin
                inc(R);
                flags := HTTP_SEND_RESPONSE_FLAG_PROCESS_RANGES;
                dataChunkFile.ByteRange.StartingOffset := ULARGE_INTEGER(rangeStart);
                if R^ in ['0'..'9'] then begin
-                  rangeLength := GetNextItemUInt64(R)-rangeStart+1;
+                  rangeLength := GetNextItemInt64(R)-rangeStart+1;
                   if rangeLength>=0 then // "bytes=0-499" -> start=0, len=500
                      dataChunkFile.ByteRange.Length := ULARGE_INTEGER(rangeLength);
                end; // "bytes=1000-" -> start=1000, len=-1 (to eof)

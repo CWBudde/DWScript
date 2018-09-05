@@ -55,13 +55,17 @@ type
          function InTransaction : Boolean;
          function CanReleaseToPool : String;
 
-         procedure Exec(const sql : String; const parameters : TData; context : TExprBase);
-         function Query(const sql : String; const parameters : TData; context : TExprBase) : IdwsDataSet;
+         procedure Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
+         function Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
 
          function VersionInfoText : String;
 
          property DB : TSQLDatabase read FDB;
          property Module[const name : String] : TObject read GetModule write SetModule;
+
+         function OptionList : TStringDynArray; override;
+         function GetOption(const name : String) : String; override;
+         procedure SetOption(const name, value : String); override;
    end;
 
    TdwsSynSQLiteDataSet = class (TdwsDataSet)
@@ -75,7 +79,7 @@ type
          procedure DoPrepareFields; override;
 
       public
-         constructor Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : TData);
+         constructor Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IDataContext);
          destructor Destroy; override;
 
          function Eof : Boolean; override;
@@ -164,7 +168,7 @@ end;
 
 // SQLAssignParameters
 //
-procedure SQLAssignParameters(var rq : TSQLRequest; const params : TData);
+procedure SQLAssignParameters(var rq : TSQLRequest; const params : IDataContext);
 
    procedure BindDateTime(var rq : TSQLRequest; i : Integer; p : PVarData);
    var
@@ -178,8 +182,8 @@ var
    i : Integer;
    p : PVarData;
 begin
-   for i:=1 to Length(params) do begin
-      p:=PVarData(@params[i-1]);
+   for i:=1 to params.DataLength do begin
+      p:=PVarData(params.AsPVariant(i-1));
       case p.VType of
          varInt64 : rq.Bind(i, p.VInt64);
          varDouble : rq.Bind(i, p.VDouble);
@@ -322,7 +326,7 @@ end;
 
 // Exec
 //
-procedure TdwsSynSQLiteDataBase.Exec(const sql : String; const parameters : TData; context : TExprBase);
+procedure TdwsSynSQLiteDataBase.Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
 var
    err : Integer;
 begin
@@ -351,7 +355,7 @@ end;
 
 // Query
 //
-function TdwsSynSQLiteDataBase.Query(const sql : String; const parameters : TData; context : TExprBase) : IdwsDataSet;
+function TdwsSynSQLiteDataBase.Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
 var
    ds : TdwsSynSQLiteDataSet;
 begin
@@ -388,13 +392,49 @@ begin
    FModules.Objects[name] := aModule;
 end;
 
+const
+   cSQLiteOptions : array [0..0] of String = (
+      'soft_heap_limit64'
+   );
+
+// OptionList
+//
+function TdwsSynSQLiteDataBase.OptionList : TStringDynArray;
+var
+   n, i : Integer;
+begin
+   Result := inherited OptionList;
+   n := Length(Result);
+   SetLength(Result, n + Length(cSQLiteOptions));
+   for i := 0 to High(cSQLiteOptions) do
+      Result[n+i] := cSQLiteOptions[i];
+end;
+
+// GetOption
+//
+function TdwsSynSQLiteDataBase.GetOption(const name : String) : String;
+begin
+   if name = cSQLiteOptions[0] then
+      Result := IntToStr(sqlite3.soft_heap_limit64(-1))
+   else Result := inherited GetOption(name);
+end;
+
+// SetOption
+//
+procedure TdwsSynSQLiteDataBase.SetOption(const name, value : String);
+begin
+   if name = cSQLiteOptions[0] then
+      sqlite3.soft_heap_limit64(StrToInt64(value))
+   else inherited SetOption(name, value);
+end;
+
 // ------------------
 // ------------------ TdwsSynSQLiteDataSet ------------------
 // ------------------
 
 // Create
 //
-constructor TdwsSynSQLiteDataSet.Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : TData);
+constructor TdwsSynSQLiteDataSet.Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IDataContext);
 begin
    FSQL := sql;
    FDB := db;
