@@ -2849,6 +2849,27 @@ begin
       {$endif}
 
       Result:=CreateAssign(scriptPos, ttASSIGN, varExpr, initExpr);
+      if Optimize and Assigned(Result) then
+      begin
+        if ((Result is TAssignConstToBoolVarExpr) and (TAssignConstToBoolVarExpr(Result).Right = False)) or
+           ((Result is TAssignConstToStringVarExpr) and (TAssignConstToStringVarExpr(Result).Right = '')) or
+           ((Result is TAssignConstToIntegerVarExpr) and (TAssignConstToIntegerVarExpr(Result).Right = 0))or
+           ((Result is TAssignConstToFloatVarExpr) and (TAssignConstToFloatVarExpr(Result).Right = 0)) then
+        begin
+          Result.Free;
+          Result := nil;
+        end
+        else
+        if ((TAssignExpr(Result).Right is TConstBooleanExpr) and (TConstBooleanExpr(TAssignExpr(Result).Right).Value = False)) or
+           ((TAssignExpr(Result).Right is TConstStringExpr) and (TConstStringExpr(TAssignExpr(Result).Right).Value = '')) or
+           ((TAssignExpr(Result).Right is TConstIntExpr) and (TConstIntExpr(TAssignExpr(Result).Right).Value = 0)) or
+           ((TAssignExpr(Result).Right is TConstFloatExpr) and (TConstFloatExpr(TAssignExpr(Result).Right).Value = 0)) then
+        begin
+          Result.Free;
+          Result := nil;
+        end;
+      end;
+
       initExpr:=nil;
 
    end else begin
