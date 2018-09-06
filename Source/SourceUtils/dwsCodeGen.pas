@@ -45,6 +45,8 @@ type
 
    TdwsCodeGenSymbolScope = (cgssGlobal, cgssClass, cgssLocal, cgssNoMap);
 
+   TdwsCodeGenIncludeRtlLevel = (ilDependent, ilAlways, ilNever);
+
    TdwsCodeGenSymbolMaps = class;
 
    TdwsCodeGenSymbolMap = class (TRefCountedObject)
@@ -173,6 +175,7 @@ type
          FIndentSize : Integer;
          FOptions : TdwsCodeGenOptions;
          FVerbosity : TdwsCodeGenOutputVerbosity;
+         FIncludeRtlLevel : TdwsCodeGenIncludeRtlLevel;
          FTryDepth : Integer;
 
          FDataContextPool : IDataContextPool;
@@ -323,6 +326,7 @@ type
          property IndentSize : Integer read FIndentSize write FIndentSize;
          property Options : TdwsCodeGenOptions read FOptions write FOptions;
          property Verbosity : TdwsCodeGenOutputVerbosity read FVerbosity write FVerbosity;
+         property IncludeRtlLevel : TdwsCodeGenIncludeRtlLevel read FIncludeRtlLevel write FIncludeRtlLevel;
 
          property Dependencies : TdwsCodeGenDependencies read FDependencies;
          property FlushedDependencies : TStringList read FFlushedDependencies;
@@ -406,6 +410,7 @@ begin
 //   FSymbolMaps:=TdwsCodeGenSymbolMaps.Create;
    FIndentChar:=' ';
    FIndentSize:=3;
+   FIncludeRtlLevel:=ilDependent;
    FDataContextPool:=TDataContextPool.Create;
 end;
 
