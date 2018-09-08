@@ -3865,7 +3865,7 @@ end;
 //
 class function TdwsJSCodeGen.All_RTL_JS : String;
 begin
-   Result:=dwsJSRTL.All_RTL_JS;
+   Result := dwsJSRTL.All_RTL_JS;
 end;
 
 // IgnoreRTLDependencies
