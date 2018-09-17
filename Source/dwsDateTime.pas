@@ -40,7 +40,7 @@ type
 
          constructor Create;
 
-         function FormatDateTime(const fmt : String; dt : Double; tz : TdwsTimeZone) : String;
+         function FormatDateTime(const fmt : String; dt : TDateTime; tz : TdwsTimeZone) : String;
          function DateTimeToStr(const dt : TDateTime; tz : TdwsTimeZone) : String;
          function DateToStr(const dt : TDateTime; tz : TdwsTimeZone) : String;
          function TimeToStr(const dt : TDateTime; tz : TdwsTimeZone) : String;
@@ -91,7 +91,7 @@ type
          TimeNeeded, DateNeeded : Boolean;
 
          procedure AddToken(tok : TDateTimeToken);
-         procedure AddLitteral(const s : String);
+         procedure AddLiteral(const s : String);
 
       public
          constructor Create(const fmt : String);
@@ -220,7 +220,7 @@ begin
                   Inc(p, 2);
                end;
             end else begin
-               AddLitteral('y');
+               AddLiteral('y');
                Inc(p);
             end;
          end;
@@ -234,7 +234,7 @@ begin
             end;
          end;
          'n', 'N' : begin
-            if (p[1] = 'n') or (p[1] = 'n') then begin
+            if (p[1] = 'n') or (p[1] = 'N') then begin
                AddToken(_nn);
                Inc(p, 2);
             end else begin
@@ -243,7 +243,7 @@ begin
             end;
          end;
          's', 'S' : begin
-            if (p[1] = 's') or (p[1] = 's') then begin
+            if (p[1] = 's') or (p[1] = 'S') then begin
                AddToken(_ss);
                Inc(p, 2);
             end else begin
@@ -271,7 +271,7 @@ begin
                AddToken(_a_p);
                Inc(p, 3);
             end else begin
-               AddLitteral('a');
+               AddLiteral('a');
                Inc(p);
             end;
          end;
@@ -283,13 +283,13 @@ begin
             Inc(quoteStart);
             if quoteStart <> p then begin
                SetString(buf, quoteStart, (NativeUInt(p)-NativeUInt(quoteStart)) div SizeOf(Char));
-               AddLitteral(buf);
+               AddLiteral(buf);
             end;
             if p^ <> #0 then
                Inc(p);
          end;
       else
-         AddLitteral(p^);
+         AddLiteral(p^);
          Inc(p);
       end;
    end;
@@ -411,9 +411,9 @@ begin
    Items[n].Token := tok;
 end;
 
-// AddLitteral
+// AddLiteral
 //
-procedure TdwsDateTimeFormatter.AddLitteral(const s : String);
+procedure TdwsDateTimeFormatter.AddLiteral(const s : String);
 var
    n : Integer;
 begin
@@ -443,7 +443,7 @@ end;
 // FormatDateTime
 //
 // Clean Room implementation based strictly on the format String
-function TdwsFormatSettings.FormatDateTime(const fmt : String; dt : Double; tz : TdwsTimeZone) : String;
+function TdwsFormatSettings.FormatDateTime(const fmt : String; dt : TDateTime; tz : TdwsTimeZone) : String;
 begin
    if fmt = '' then Exit;
 
@@ -491,14 +491,16 @@ var
    dth : Double;
    match, previousWasHour, hourToken : Boolean;
 
-   procedure GrabDigits(nbDigits : Integer);
+   function GrabDigits(nbDigits : Integer) : Boolean;
    begin
+      Result := False;
       while (nbDigits>0) and (p<=Length(str)) do begin
          Dec(nbDigits);
          case str[p] of
             '0'..'9' : begin
                value:=value*10+Ord(str[p])-Ord('0');
                Inc(p);
+               Result := True;
             end;
          else
             break;
@@ -546,7 +548,10 @@ begin
                'm', 'd', 'h', 'n', 's' : GrabDigits(1);
                'z' : GrabDigits(2);
             end;
-         2 : if tok='yy' then GrabDigits(2);
+         2 : if tok='yy' then begin
+            if GrabDigits(2) then
+               tok := 'yyyy';
+         end;
       end;
 
       hourToken:=False;
@@ -651,7 +656,11 @@ begin
             Result:=True;
          end;
       end else begin
-         dt:=dth;
+         if (tz=tzUTC) or ((tz=tzDefault) and (TimeZone=tzUTC)) then begin
+            dt := Frac(LocalDateTimeToUTCDateTime(Trunc(Now) + dth));
+         end else begin
+            dt := dth;
+         end;
          Result:=True;
       end;
    end;

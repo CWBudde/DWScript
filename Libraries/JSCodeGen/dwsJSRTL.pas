@@ -146,7 +146,7 @@ implementation
 {$R dwsJSRTL.res}
 
 const
-   cJSRTLDependencies : array [1..274] of TJSRTLDependency = (
+   cJSRTLDependencies : array [1..285] of TJSRTLDependency = (
       // codegen utility functions
       (Name : '$CheckStep';
        Code : 'function $CheckStep(s,z) { if (s>0) return s; throw Exception.Create($New(Exception),"FOR loop STEP should be strictly positive: "+s.toString()+z); }';
@@ -511,15 +511,16 @@ const
       (Name : '$SetMul';
        code : 'function $SetMul(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]&b[i]); return r }'),
       (Name : '$TZ';
-       code : 'var $TZ = 1;'#13#10
-              +'var $fmt = { '#13#10
-              +#9'ShortDayNames : [ "sun", "mon", "tue", "wed", "thu", "fri", "sat" ],'#13#10
-              +#9'LongDayNames : [ "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday" ],'#13#10
-              +#9'ShortMonthNames : [ "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec" ],'#13#10
-              +#9'LongMonthNames : [ "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december" ],'#13#10
+       code : 'var $TZ = 1, $fmt = { '#13#10
+              +#9'ShortDayNames : [ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" ],'#13#10
+              +#9'LongDayNames : [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" ],'#13#10
+              +#9'ShortMonthNames : [ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" ],'#13#10
+              +#9'LongMonthNames : [ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" ],'#13#10
               +#9'ShortDateFormat : "yyyy-mm-dd",'#13#10
               +#9'ShortTimeFormat : "hh:nn",'#13#10
-              +#9'LongTimeFormat : "hh:nn:ss"'#13#10
+              +#9'LongTimeFormat : "hh:nn:ss",'#13#10
+              +#9'TimeAMString : "AM",'#13#10
+              +#9'TimePMString : "PM"'#13#10
               +'}'),
 
       // RTL classes
@@ -628,6 +629,9 @@ const
        Code : 'function ArcTanh(v) { return 0.5*Math.log((1+v)/(1-v)) }'),
       (Name : 'BoolToStr';
        Code : 'function BoolToStr(b) { return b?"True":"False" }'),
+      (Name : 'ByteSizeToStr';
+       Code : '';
+       Dependency : '!byteSizeToStr_js' ),
       (Name : 'Ceil';
        Code : 'var Ceil = Math.ceil'),
       (Name : 'CharAt';
@@ -648,6 +652,14 @@ const
       (Name : 'CompareText';
        Code : 'function CompareText(a,b) { return CompareStr(a.toUpperCase(), b.toUpperCase()) }';
        Dependency : 'CompareStr'),
+      (Name : 'CompareNum$_Integer_Integer_';
+       Code : 'function CompareNum$_Integer_Integer_(a,b) { return a>b?1:a<b?-1:0 }'),
+      (Name : 'CompareNum$_Float_Integer_';
+       Code : 'function CompareNum$_Float_Integer_(a,b) { return a>b?1:a<b?-1:0 }'),
+      (Name : 'CompareNum$_Integer_Float_';
+       Code : 'function CompareNum$_Integer_Float_(a,b) { return a>b?1:a<b?-1:0 }'),
+      (Name : 'CompareNum$_Float_Float_';
+       Code : 'function CompareNum$_Float_Float_(a,b) { return a>b?1:a<b?-1:0 }'),
       (Name : 'Copy';
        Code : 'function Copy(s,f,n) { return s.substr(f-1,n) }'),
       (Name : 'Cos';
@@ -671,11 +683,19 @@ const
        Dependency : 'FormatDateTime' ),
       (Name : 'DateTimeToRFC822';
        Code : 'function DateTimeToRFC822(v) {'#13#10
-               +#9'return new Date(Math.round((v-25569)*864e5));'#13#10
+               +#9'return (new Date(Math.round((v-25569)*864e5))).toUTCString();'#13#10
                +'}' ),
       (Name : 'DateTimeToStr';
        Code : 'function DateTimeToStr(v, u) { return FormatDateTime($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, v, u) }';
        Dependency : 'FormatDateTime' ),
+      (Name : 'UnixTimeToLocalDateTime';
+       Code : 'function UnixTimeToLocalDateTime(t) { return t/86400+25569-(new Date(t*1e3)).getTimezoneOffset()/1440 }' ),
+      (Name : 'LocalDateTimeToUnixTime';
+       Code : 'function LocalDateTimeToUnixTime(t) { var ut = (t-25569)*86400; return ut+(new Date(ut*1e3)).getTimezoneOffset()*60 }' ),
+      (Name : 'LocalDateTimeToUTCDateTime';
+       Code : 'function LocalDateTimeToUTCDateTime(t) { return t+(new Date((t-25569)*864e5)).getTimezoneOffset()/1440 }' ),
+      (Name : 'UTCDateTimeToLocalDateTime';
+       Code : 'function UTCDateTimeToLocalDateTime(t) { return t-(new Date((t-25569)*864e5)).getTimezoneOffset()/1440 }' ),
       (Name : 'DateTimeToUnixTime';
        Code : 'function DateTimeToUnixTime(t) { return Math.floor((t-25569)*86400) }' ),
       (Name : 'DateToISO8601';
@@ -856,7 +876,12 @@ const
       (Name : 'IntPower$_Float_Integer_';
        Code : 'var IntPower$_Float_Integer_ = Math.pow'),
       (Name : 'ISO8601ToDateTime';
-       Code : 'function ISO8601ToDateTime(s) { return Date.parse(s)/864e5+25569 }'),
+       Code : 'function ISO8601ToDateTime(s) {'#13#10
+              +#9'var r = Date.parse(s)/864e5+25569;'#13#10
+              +#9'if (isNaN(r)) throw Exception.Create($New(Exception),"Invalid ISO8601")'#13#10
+              +#9'return r;'#13#10
+              +'}';
+       Dependency : 'Exception' ),
       (Name : 'IntToBin';
        Code : 'function IntToBin(v,d) { var r=v.toString(2); while (r.length<d) r="0"+r; return r }'),
       (Name : 'IntToHex';
@@ -902,6 +927,8 @@ const
        Code : 'function LogN(n,x) { return Math.log(x)/Math.log(n) }'),
       (Name : 'LowerCase';
        Code : 'function LowerCase(v) { return v.toLowerCase() }'),
+      (Name : 'MaxInt$_';
+       Code : 'function MaxInt$_() { return 9007199254740991 };'),
       (Name : 'Max$_Float_Float_';
        Code : 'function Max$_Float_Float_(a,b) { return (a>b)?a:b }'),
       (Name : 'Max$_Integer_Integer_';
@@ -948,7 +975,7 @@ const
        Dependency : 'StringOfString' ),
       (Name : 'ParseDateTime';
        Code : 'function ParseDateTime(f, s, u) { return strToDateTimeDef(f, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
       (Name : 'Pos';
        Code : 'function Pos(a,b) { return b.indexOf(a)+1 }'),
       (Name : 'PosEx';
@@ -1023,7 +1050,7 @@ const
        Code : 'function StrBetween(s,d,f) { return StrBefore(StrAfter(s, d), f) }';
        Dependency: 'StrAfter'; Dependency2: 'StrBefore'),
       (Name : 'StrBeginsWith';
-       Code : 'function StrBeginsWith(s,b) { return s.substr(0, b.length)==b }'),
+       Code : 'function StrBeginsWith(s,b) { return (b.length > 0) ? s.substr(0, b.length)==b : false }'),
       (Name : 'StrContains';
        Code : 'function StrContains(s,b) { return s.indexOf(b)>=0 }'),
       (Name : 'StrDeleteLeft';
@@ -1060,16 +1087,16 @@ const
        Code : 'function StrToBool(s) { return (/^(t|y|1|true|yes)$/i).test(s) }'),
       (Name : 'StrToDate';
        Code : 'function StrToDate(s,u) { return strToDateTimeDef($fmt.ShortDateFormat, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateDef';
        Code : 'function StrToDateDef(s,d,u) { return strToDateTimeDef($fmt.ShortDateFormat, s, d, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateTime';
-       Code : 'function StrToDateTime(s,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Code : 'function StrToDateTime(s,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, 0, u) || strToDateTimeDef($fmt.ShortDateFormat, s, 0, u) }';
+       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateTimeDef';
-       Code : 'function StrToDateTimeDef(s,d,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, d, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Code : 'function StrToDateTimeDef(s,d,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, 0, u) || strToDateTimeDef($fmt.ShortDateFormat, s, d, u) }';
+       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToFloat';
        Code : 'function StrToFloat(v) { return parseFloat(v) }'),
       (Name : 'StrToFloatDef';
@@ -1176,6 +1203,8 @@ const
        Code : 'function VarIsStr(v) { return typeof v === "string" }'),
       (Name : 'VarToStr';
        Code : 'function VarToStr(v) { return (typeof v === "undefined")?"":v.toString() }'),
+      (Name : 'VarToFloatDef';
+       Code : 'function VarToFloatDef(v, d) { if (v == null) return d; var r = parseFloat(v); return isNaN(r) ? d : r }'),
       (Name : 'VarType';
        Code : 'function VarType(v) {'#13#10
                +#9'switch (Object.prototype.toString.call(v)) {'#13#10
@@ -1284,8 +1313,8 @@ begin
    FMagicCodeGens.AddObject('ArcTan', TdwsExprGenericCodeGen.Create(['Math.atan', '(', 0, ')']));
    FMagicCodeGens.AddObject('ArcTan2', TdwsExprGenericCodeGen.Create(['Math.atan2', '(', 0, ',', 1, ')']));
    FMagicCodeGens.AddObject('Ceil', TdwsExprGenericCodeGen.Create(['Math.ceil', '(', 0, ')']));
-   FMagicCodeGens.AddObject('Cos', TdwsExprGenericCodeGen.Create(['Math.cos', '(', 0, ')']));
    FMagicCodeGens.AddObject('Copy', TJSStrCopyFuncExpr.Create);
+   FMagicCodeGens.AddObject('Cos', TdwsExprGenericCodeGen.Create(['Math.cos', '(', 0, ')']));
    FMagicCodeGens.AddObject('MidStr', TJSStrCopyFuncExpr.Create);
    FMagicCodeGens.AddObject('Exp', TdwsExprGenericCodeGen.Create(['Math.exp', '(', 0, ')']));
    FMagicCodeGens.AddObject('FloatToStr$_Float_', TJSFloatToStrExpr.Create);
@@ -1576,7 +1605,7 @@ begin
 
       c:=TConstStringExpr(a);
       case Length(c.Value) of
-         0 : codeGen.WriteString('true');
+         0 : codeGen.WriteString('false');
          1 : begin
             codeGen.WriteString('(');
             codeGen.Compile(e.Args[0]);
