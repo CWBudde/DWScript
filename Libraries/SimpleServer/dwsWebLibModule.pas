@@ -104,11 +104,11 @@ type
       baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
     procedure dwsWebClassesWebRequestMethodsGetCookieFastEvalString(
       baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
-    function dwsWebClassesWebRequestMethodsHasQueryFieldFastEvalBolean(
+    function dwsWebClassesWebRequestMethodsHasQueryFieldFastEvalBoolean(
       baseExpr: TTypedExpr; const args: TExprBaseListExec): Boolean;
     procedure dwsWebClassesWebRequestMethodsGetContentFieldFastEvalString(
       baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
-    function dwsWebClassesWebRequestMethodsHasContentFieldFastEvalBolean(
+    function dwsWebClassesWebRequestMethodsHasContentFieldFastEvalBoolean(
       baseExpr: TTypedExpr; const args: TExprBaseListExec): Boolean;
     procedure dwsWebClassesWebRequestMethodsFullURLFastEvalString(
       baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
@@ -460,8 +460,10 @@ begin
       if not Finished then
          WaitFor;
       Free;
-   end else Released := True;
-   ReleaseLock.EndWrite;
+   end else begin
+      Released := True;
+      ReleaseLock.EndWrite;
+   end;
 end;
 
 // Wait
@@ -683,13 +685,13 @@ begin
    Result := args.WebRequest.Cookies.Values[args.AsString[0]];
 end;
 
-function TdwsWebLib.dwsWebClassesWebRequestMethodsHasContentFieldFastEvalBolean(
+function TdwsWebLib.dwsWebClassesWebRequestMethodsHasContentFieldFastEvalBoolean(
   baseExpr: TTypedExpr; const args: TExprBaseListExec): Boolean;
 begin
    Result := args.WebRequest.HasContentField(args.AsString[0]);
 end;
 
-function TdwsWebLib.dwsWebClassesWebRequestMethodsHasQueryFieldFastEvalBolean(
+function TdwsWebLib.dwsWebClassesWebRequestMethodsHasQueryFieldFastEvalBoolean(
   baseExpr: TTypedExpr; const args: TExprBaseListExec): Boolean;
 begin
    Result := args.WebRequest.HasQueryField(args.AsString[0]);
