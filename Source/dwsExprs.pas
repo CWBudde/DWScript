@@ -714,6 +714,8 @@ type
 
          function ScriptLocation(prog : TObject) : String; override;
 
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); virtual;
+
          function InterruptsFlow : Boolean; virtual;
 
          property Typ : TTypeSymbol read GetType;
@@ -819,6 +821,7 @@ type
          function ExtractStatement(index : Integer) : TProgramExpr;
 
          function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property StatementCount : Integer read FCount;
    end;
@@ -1049,6 +1052,7 @@ type
       function SameFunc(const v : Variant) : Boolean;
       procedure EvalAsVariant(exec : TdwsExecution; caller : TFuncExpr; var result : Variant);
       function EvalAsInteger(exec : TdwsExecution; caller : TFuncExpr) : Int64;
+      function EvalAsBoolean(exec : TdwsExecution; caller : TFuncExpr) : Boolean;
       function EvalDataPtr(exec : TdwsExecution; caller : TFuncExpr; resultAddr : Integer) : IDataContext;
    end;
 
@@ -1074,6 +1078,7 @@ type
 
          procedure EvalAsVariant(exec : TdwsExecution; caller : TFuncExpr; var result : Variant);
          function EvalAsInteger(exec : TdwsExecution; caller : TFuncExpr) : Int64;
+         function EvalAsBoolean(exec : TdwsExecution; caller : TFuncExpr) : Boolean;
          function EvalDataPtr(exec : TdwsExecution; caller : TFuncExpr; resultAddr : Integer) : IDataContext;
    end;
 
@@ -1660,6 +1665,7 @@ type
          FCapacity, FGrowth : Integer;
          FHashCodes : TScriptAssociativeArrayHashCodes;
          FKeys : TData;
+         FCreateKeyOnAccess : Boolean;
 
       protected
          procedure Grow;
@@ -1677,8 +1683,6 @@ type
          procedure GetDataPtr(exec : TdwsExecution; index : TTypedExpr; var result : IDataContext);
          function GetDataAsBoolean(exec : TdwsExecution; index : TTypedExpr) : Boolean;
          function GetDataAsInteger(exec : TdwsExecution; index : TTypedExpr) : Int64; overload;
-
-         procedure GetValueDataPtr(exec : TdwsExecution; const keyValue : Variant; var result : IDataContext);
          function GetDataAsInteger(exec : TdwsExecution; const keyValue : Variant) : Int64; overload;
 
          //procedure ReplaceData(exec : TdwsExecution; index : Int64; value : TDataExpr);
@@ -2626,12 +2630,13 @@ procedure TdwsProgramExecution.DebuggerNotifyException(const exceptObj : IScript
 var
    addr, i : Integer;
 begin
-   if not IsDebugging then Exit;
-   addr:=DebuggerFieldAddr;
-   i:=exceptObj.AsInteger[addr];
-   exceptObj.AsInteger[addr]:=i+1;
-   if i=0 then
-      Debugger.NotifyException(Self, exceptObj);
+   if (exceptObj <> nil) and IsDebugging then begin
+      addr := DebuggerFieldAddr;
+      i := exceptObj.AsInteger[addr];
+      exceptObj.AsInteger[addr] := i+1;
+      if i = 0 then
+         Debugger.NotifyException(Self, exceptObj);
+   end;
 end;
 
 // ------------------
@@ -4000,6 +4005,13 @@ begin
    else Result:=ScriptPos.AsInfo;
 end;
 
+// EnumerateSteppableExprs
+//
+procedure TProgramExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   // empty
+end;
+
 // InterruptsFlow
 //
 function TProgramExpr.InterruptsFlow : Boolean;
@@ -4324,6 +4336,16 @@ begin
       blockExpr.AddStatement(FStatements[i].SpecializeProgramExpr(context));
 
    Result := blockExpr;
+end;
+
+// EnumerateSteppableExprs
+//
+procedure TBlockExprBase.EnumerateSteppableExprs(const callback : TExprBaseProc);
+var
+   i : Integer;
+begin
+   for i := 0 to FCount-1 do
+      callback(FStatements[i]);
 end;
 
 // SpecializeTable
@@ -5438,17 +5460,47 @@ end;
 // EvalAsInteger
 //
 function TFuncPointer.EvalAsInteger(exec : TdwsExecution; caller : TFuncExpr) : Int64;
+
+   function Fallback(var v : TVarData) : Int64;
+   begin
+      try
+         Result := VariantToInt64(Variant(v));
+      finally
+         VarClearSafe(Variant(v));
+      end;
+   end;
+
 var
    v : TVarData;
 begin
-   v.VType:=varInt64;
+   v.VType := varInt64;
    FDoEvalAsVariant(exec, caller, Variant(v));
-   if v.VType=varInt64 then
-      Result:=v.VInt64
-   else begin
-      Result:=Variant(v);
-      VarClearSafe(Variant(v));
+   if v.VType = varInt64 then
+      Result := v.VInt64
+   else Result := Fallback(v);
+end;
+
+// EvalAsBoolean
+//
+function TFuncPointer.EvalAsBoolean(exec : TdwsExecution; caller : TFuncExpr) : Boolean;
+
+   function Fallback(var v : TVarData) : Boolean;
+   begin
+      try
+         Result := VariantToBool(Variant(v));
+      finally
+         VarClearSafe(Variant(v));
+      end;
    end;
+
+var
+   v : TVarData;
+begin
+   v.VType := varBoolean;
+   FDoEvalAsVariant(exec, caller, Variant(v));
+   if v.VType = varBoolean then
+      Result := v.VBoolean
+   else Result := Fallback(v);
 end;
 
 // EvalDataPtr
@@ -7587,20 +7639,23 @@ end;
 class function TScriptAssociativeArray.CreateNew(keyTyp, elemTyp : TTypeSymbol) : TScriptAssociativeArray;
 var
    size : Integer;
+   ct : TClass;
 begin
-   Result:=TScriptAssociativeArray.Create;
+   Result := TScriptAssociativeArray.Create;
 
-   if keyTyp<>nil then
-      size:=keyTyp.Size
-   else size:=0;
-   Result.FKeyTyp:=keyTyp;
-   Result.FKeySize:=size;
+   if keyTyp <> nil then
+      size := keyTyp.Size
+   else size := 0;
+   Result.FKeyTyp := keyTyp;
+   Result.FKeySize := size;
 
-   if elemTyp<>nil then
-      size:=elemTyp.Size
-   else size:=0;
-   Result.FElementTyp:=elemTyp;
-   Result.FElementSize:=size;
+   if elemTyp <> nil then begin
+      size := elemTyp.Size;
+      ct := elemTyp.UnAliasedType.ClassType;
+      Result.FCreateKeyOnAccess := (ct = TDynamicArraySymbol) or (ct = TAssociativeArraySymbol)
+   end else size := 0;
+   Result.FElementTyp := elemTyp;
+   Result.FElementSize := size;
 end;
 
 // Grow
@@ -7695,6 +7750,28 @@ begin
    end;
 end;
 
+// ReplaceValue
+//
+procedure TScriptAssociativeArray.ReplaceValue(exec : TdwsExecution; index, value : TTypedExpr);
+var
+   i : Integer;
+   hashCode : Cardinal;
+   key : IDataContext;
+begin
+   if FCount>=FGrowth then Grow;
+
+   IndexExprToKeyAndHashCode(exec, index, key, hashCode);
+   i:=(hashCode and (FCapacity-1));
+   if not LinearFind(key, i) then begin
+      FHashCodes[i]:=hashCode;
+      key.CopyData(FKeys, i*FKeySize, FKeySize);
+      Inc(FCount);
+   end;
+   if FElementSize > 1 then
+      WriteData(i*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), FElementSize)
+   else value.EvalAsVariant(exec, AsPVariant(i)^);
+end;
+
 // GetDataPtr
 //
 procedure TScriptAssociativeArray.GetDataPtr(exec : TdwsExecution; index : TTypedExpr; var result : IDataContext);
@@ -7703,7 +7780,10 @@ var
    hashCode : Cardinal;
    key : IDataContext;
 begin
-   if FCount>0 then begin
+   if FCreateKeyOnAccess then
+      if FCount >= FGrowth then Grow;
+
+   if (FCount > 0) or FCreateKeyOnAccess then begin
       IndexExprToKeyAndHashCode(exec, index, key, hashCode);
       i:=(hashCode and (FCapacity-1));
       if LinearFind(key, i) then begin
@@ -7711,8 +7791,17 @@ begin
          Exit;
       end;
    end;
+
    exec.DataContext_CreateEmpty(FElementSize, result);
    FElementTyp.InitDataContext(result);
+
+   if FCreateKeyOnAccess then begin
+      Assert(FElementSize = 1);
+      FHashCodes[i] := hashCode;
+      key.CopyData(FKeys, i*FKeySize, FKeySize);
+      Inc(FCount);
+      result.EvalAsVariant(0, AsPVariant(i)^);
+   end;
 end;
 
 // GetDataAsBoolean
@@ -7753,25 +7842,6 @@ begin
    Result := 0;
 end;
 
-// GetValueDataPtr
-//
-procedure TScriptAssociativeArray.GetValueDataPtr(exec : TdwsExecution; const keyValue : Variant; var result : IDataContext);
-var
-   hashCode : Cardinal;
-   i : Integer;
-begin
-   if FCount>0 then begin
-      hashCode := DWSHashCode(keyValue);
-      i:=(hashCode and (FCapacity-1));
-      if LinearValueFind(keyValue, i) then begin
-         CreateOffset(i*FElementSize, result);
-         Exit;
-      end;
-   end;
-   exec.DataContext_CreateEmpty(FElementSize, result);
-   FElementTyp.InitDataContext(result);
-end;
-
 // GetDataAsInteger
 //
 function TScriptAssociativeArray.GetDataAsInteger(exec : TdwsExecution; const keyValue : Variant) : Int64;
@@ -7788,28 +7858,6 @@ begin
       end;
    end;
    Result := 0;
-end;
-
-// ReplaceValue
-//
-procedure TScriptAssociativeArray.ReplaceValue(exec : TdwsExecution; index, value : TTypedExpr);
-var
-   i : Integer;
-   hashCode : Cardinal;
-   key : IDataContext;
-begin
-   if FCount>=FGrowth then Grow;
-
-   IndexExprToKeyAndHashCode(exec, index, key, hashCode);
-   i:=(hashCode and (FCapacity-1));
-   if not LinearFind(key, i) then begin
-      FHashCodes[i]:=hashCode;
-      key.CopyData(FKeys, i*FKeySize, FKeySize);
-      Inc(FCount);
-   end;
-   if FElementSize>1 then
-      WriteData(i*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), FElementSize)
-   else value.EvalAsVariant(exec, AsPVariant(i)^);
 end;
 
 // ContainsKey

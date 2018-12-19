@@ -1066,7 +1066,17 @@ begin
       case errCode of
          NO_ERROR : begin
             // parse method and headers
-            FWebRequest.SetRequest(request, URLRewriter);
+            try
+               FWebRequest.SetRequest(request, URLRewriter);
+            except
+               on E : Exception do begin
+                  if Assigned(FOnHttpThreadException) then
+                     FOnHttpThreadException(Self, E);
+                  SendError(request, response, 400, 'Query string too long');
+                  requestID := 0;
+                  continue;
+               end;
+            end;
 
             with request^.Headers.KnownHeaders[reqContentType] do
                SetString(inContentType, pRawValue, RawValueLength);
@@ -1163,6 +1173,8 @@ begin
             except
                // handle any exception raised during process: show must go on!
                on E : Exception do begin
+                  if Assigned(FOnHttpThreadException) then
+                     FOnHttpThreadException(Self, E);
                   SendError(request, response, 500, E.Message);
                end;
             end;
@@ -1350,8 +1362,8 @@ begin
       FLogFieldsData.Method := request^.pUnknownVerb;
    end;
 
-   FLogFieldsData.UriStemLength := request^.CookedUrl.AbsPathLength;
-   FLogFieldsData.UriStem := request^.CookedUrl.pAbsPath;
+   FLogFieldsData.UriStemLength := request^.CookedUrl.FullUrlLength;
+   FLogFieldsData.UriStem := request^.CookedUrl.pFullUrl;
 
    FLogFieldsData.ClientIpLength := FWebRequest.RemoteIP_UTF8_Length;
    FLogFieldsData.ClientIp := FWebRequest.RemoteIP_UTF8;

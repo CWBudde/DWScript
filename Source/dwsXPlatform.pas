@@ -287,7 +287,7 @@ function FileMove(const existing, new : TFileName) : Boolean;
 function FileDelete(const fileName : TFileName) : Boolean;
 function FileRename(const oldName, newName : TFileName) : Boolean;
 function FileSize(const name : TFileName) : Int64;
-function FileDateTime(const name : TFileName) : TDateTime;
+function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TDateTime;
 procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
 {$endif}
 function DeleteDirectory(const path : String) : Boolean;
@@ -2382,14 +2382,16 @@ end;
 
 // FileDateTime
 //
-function FileDateTime(const name : TFileName) : TDateTime;
+function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TDateTime;
 var
    info : TWin32FileAttributeData;
    localTime : TFileTime;
    systemTime : TSystemTime;
 begin
    if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then begin
-      FileTimeToLocalFileTime(info.ftLastWriteTime, localTime);
+      if lastAccess then
+         FileTimeToLocalFileTime(info.ftLastAccessTime, localTime)
+      else FileTimeToLocalFileTime(info.ftLastWriteTime, localTime);
       FileTimeToSystemTime(localTime, systemTime);
       Result:=SystemTimeToDateTime(systemTime);
    end else Result:=0;
@@ -2629,9 +2631,15 @@ function ApplicationVersion : String;
 var
    version : TModuleVersion;
 begin
+   {$ifdef WIN64}
    if GetApplicationVersion(version) then
-      Result := version.AsString
-   else Result := '?.?.?.?';
+      Result := version.AsString + ' 64bit'
+   else Result := '?.?.?.? 64bit';
+   {$else}
+   if GetApplicationVersion(version) then
+      Result := version.AsString + ' 32bit'
+   else Result := '?.?.?.? 32bit';
+   {$endif}
 end;
 {$ENDIF}
 

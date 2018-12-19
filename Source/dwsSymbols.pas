@@ -23,7 +23,7 @@ unit dwsSymbols;
 
 interface
 
-uses SysUtils, Classes,
+uses SysUtils, Classes, System.Math,
    dwsStrings, dwsErrors, dwsUtils, dwsDateTime, dwsScriptSource,
    dwsTokenizer, dwsStack, dwsXPlatform, dwsDataContext
    {$ifdef FPC},LazUTF8{$endif};
@@ -182,6 +182,7 @@ type
 
    TExecutionStatusResult = (esrNone, esrExit, esrBreak, esrContinue);
 
+   TExprBaseProc = procedure (expr : TExprBase) of object;
    TExprBaseEnumeratorProc = procedure (parent, expr : TExprBase; var abort : Boolean) of object;
 
    // Is thrown by "raise" statements in script code
@@ -837,6 +838,7 @@ type
 
          function  IsValidOverloadOf(other : TFuncSymbol) : Boolean;
          function  IsSameOverloadOf(other : TFuncSymbol) : Boolean; virtual;
+         function  SameType(typSym : TTypeSymbol) : Boolean; override;
 
          function  ParamsDescription : String; virtual;
 
@@ -1134,6 +1136,7 @@ type
          FIndexType : TTypeSymbol;
          FSortFunctionType : TFuncSymbol;
          FMapFunctionType : TFuncSymbol;
+         FFilterFunctionType : TFuncSymbol;
 
       protected
          function ElementSize : Integer;
@@ -1146,8 +1149,9 @@ type
 
          function AssignsAsDataExpr : Boolean; override;
 
-         function SortFunctionType(integerType : TTypeSymbol) : TFuncSymbol; virtual;
+         function SortFunctionType(integerType : TBaseIntegerSymbol) : TFuncSymbol; virtual;
          function MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol; virtual;
+         function FilterFunctionType(booleanType : TBaseBooleanSymbol) : TFuncSymbol; virtual;
 
          property IndexType : TTypeSymbol read FIndexType write FIndexType;
    end;
@@ -1215,6 +1219,7 @@ type
 
       protected
          function GetCaption : String; override;
+         function DoIsOfType(typSym : TTypeSymbol) : Boolean; override;
 
       public
          constructor Create(const name : String; elementType, keyType : TTypeSymbol);
@@ -4050,6 +4055,26 @@ begin
          end;
       end;
    end;
+end;
+
+// SameType
+//
+function TFuncSymbol.SameType(typSym : TTypeSymbol) : Boolean;
+var
+   otherFunc : TFuncSymbol;
+   i : Integer;
+begin
+   Result := False;
+   if (typSym = nil) or (ClassType <> typSym.ClassType) then Exit;
+   if (Typ = nil) xor (typSym.Typ = nil) then Exit;
+   if (Typ <> nil) and not Typ.SameType(typSym.Typ) then Exit;
+
+   otherFunc := TFuncSymbol(typSym);
+   if Params.Count <> otherFunc.Params.Count then Exit;
+   for i := 0 to Params.Count-1 do
+      if not Params[i].SameParam(otherFunc.Params[i]) then Exit;
+
+   Result := True;
 end;
 
 // ParamsDescription
@@ -6980,6 +7005,7 @@ destructor TArraySymbol.Destroy;
 begin
    FSortFunctionType.Free;
    FMapFunctionType.Free;
+   FFilterFunctionType.Free;
    inherited;
 end;
 
@@ -7008,7 +7034,7 @@ end;
 
 // SortFunctionType
 //
-function TArraySymbol.SortFunctionType(integerType : TTypeSymbol) : TFuncSymbol;
+function TArraySymbol.SortFunctionType(integerType : TBaseIntegerSymbol) : TFuncSymbol;
 begin
    if FSortFunctionType=nil then begin
       FSortFunctionType:=TFuncSymbol.Create('', fkFunction, 0);
@@ -7029,6 +7055,18 @@ begin
       FMapFunctionType.AddParam(TParamSymbol.Create('v', Typ));
    end;
    Result:=FMapFunctionType;
+end;
+
+// FilterFunctionType
+//
+function TArraySymbol.FilterFunctionType(booleanType : TBaseBooleanSymbol) : TFuncSymbol;
+begin
+   if FFilterFunctionType = nil then begin
+      FFilterFunctionType := TFuncSymbol.Create('', fkFunction, 0);
+      FFilterFunctionType.Typ := booleanType;
+      FFilterFunctionType.AddParam(TParamSymbol.Create('v', Typ));
+   end;
+   Result := FFilterFunctionType;
 end;
 
 // ------------------
@@ -7276,7 +7314,8 @@ end;
 function TAssociativeArraySymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
 begin
   Result :=     (typSym is TAssociativeArraySymbol)
-            and (Typ.IsCompatible(typSym.Typ) or (typSym.Typ is TNilSymbol));
+            and Typ.IsCompatible(typSym.Typ)
+            and KeyType.IsCompatible(TAssociativeArraySymbol(typSym).KeyType);
 end;
 
 // IsPointerType
@@ -7291,8 +7330,9 @@ end;
 function TAssociativeArraySymbol.SameType(typSym : TTypeSymbol) : Boolean;
 begin
    Result:=    (typSym<>nil)
-           and (typSym.ClassType=ClassType)
-           and Typ.SameType(typSym.Typ);
+           and (typSym.ClassType=TAssociativeArraySymbol)
+           and Typ.SameType(typSym.Typ)
+           and KeyType.SameType(TAssociativeArraySymbol(typSym).KeyType);
 end;
 
 // KeysArrayType
@@ -7309,6 +7349,13 @@ end;
 function TAssociativeArraySymbol.GetCaption : String;
 begin
    Result := 'array [' + KeyType.Caption + '] of ' + Typ.Caption;
+end;
+
+// DoIsOfType
+//
+function TAssociativeArraySymbol.DoIsOfType(typSym : TTypeSymbol) : Boolean;
+begin
+   Result := SameType(typSym.UnAliasedType);
 end;
 
 // ------------------

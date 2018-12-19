@@ -33,6 +33,11 @@ type
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
 
+   TInt64DynArrayHelper = record helper for TInt64DynArray
+      function High : Integer; inline;
+      function Length : Integer; inline;
+   end;
+
    // TRefCountedObject
    //
    // Uses Monitor hidden field to store refcount, so not compatible with monitor use
@@ -969,8 +974,6 @@ function StrBeforeChar(const aStr : String; aChar : Char) : String;
 function StrReplaceChar(const aStr : String; oldChar, newChar : Char) : String;
 
 function StrCountChar(const aStr : String; c : Char) : Integer;
-
-function Min(a, b : Integer) : Integer; inline;
 
 function WhichPowerOfTwo(const v : Int64) : Integer;
 
@@ -2904,13 +2907,31 @@ begin
    end;
 end;
 
-var
-   vUnifiedStrings : array [0..1] of Pointer;
-   vUnifiedCharacters : array [0..Ord(TStringUnifier.HighestUnifiedChar)] of String;
+// ------------------
+// ------------------ TInt64DynArrayHelper ------------------
+// ------------------
+
+// High
+//
+function TInt64DynArrayHelper.High : Integer;
+begin
+   Result := System.High(Self);
+end;
+
+// Length
+//
+function TInt64DynArrayHelper.Length : Integer;
+begin
+   Result := System.Length(Self);
+end;
 
 // ------------------
 // ------------------ TStringUnifier ------------------
 // ------------------
+
+var
+   vUnifiedStrings : array [0..1] of Pointer;
+   vUnifiedCharacters : array [0..Ord(TStringUnifier.HighestUnifiedChar)] of String;
 
 // Create
 //
@@ -3563,15 +3584,6 @@ begin
    for i:=1 to Length(aStr) do
       if aStr[i]=c then
          Inc(Result);
-end;
-
-// Min
-//
-function Min(a, b : Integer) : Integer;
-begin
-   if a<b then
-      Result:=a
-   else Result:=b;
 end;
 
 // WhichPowerOfTwo

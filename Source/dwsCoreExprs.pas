@@ -854,6 +854,27 @@ type
          property MapFuncExpr : TFuncPtrExpr read FMapFuncExpr write FMapFuncExpr;
    end;
 
+   // Filter a dynamic array
+   TArrayFilterExpr = class(TArrayTypedExpr)
+      private
+         FFilterFuncExpr : TFuncPtrExpr;
+         FItem : TDataSymbol;
+
+      protected
+         function GetSubExpr(i : Integer) : TExprBase; override;
+         function GetSubExprCount : Integer; override;
+
+      public
+         constructor Create(context : TdwsCompilerContext; const scriptPos: TScriptPos;
+                            aBase : TTypedExpr; aFilterFunc : TFuncPtrExpr);
+         destructor Destroy; override;
+
+         procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
+         procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
+
+         property FilterFuncExpr : TFuncPtrExpr read FFilterFuncExpr write FFilterFuncExpr;
+   end;
+
    // Reverse a dynamic array
    TArrayReverseExpr = class(TArrayTypedFluentExpr)
       public
@@ -1808,6 +1829,7 @@ type
          procedure Orphan(context : TdwsCompilerContext); override;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
          function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property CondExpr : TTypedExpr read FCond write FCond;
          property ThenExpr : TProgramExpr read FThen write FThen;
@@ -1831,6 +1853,7 @@ type
          procedure Orphan(context : TdwsCompilerContext); override;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
          function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property ElseExpr : TProgramExpr read FElse write FElse;
    end;
@@ -1993,6 +2016,7 @@ type
          procedure EvalNoResult(exec : TdwsExecution); override;
 
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property CaseConditions : TTightList read FCaseConditions;
          property ValueExpr: TTypedExpr read FValueExpr write FValueExpr;
@@ -2045,7 +2069,19 @@ type
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
 
-   TIntegerInOpExpr = class (TStringInOpExpr)
+   TCharacterInOpExpr = class (TInOpExpr)
+      private
+         FMap : array of Boolean;
+         FMapHigh : Integer;
+
+      public
+         class function AttemptCreate(context : TdwsCompilerContext; Left : TTypedExpr;
+                                      const conditionsList : TTightList) : TCharacterInOpExpr; static;
+
+         function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
+   end;
+
+   TIntegerInOpExpr = class (TInOpExpr)
       public
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
@@ -2096,6 +2132,7 @@ type
          property VarExpr: TIntVarExpr read FVarExpr write FVarExpr;
 
          function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
    end;
 
    TForExprClass = class of TForExpr;
@@ -2158,6 +2195,8 @@ type
                             aVarExpr : TVarExpr; aInExpr : TTypedExpr);
          destructor Destroy; override;
 
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
+
          property DoExpr : TProgramExpr read FDoExpr write FDoExpr;
          property InExpr : TTypedExpr read FInExpr write FInExpr;
          property VarExpr : TVarExpr read FVarExpr write FVarExpr;
@@ -2197,6 +2236,7 @@ type
          procedure EvalNoResult(exec : TdwsExecution); override;
 
          function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property CondExpr : TTypedExpr read FCondExpr write FCondExpr;
          property LoopExpr : TProgramExpr read FLoopExpr write FLoopExpr;
@@ -2294,6 +2334,8 @@ type
          constructor Create(tryExpr : TProgramExpr);
          destructor Destroy; override;
 
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
+
          property TryExpr : TProgramExpr read FTryExpr write FTryExpr;
          property HandlerExpr : TProgramExpr read FHandlerExpr write FHandlerExpr;
    end;
@@ -2319,6 +2361,8 @@ type
          procedure AddDoExpr(expr : TExceptDoExpr);
          property DoExpr[i : Integer] : TExceptDoExpr read GetDoExpr;
          function DoExprCount : Integer;
+
+         procedure EnumerateSteppableExprs(const callback : TExprBaseProc); override;
 
          property ElseExpr : TProgramExpr read FElseExpr write FElseExpr;
    end;
@@ -5099,6 +5143,90 @@ begin
 end;
 
 // ------------------
+// ------------------ TCharacterInOpExpr ------------------
+// ------------------
+
+// AttemptCreate
+//
+class function TCharacterInOpExpr.AttemptCreate(
+   context : TdwsCompilerContext; Left : TTypedExpr;
+   const conditionsList : TTightList
+   ) : TCharacterInOpExpr;
+const
+   cMaxChar = 127;
+var
+   failed : Boolean;
+
+   procedure AddRange(const minChar, maxChar : String);
+   var
+      c, minC, maxC : Integer;
+   begin
+      if (Length(minChar) <> 1) then Exit;
+      if (Length(maxChar) <> 1) then Exit;
+      minC := Ord(minChar[1]);
+      maxC := Ord(maxChar[1]);
+      if minC > cMaxChar then Exit;
+      if maxC > cMaxChar then Exit;
+
+      if Length(Result.FMap) <= maxC then
+         SetLength(Result.FMap, maxC+1);
+      for c := minC to maxC do
+         Result.FMap[c] := True;
+
+      failed := False;
+   end;
+
+   procedure AddCharacter(const s : String);
+   begin
+      AddRange(s, s);
+   end;
+
+var
+   cc : TRefCountedObject;
+   lowVal, highVal : String;
+   rcc : TRangeCaseCondition;
+begin
+   Result := TCharacterInOpExpr.Create(context, Left);
+   failed := True;
+   for cc in conditionsList do begin
+      failed := True;
+      if cc is TCompareConstStringCaseCondition then begin
+         AddCharacter(TCompareConstStringCaseCondition(cc).Value)
+      end else if cc is TRangeCaseCondition then begin
+         rcc := TRangeCaseCondition(cc);
+         if     rcc.FromExpr.IsConstant and rcc.ToExpr.IsConstant
+            and rcc.FromExpr.Typ.IsOfType(context.TypString)
+            and rcc.ToExpr.Typ.IsOfType(context.TypString) then begin
+
+            rcc.FromExpr.EvalAsString(context.Execution, lowVal);
+            rcc.ToExpr.EvalAsString(context.Execution, highVal);
+            AddRange(lowVal, highVal);
+         end;
+      end;
+      if failed then break;
+   end;
+
+   if failed then begin
+      Result.FLeft := nil;
+      FreeAndNil(Result);
+   end else Result.FMapHigh := High(Result.FMap);
+end;
+
+// EvalAsBoolean
+//
+function TCharacterInOpExpr.EvalAsBoolean(exec : TdwsExecution) : Boolean;
+var
+   value : String;
+   c : Integer;
+begin
+   FLeft.EvalAsString(exec, value);
+   if value <> '' then begin
+      c := Ord(PChar(Pointer(value))^);
+      Result := (c <= FMapHigh) and FMap[c];
+   end else Result := False;
+end;
+
+// ------------------
 // ------------------ TIntegerInOpExpr ------------------
 // ------------------
 
@@ -7576,6 +7704,13 @@ begin
    );
 end;
 
+// EnumerateSteppableExprs
+//
+procedure TIfThenExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(ThenExpr);
+end;
+
 // GetSubExpr
 //
 function TIfThenExpr.GetSubExpr(i : Integer) : TExprBase;
@@ -7678,6 +7813,14 @@ begin
       ThenExpr.SpecializeProgramExpr(context),
       ElseExpr.SpecializeProgramExpr(context)
    );
+end;
+
+// EnumerateSteppableExprs
+//
+procedure TIfThenElseExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(ThenExpr);
+   callback(ElseExpr);
 end;
 
 // GetSubExpr
@@ -7794,6 +7937,17 @@ begin
       end;
    end;
    Result:=Self;
+end;
+
+// EnumerateSteppableExprs
+//
+procedure TCaseExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+var
+   i : Integer;
+begin
+   for i := 0 to CaseConditions.Count-1 do
+      callback(TCaseCondition(CaseConditions.List[i]).TrueExpr);
+   callback(ElseExpr);
 end;
 
 // GetSubExpr
@@ -8234,6 +8388,13 @@ begin
    Result := specialized;
 end;
 
+// EnumerateSteppableExprs
+//
+procedure TForExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(DoExpr);
+end;
+
 // GetSubExpr
 //
 function TForExpr.GetSubExpr(i : Integer) : TExprBase;
@@ -8510,6 +8671,13 @@ begin
    Result := specialized;
 end;
 
+// EnumerateSteppableExprs
+//
+procedure TLoopExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(LoopExpr);
+end;
+
 // GetSubExpr
 //
 function TLoopExpr.GetSubExpr(i : Integer) : TExprBase;
@@ -8702,6 +8870,14 @@ begin
   inherited;
 end;
 
+// EnumerateSteppableExprs
+//
+procedure TExceptionExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(TryExpr);
+   callback(HandlerExpr);
+end;
+
 // GetSubExpr
 //
 function TExceptionExpr.GetSubExpr(i : Integer) : TExprBase;
@@ -8830,6 +9006,18 @@ end;
 function TExceptExpr.DoExprCount : Integer;
 begin
    Result:=FDoExprs.Count;
+end;
+
+// EnumerateSteppableExprs
+//
+procedure TExceptExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+var
+   i : Integer;
+begin
+   inherited EnumerateSteppableExprs(callback);
+   for i := 0 to DoExprCount-1 do
+      callback(DoExpr[i]);
+   callback(ElseExpr);
 end;
 
 // GetSubExpr
@@ -9672,6 +9860,111 @@ end;
 function TArrayMapExpr.GetSubExprCount : Integer;
 begin
    Result:=2;
+end;
+
+// ------------------
+// ------------------ TArrayFilterExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TArrayFilterExpr.Create(context : TdwsCompilerContext; const scriptPos: TScriptPos;
+                                   aBase : TTypedExpr; aFilterFunc : TFuncPtrExpr);
+var
+   elemTyp : TTypeSymbol;
+begin
+   inherited Create(context, scriptPos, aBase);
+   FFilterFuncExpr := aFilterFunc;
+   Typ := aBase.Typ;
+
+   if aFilterFunc <> nil then begin
+      elemTyp := aFilterFunc.FuncSym.Params[0].Typ;
+      FItem := TScriptDataSymbol.Create('', elemTyp);
+      context.Table.AddSymbol(FItem);
+      FFilterFuncExpr.AddArg(TVarExpr.CreateTyped(context, FItem));
+      FFilterFuncExpr.InitializeResultAddr(context.Prog as TdwsProgram);
+   end;
+end;
+
+// Destroy
+//
+destructor TArrayFilterExpr.Destroy;
+begin
+   inherited;
+   FFilterFuncExpr.Free;
+end;
+
+// EvalAsVariant
+//
+procedure TArrayFilterExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
+var
+   dyn : IScriptDynArray;
+begin
+   EvalAsScriptDynArray(exec, dyn);
+   VarCopySafe(Result, dyn);
+end;
+
+// EvalAsScriptDynArray
+//
+procedure TArrayFilterExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
+var
+   newArray : TScriptDynamicArray;
+   base : IScriptDynArray;
+   dyn : TScriptDynamicValueArray;
+   i, k, elementSize, itemAddr : Integer;
+   funcPointer : IFuncPointer;
+   newPData, oldPData : PData;
+begin
+   BaseExpr.EvalAsScriptDynArray(exec, base);
+   FilterFuncExpr.EvalAsFuncPointer(exec, funcPointer);
+
+   dyn := TScriptDynamicValueArray(base.GetSelf);
+   oldPData := dyn.AsPData;
+
+   newArray := TScriptDynamicArray.CreateNew(dyn.ElementTyp);
+   result := IScriptDynArray(newArray);
+   newArray.ArrayLength := dyn.ArrayLength;
+   newPData := newArray.AsPData;
+   elementSize := newArray.ElementSize;
+   k := 0;
+
+   itemAddr := exec.Stack.BasePointer + FItem.StackAddr;
+   if elementSize = 1 then begin
+      for i := 0 to dyn.ArrayLength-1 do begin
+         exec.Stack.WriteValue(itemAddr, oldPData^[i]);
+         if funcPointer.EvalAsBoolean(exec, FilterFuncExpr) then begin
+            VarCopySafe(newPData^[k], oldPData^[i]);
+            Inc(k);
+         end;
+      end;
+   end else begin
+      for i := 0 to dyn.ArrayLength-1 do begin
+         dyn.CopyData(i*dyn.ElementSize, exec.Stack.Data, itemAddr, dyn.ElementSize);
+         if funcPointer.EvalAsBoolean(exec, FilterFuncExpr) then begin
+            dyn.CopyData(i*dyn.ElementSize, newPData^, k*elementSize, elementSize);
+            Inc(k);
+         end;
+      end;
+   end;
+
+   if k <> newArray.ArrayLength then
+      newArray.ArrayLength := k;
+end;
+
+// GetSubExpr
+//
+function TArrayFilterExpr.GetSubExpr(i : Integer) : TExprBase;
+begin
+   if i = 0 then
+      Result := BaseExpr
+   else Result := FilterFuncExpr;
+end;
+
+// GetSubExprCount
+//
+function TArrayFilterExpr.GetSubExprCount : Integer;
+begin
+   Result := 2;
 end;
 
 // ------------------
@@ -10618,6 +10911,13 @@ begin
    FInExpr.Free;
    FVarExpr.Free;
    inherited;
+end;
+
+// EnumerateSteppableExprs
+//
+procedure TForInStrExpr.EnumerateSteppableExprs(const callback : TExprBaseProc);
+begin
+   callback(DoExpr);
 end;
 
 // GetSubExpr

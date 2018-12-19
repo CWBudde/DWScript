@@ -24,7 +24,7 @@ unit dwsCompiler;
 interface
 
 uses
-  Classes, SysUtils, TypInfo, Variants,
+  Classes, SysUtils, TypInfo, Variants, System.Math,
   dwsFileSystem, dwsUtils, dwsXPlatform, dwsUnicode,
   dwsExprs, dwsSymbols, dwsTokenizer, dwsErrors, dwsDataContext, dwsExprList,
   dwsStrings, dwsFunctions, dwsStack, dwsConnectorSymbols, dwsFilter,
@@ -36,13 +36,13 @@ uses
   dwsGenericExprs;
 
 const
-   cDefaultCompilerOptions = [coOptimize, coAssertions];
+   cDefaultCompilerOptions = [ coOptimize, coAssertions ];
    cDefaultMaxRecursionDepth = 1024;
    cDefaultMaxExceptionDepth = 10;
    cDefaultStackChunkSize = 4096;  // 64 kB in 32bit Delphi, each stack entry is a Variant
 
    // compiler version is date in YYYYMMDD format, dot subversion number
-   cCompilerVersion = 20180717.0;
+   cCompilerVersion = 20181214.0;
 
 type
    TdwsCompiler = class;
@@ -3008,6 +3008,8 @@ begin
          OrphanAndNil(expr);
       end;
    end;
+   if FTok.Test(ttDEPRECATED) then
+      Result.DeprecatedMessage := ReadDeprecatedMessage(False);
 end;
 
 // ReadConstDecl
@@ -7080,6 +7082,12 @@ begin
 
                   end;
 
+               end else if     matchParamType.Typ.IsOfType(FCompilerContext.TypVariant)
+                           and matchParamType.Typ.IsCompatible(funcExprParamType.Typ) then begin
+
+                  // disfavor promotion to variant
+                  Inc(matchDistance, 128);
+
                end else if    (TStaticArraySymbol(funcExprParamType).ElementCount=0)
                            or (    (funcExprParamType.Typ=FCompilerContext.TypNil)
                                and (   (matchParamType.Typ is TClassSymbol)
@@ -7755,6 +7763,7 @@ var
    argSymTable : TUnSortedSymbolTable;
    i : Integer;
    mapFunctionType : TFuncSymbol;
+   filterFunctionType : TFuncSymbol;
    methodKind : TArrayMethodKind;
    indexOfClass : TArrayIndexOfExprClass;
 
@@ -7797,7 +7806,7 @@ begin
    try
       arraySym := baseExpr.Typ.UnAliasedType as TArraySymbol;
 
-      methodKind:=NameToArrayMethod(name, FMsgs, namePos);
+      methodKind := NameToArrayMethod(name, FMsgs, namePos);
 
       case methodKind of
 
@@ -7811,10 +7820,13 @@ begin
          end;
 
          amkSort :
-            argList.DefaultExpected:=TParamSymbol.Create('', arraySym.SortFunctionType(FCompilerContext.TypInteger));
+            argList.DefaultExpected := TParamSymbol.Create('', arraySym.SortFunctionType(FCompilerContext.TypInteger));
 
          amkMap :
-            argList.DefaultExpected:=TParamSymbol.Create('', arraySym.MapFunctionType(FCompilerContext.TypAnyType));
+            argList.DefaultExpected := TParamSymbol.Create('', arraySym.MapFunctionType(FCompilerContext.TypAnyType));
+
+         amkFilter :
+            argList.DefaultExpected := TParamSymbol.Create('', arraySym.FilterFunctionType(FCompilerContext.TypBoolean));
 
       end;
 
@@ -8022,7 +8034,7 @@ begin
                   end else begin
                      if not argList[0].Typ.IsCompatible(arraySym.SortFunctionType(FCompilerContext.TypInteger)) then begin
                         IncompatibleTypes(argPosArray[0], CPE_IncompatibleParameterTypes,
-                                          arraySym.SortFunctionType(FCompilerContext.TypBoolean), argList[0].Typ);
+                                          arraySym.SortFunctionType(FCompilerContext.TypInteger), argList[0].Typ);
                         argList.OrphanItems(FCompilerContext);
                         argList.Clear;
                      end;
@@ -8052,6 +8064,25 @@ begin
                end;
                if Result=nil then
                   Result:=TArrayMapExpr.Create(FCompilerContext, namePos, baseExpr, nil);
+            end;
+
+            amkFilter : begin
+               CheckRestricted;
+               if CheckArguments(1, 1) then begin
+                  filterFunctionType := arraySym.FilterFunctionType(FCompilerContext.TypBoolean);
+                  if      argList[0].Typ.IsCompatible(filterFunctionType)
+                     and (argList[0].Typ.Typ <> nil) then begin
+                     Result := TArrayFilterExpr.Create(FCompilerContext, namePos, baseExpr,
+                                                       TFuncPtrExpr.Create(FCompilerContext, argPosArray[0], argList[0]));
+                     argList.Clear;
+                  end else begin
+                     IncompatibleTypes(argPosArray[0], CPE_IncompatibleParameterTypes,
+                                       filterFunctionType, argList[0].Typ);
+                     argList.OrphanItems(FCompilerContext)
+                  end;
+               end;
+               if Result = nil then
+                  Result := TArrayFilterExpr.Create(FCompilerContext, namePos, baseExpr, nil);
             end;
 
             amkReverse : begin
@@ -10195,7 +10226,7 @@ begin
       proc:=TdwsProcedure(CurrentProg);
       if proc.Func.Result=nil then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_NoResultRequired);
-      RecordSymbolUse(proc.Func.Result, exitPos, [suReference, suWrite]);
+      RecordSymbolUse(proc.Func.Result, exitPos, [suReference, suWrite, suImplicit]);
       leftExpr:=TVarExpr.CreateTyped(FCompilerContext, proc.Func.Result);
       try
          assignExpr:=ReadAssign(ttASSIGN, leftExpr) as TAssignExpr;
@@ -11008,16 +11039,20 @@ begin
          if     TCaseConditionsHelper.CanOptimizeToTyped(condList, TConstStringExpr)
             and condList.ItemsAllOfClass(TCompareConstStringCaseCondition) then begin
 
-            Result:=TStringInOpStaticSetExpr.Create(FCompilerContext, left)
+            Result := TStringInOpStaticSetExpr.Create(FCompilerContext, left)
 
          end else begin
 
-            Result:=TStringInOpExpr.Create(FCompilerContext, left);
+            if left is TStringArrayOpExpr then
+               Result := TCharacterInOpExpr.AttemptCreate(FCompilerContext, left, condList)
+            else Result := nil;
+            if Result = nil then
+               Result := TStringInOpExpr.Create(FCompilerContext, left);
 
          end;
       end else begin
 
-         Result:=TInOpExpr.Create(FCompilerContext, left);
+         Result := TInOpExpr.Create(FCompilerContext, left);
 
       end;
 
@@ -11958,7 +11993,7 @@ begin
                CurrentProg.Table.AddSymbol(includeSymbol);
                fileNamePos:=FTok.HotPos;
                fileNamePos.IncCol; // skip quote
-               RecordSymbolUse(includeSymbol, fileNamePos, [suReference]);
+               RecordSymbolUse(includeSymbol, fileNamePos, [suReference, suImplicit]);
             end;
 
             if (switch=siIncludeOnce) then begin

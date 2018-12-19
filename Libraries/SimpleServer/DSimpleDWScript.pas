@@ -1048,6 +1048,7 @@ begin
    FBkgndWorkers:=TdwsBackgroundWorkersLib.Create(Self);
    FBkgndWorkers.dwsBackgroundWorkers.Script:=DelphiWebScript;
    FBkgndWorkers.OnBackgroundWork:=DoBackgroundWork;
+   FBkgndWorkers.OnBackgroundLogEvent:=LogError;
 end;
 
 // Finalize
@@ -1081,6 +1082,9 @@ procedure TSimpleDWScript.Startup;
 var
    startupWebRequest : TWebRequest;
 begin
+   if ErrorLogDirectory <> '' then
+      LogError('Startup ' + ParamStr(0));
+
    FBackgroundFileSystem:=dwsRuntimeFileSystem.AllocateFileSystem;
 
    GetSystemTimeAsFileTime(FLastCheckTime);
@@ -1102,6 +1106,9 @@ procedure TSimpleDWScript.Shutdown;
 var
    shutdownWebRequest : TWebRequest;
 begin
+   if ErrorLogDirectory <> '' then
+      LogError('Shutdown ' + ParamStr(0));
+
    FCheckDirectoryChanges := nil;
 
    FBackgroundFileSystem:=nil;
