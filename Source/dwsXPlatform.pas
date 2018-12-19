@@ -630,12 +630,14 @@ begin
    Result := SysUtils.StringReplace(s, oldPattern, newPattern, flags);
 end;
 
+{$IFNDEF MACOS}
 function CompareStringEx(
    lpLocaleName: LPCWSTR; dwCmpFlags: DWORD;
    lpString1: LPCWSTR; cchCount1: Integer;
    lpString2: LPCWSTR; cchCount2: Integer;
    lpVersionInformation: Pointer; lpReserved: LPVOID;
    lParam: LPARAM): Integer; stdcall; external 'kernel32.dll';
+{$ENDIF}
 
 // UnicodeCompareP
 //
