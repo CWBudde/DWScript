@@ -180,6 +180,12 @@ type
       baseExpr: TTypedExpr; const args: TExprBaseListExec);
     procedure dwsWebClassesWebResponseMethodsSetStatusPlainTextFastEvalNoResult(
       baseExpr: TTypedExpr; const args: TExprBaseListExec);
+    procedure dwsWebClassesWebRequestMethodsIfNoneMatchFastEvalString(
+      baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
+    procedure dwsWebClassesWebResponseMethodsSetETagFastEvalNoResult(
+      baseExpr: TTypedExpr; const args: TExprBaseListExec);
+    procedure dwsWebClassesWebResponseMethodsSetCacheControlFastEvalNoResult(
+      baseExpr: TTypedExpr; const args: TExprBaseListExec);
   private
     { Private declarations }
     FServer :  IWebServerInfo;
@@ -721,6 +727,12 @@ begin
    Result := args.WebRequest.IfModifiedSince;
 end;
 
+procedure TdwsWebLib.dwsWebClassesWebRequestMethodsIfNoneMatchFastEvalString(
+  baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
+begin
+   Result := args.WebRequest.IfNoneMatch;
+end;
+
 procedure TdwsWebLib.dwsWebClassesWebRequestMethodsMethodFastEvalString(
   baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
 begin
@@ -967,6 +979,24 @@ begin
    wr := args.WebResponse;
    if wr <> nil then
       wr.LastModified := args.AsFloat[0];
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetETagFastEvalNoResult(
+  baseExpr: TTypedExpr; const args: TExprBaseListExec);
+var
+   wr : TWebResponse;
+begin
+   wr := args.WebResponse;
+   if wr <> nil then
+      wr.ETag := args.AsString[0];
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetCacheControlFastEvalNoResult(
+  baseExpr: TTypedExpr; const args: TExprBaseListExec);
+begin
+   var wr := args.WebResponse;
+   if wr <> nil then
+      wr.CacheControl := args.AsString[0];
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetStaticFastEvalNoResult(

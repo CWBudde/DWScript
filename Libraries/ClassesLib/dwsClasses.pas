@@ -858,6 +858,7 @@ begin
       System.Move(FList^[Index], FList^[Index + 1], (FCount - Index) * SizeOf(TStringItem));
    with FList^[Index] do begin
       Pointer(FString) := nil;
+      Pointer(FObject) := nil;
       FObject := AObject;
       FString := S;
    end;

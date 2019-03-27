@@ -492,7 +492,7 @@ begin
                  or (S[(temp shr  8) and 0xFF] shl  8)
                  or (S[(temp       ) and 0xFF]       ));
 
-      Result.Add( Result[j-nk] xor temp );
+      Result.Add( Unsigned32(Result[j-nk] xor temp) );
    end;
 
    // Decryption key
@@ -552,10 +552,19 @@ begin
    end;
 end;
 
+var expanded := KeyExpansion('0123456789abcdefghijklmnopqrstuv');
+for var k := 0 to expanded.High do begin
+    Print(expanded[k].ToHexString(8).ToUpper);
+    if (k and 7) = 7 then
+        PrintLn('')
+    else Print(',');
+end;
+PrintLn('');
+
 var data := AesEcbEncrypt(
-   KeyExpansion('0123456789abcdefghijklmnopqrstuv'),
+   expanded,
    '00112233445566778899aabbccddeeff'
    );
 for var c in data do
-   Print(IntToHex(Ord(c), 2));
+   Print(IntToHex(Ord(c), 2).ToUpper);
 PrintLn('');

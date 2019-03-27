@@ -74,6 +74,12 @@ type
          procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
 
+   TJSStrEndsWithExpr = class (TJSFuncBaseExpr)
+      public
+         procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
+         procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
+   end;
+
    TJSStrFindExpr = class (TJSFuncBaseExpr)
       public
          procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
@@ -148,6 +154,8 @@ function FindJSRTLDependency(const name : String) : PJSRTLDependency;
 function All_RTL_JS : String;
 procedure IgnoreJSRTLDependencies(dependencies : TStrings);
 
+procedure SetJSRTL_TZ_FromSettings(const settings : TFormatSettings);
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -155,6 +163,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses dwsJSON;
 
 {$R dwsJSRTL.res}
 
@@ -169,11 +179,11 @@ const
       (Name : '$New';
        Code : 'function $New(c) { var i={ClassType:c}; c.$Init(i); return i }'),
       (Name : '$NewDyn';
-       Code : 'function $NewDyn(c,z) {'#13#10
-              +#9'if (c==null) throw Exception.Create($New(Exception),"ClassType is nil"+z);'#13#10
-              +#9'var i={ClassType:c};'#13#10
-              +#9'c.$Init(i);'#13#10
-              +#9'return i'#13#10
+       Code : 'function $NewDyn(c,z) {'#10
+              +#9'if (c==null) throw Exception.Create($New(Exception),"ClassType is nil"+z);'#10
+              +#9'var i={ClassType:c};'#10
+              +#9'c.$Init(i);'#10
+              +#9'return i'#10
               +'}';
        Dependency : 'Exception' ),
       (Name : '$NewArrayFn';
@@ -181,47 +191,47 @@ const
       (Name : '$NewArray';
        Code : 'function $NewArray(n,v) { var r=new Array(n); for(var i=0;i<n;i++) r[i]=v; return r }'),
       (Name : '$ArrayInsert';
-       Code : 'function $ArrayInsert(a,i,v,z) {'#13#10
-              +#9'if (i==a.length) a.push(v); else a.splice($Idx(i,0,a.length-1,z),0,v)'#13#10
+       Code : 'function $ArrayInsert(a,i,v,z) {'#10
+              +#9'if (i==a.length) a.push(v); else a.splice($Idx(i,0,a.length-1,z),0,v)'#10
               +'}';
        Dependency : '$Idx' ),
       (Name : '$ArraySetLenC';
-       Code : 'function $ArraySetLenC(a,n,d) {'#13#10
-              +#9'var o=a.length;'#13#10
-              +#9'if (o==n) return;'#13#10
-              +#9'if (o>n) a.length=n; else for (;o<n;o++) a.push(d());'#13#10
+       Code : 'function $ArraySetLenC(a,n,d) {'#10
+              +#9'var o=a.length;'#10
+              +#9'if (o==n) return;'#10
+              +#9'if (o>n) a.length=n; else for (;o<n;o++) a.push(d());'#10
               +'}'),
       (Name : '$ArraySetLen';
-       Code : 'function $ArraySetLen(a,n,v) {'#13#10
-              +#9'var o=a.length;'#13#10
-              +#9'if (o==n) return;'#13#10
-              +#9'if (o>n) a.length=n; else for (;o<n;o++) a.push(v);'#13#10
+       Code : 'function $ArraySetLen(a,n,v) {'#10
+              +#9'var o=a.length;'#10
+              +#9'if (o==n) return;'#10
+              +#9'if (o>n) a.length=n; else for (;o<n;o++) a.push(v);'#10
               +'}'),
       (Name : '$ArrayCopy';
        Code : 'function $ArrayCopy(a,i,z) { return a.slice($Idx(i,0,a.length-1,z)) }';
        Dependency : '$Idx' ),
       (Name : '$ArrayCopyLen';
-       Code : 'function $ArrayCopyLen(a,i,l,z) {'#13#10
-              +#9'if (l<0) throw Exception.Create($New(Exception),"Positive count expected (got "+l.toString()+")"+z);'#13#10
-              +#9'return a.slice($Idx(i,0,a.length-1,z),$Idx(i+l-1,0,a.length-1,z)-i+1,z)'#13#10
+       Code : 'function $ArrayCopyLen(a,i,l,z) {'#10
+              +#9'if (l<0) throw Exception.Create($New(Exception),"Positive count expected (got "+l.toString()+")"+z);'#10
+              +#9'return a.slice($Idx(i,0,a.length-1,z),i+l-1)'#10
               +'}';
        Dependency : '$Idx' ),
       (Name : '$ArrayMove';
        Code : 'function $ArrayMove(a,s,d) { var e=a[s]; a.splice(s, 1); a.splice(d, 0, e) }' ),
       (Name : '$ArrayMoveChk';
-       Code : 'function $ArrayMoveChk(a,s,d,z) {'#13#10
-              +#9'var n=a.length-1;'#13#10
-              +#9'$ArrayMove(a,$Idx(s,0,n,z),$Idx(d,0,n,z));'#13#10
+       Code : 'function $ArrayMoveChk(a,s,d,z) {'#10
+              +#9'var n=a.length-1;'#10
+              +#9'$ArrayMove(a,$Idx(s,0,n,z),$Idx(d,0,n,z));'#10
               +'}';
        Dependency : '$Idx'; Dependency2 : '$ArrayMove' ),
       (Name : '$ArraySwap';
        Code : 'function $ArraySwap(a,i1,i2) { var t=a[i1]; a[i1]=a[i2]; a[i2]=t; return a }' ),
       (Name : '$ArraySwapChk';
-       Code : 'function $ArraySwapChk(a,i1,i2,z) {'#13#10
-              +#9'var n=a.length-1, t=a[$Idx(i1,0,n,z)];'#13#10
-              +#9'a[i1]=a[$Idx(i2,0,n,z)]'#13#10
-              +#9'a[i2]=t;'#13#10
-              +#9'return a;'#13#10
+       Code : 'function $ArraySwapChk(a,i1,i2,z) {'#10
+              +#9'var n=a.length-1, t=a[$Idx(i1,0,n,z)];'#10
+              +#9'a[i1]=a[$Idx(i2,0,n,z)]'#10
+              +#9'a[i2]=t;'#10
+              +#9'return a;'#10
               +'}';
        Dependency : '$Idx' ),
       (Name : '$CmpNum';
@@ -244,239 +254,239 @@ const
       (Name : '$Delete';
        Code : 'function $Delete(o) { for (var m in o) delete o[m]; }' ),
       (Name : '$Inh';
-       Code : 'function $Inh(s,c) {'#13#10
-               +#9'if (s===null) return false;'#13#10
-               +#9'while ((s)&&(s!==c)) s=s.$Parent;'#13#10
-               +#9'return (s)?true:false;'#13#10
-               +'}'#13#10 ),
+       Code : 'function $Inh(s,c) {'#10
+               +#9'if (s===null) return false;'#10
+               +#9'while ((s)&&(s!==c)) s=s.$Parent;'#10
+               +#9'return (s)?true:false;'#10
+               +'}'#10 ),
       (Name : '$ToClassType';
-       Code : 'function $ToClassType(o) {'#13#10
-               +#9'if (o===null) return o;'#13#10
-               +#9'return o.ClassType'#13#10
-               +'}'#13#10;
+       Code : 'function $ToClassType(o) {'#10
+               +#9'if (o===null) return o;'#10
+               +#9'return o.ClassType'#10
+               +'}'#10;
        Dependency : 'TObject' ),
       (Name : '$Is';
-       Code : 'function $Is(o,c) {'#13#10
-               +#9'if (o===null) return false;'#13#10
-               +#9'return $Inh(o.ClassType,c);'#13#10
-               +'}'#13#10;
+       Code : 'function $Is(o,c) {'#10
+               +#9'if (o===null) return false;'#10
+               +#9'return $Inh(o.ClassType,c);'#10
+               +'}'#10;
        Dependency : '$Inh' ),
       (Name : '$As';
-       Code : 'function $As(o,c) {'#13#10
-               +#9'if ((o===null)||$Is(o,c)) return o;'#13#10
-               +#9'throw Exception.Create($New(Exception),"Cannot cast instance of type \""+o.ClassType.$ClassName+"\" to class \""+c.$ClassName+"\"");'#13#10
+       Code : 'function $As(o,c) {'#10
+               +#9'if ((o===null)||$Is(o,c)) return o;'#10
+               +#9'throw Exception.Create($New(Exception),"Cannot cast instance of type \""+o.ClassType.$ClassName+"\" to class \""+c.$ClassName+"\"");'#10
                +'}';
        Dependency : '$Is';
        Dependency2 : 'Exception' ),
       (Name : '$AsClass';
-       Code : 'function $AsClass(s,c) {'#13#10
-               +#9'if ((s===null)||$Inh(s,c)) return s;'#13#10
-               +#9'throw Exception.Create($New(Exception),"Cannot cast class \""+s.$ClassName+"\" to class \""+c.$ClassName+"\"");'#13#10
+       Code : 'function $AsClass(s,c) {'#10
+               +#9'if ((s===null)||$Inh(s,c)) return s;'#10
+               +#9'throw Exception.Create($New(Exception),"Cannot cast class \""+s.$ClassName+"\" to class \""+c.$ClassName+"\"");'#10
                +'}';
        Dependency : '$Inh' ),
       (Name : '$AsIntf';
-       Code : 'function $AsIntf(o,i) {'#13#10
-               +#9'if (o===null) return null;'#13#10
-               +#9'var r = o.ClassType.$Intf[i].map(function (e) {'#13#10
-                  +#9#9'return function () {'#13#10
-                     +#9#9#9'var arg=Array.prototype.slice.call(arguments);'#13#10
-                     +#9#9#9'arg.splice(0,0,o);'#13#10
-                     +#9#9#9'return e.apply(o, arg);'#13#10
-                  +#9#9'}'#13#10
-               +#9'});'#13#10
-               +#9'r.O = o;'#13#10
-               +#9'return r;'#13#10
-               +'}'#13#10),
+       Code : 'function $AsIntf(o,i) {'#10
+               +#9'if (o===null) return null;'#10
+               +#9'var r = o.ClassType.$Intf[i].map(function (e) {'#10
+                  +#9#9'return function () {'#10
+                     +#9#9#9'var arg=Array.prototype.slice.call(arguments);'#10
+                     +#9#9#9'arg.splice(0,0,o);'#10
+                     +#9#9#9'return e.apply(o, arg);'#10
+                  +#9#9'}'#10
+               +#9'});'#10
+               +#9'r.O = o;'#10
+               +#9'return r;'#10
+               +'}'#10),
       (Name : '$Implements';
-       Code : 'function $Implements(o,i) {'#13#10
-               +#9'if (o===null) return false;'#13#10
-               +#9'var cti=o.ClassType.$Intf;'#13#10
-               +#9'return ((cti!=undefined)&&(cti[i]!=undefined));'#13#10
-               +'}'#13#10),
+       Code : 'function $Implements(o,i) {'#10
+               +#9'if (o===null) return false;'#10
+               +#9'var cti=o.ClassType.$Intf;'#10
+               +#9'return ((cti!=undefined)&&(cti[i]!=undefined));'#10
+               +'}'#10),
       (Name : '$ClassImplements';
-       Code : 'function $ClassImplements(c,i) {'#13#10
-               +#9'if (c===null) return false;'#13#10
-               +#9'var cti=c.$Intf;'#13#10
-               +#9'return ((cti!=undefined)&&(cti[i]!=undefined));'#13#10
-               +'}'#13#10),
+       Code : 'function $ClassImplements(c,i) {'#10
+               +#9'if (c===null) return false;'#10
+               +#9'var cti=c.$Intf;'#10
+               +#9'return ((cti!=undefined)&&(cti[i]!=undefined));'#10
+               +'}'#10),
       (Name : '$IntfAsClass';
-       Code : 'function $IntfAsClass(i,c) {'#13#10
-               +#9'if (i===null) return null;'#13#10
-               +#9'if ($Is(i.O,c)) return i.O;'#13#10
-               +#9'else throw Exception.Create($New(Exception),"Cannot cast interface of \""+i.O.ClassType.$ClassName+"\" to class \""+c.$ClassName+"\"");'#13#10
-               +'}'#13#10;
+       Code : 'function $IntfAsClass(i,c) {'#10
+               +#9'if (i===null) return null;'#10
+               +#9'if ($Is(i.O,c)) return i.O;'#10
+               +#9'else throw Exception.Create($New(Exception),"Cannot cast interface of \""+i.O.ClassType.$ClassName+"\" to class \""+c.$ClassName+"\"");'#10
+               +'}'#10;
        Dependency : '$Is' ),
       (Name : '$Peek';
-       Code : 'function $Peek(a,z) {'#13#10
-               +#9'var n=a.length;'#13#10
-               +#9'if (n>0) return a[n-1];'#13#10
-               +#9'throw Exception.Create($New(Exception),"Upper bound exceeded! Index 0"+z);'#13#10
+       Code : 'function $Peek(a,z) {'#10
+               +#9'var n=a.length;'#10
+               +#9'if (n>0) return a[n-1];'#10
+               +#9'throw Exception.Create($New(Exception),"Upper bound exceeded! Index 0"+z);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$Pop';
-       Code : 'function $Pop(a,z) {'#13#10
-               +#9'if (a.length>0) return a.pop();'#13#10
-               +#9'throw Exception.Create($New(Exception),"Upper bound exceeded! Index 0"+z);'#13#10
+       Code : 'function $Pop(a,z) {'#10
+               +#9'if (a.length>0) return a.pop();'#10
+               +#9'throw Exception.Create($New(Exception),"Upper bound exceeded! Index 0"+z);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$Pusha';
        Code : 'Array.prototype.pusha = function (e) { this.push.apply(this, e); return this }' ),
       (Name : '$Idx';
-       Code : 'function $Idx(i,l,h,z) {'#13#10
-               +#9'if (i<l) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>h) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'return i-l;'#13#10
+       Code : 'function $Idx(i,l,h,z) {'#10
+               +#9'if (i<l) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>h) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'return i-l;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxR';
-       Code : 'function $DIdxR(a,i,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'return a[i];'#13#10
+       Code : 'function $DIdxR(a,i,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'return a[i];'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxW';
-       Code : 'function $DIdxW(a,i,v,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'a[i]=v;'#13#10
+       Code : 'function $DIdxW(a,i,v,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'a[i]=v;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxAdd';
-       Code : 'function $DIdxAdd(a,i,v,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'a[i]+=v;'#13#10
+       Code : 'function $DIdxAdd(a,i,v,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'a[i]+=v;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxMinus';
-       Code : 'function $DIdxMinus(a,i,v,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'a[i]-=v;'#13#10
+       Code : 'function $DIdxMinus(a,i,v,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'a[i]-=v;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxMult';
-       Code : 'function $DIdxMult(a,i,v,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'a[i]*=v;'#13#10
+       Code : 'function $DIdxMult(a,i,v,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'a[i]*=v;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$DIdxDiv';
-       Code : 'function $DIdxMult(a,i,v,z) {'#13#10
-               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'a[i]/=v;'#13#10
+       Code : 'function $DIdxMult(a,i,v,z) {'#10
+               +#9'if (i<0) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>=a.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'a[i]/=v;'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$SIdx';
-       Code : 'function $SIdx(s,i,z) {'#13#10
-               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'return s.charAt(i-1);'#13#10
+       Code : 'function $SIdx(s,i,z) {'#10
+               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'return s.charAt(i-1);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$SCodeIdx';
-       Code : 'function $SCodeIdx(s,i,z) {'#13#10
-               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'return s.charCodeAt(i-1);'#13#10
+       Code : 'function $SCodeIdx(s,i,z) {'#10
+               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'return s.charCodeAt(i-1);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$IndexOffset';
        Code : 'function $IndexOffset(i,b) { return i >= 0 ? i+b : i }'),
       (Name : '$IndexOfRecord';
-       Code : 'function $IndexOfRecord(a,i,f,b) {'#13#10
-               +#9'var ij = JSON.stringify(i);'#13#10
-               +#9'for (var k=f,n=a.length;k<n;k++)'#13#10
-               +#9#9'if (JSON.stringify(a[k])==ij) return k+b;'#13#10
-               +#9'return -1'#13#10
+       Code : 'function $IndexOfRecord(a,i,f,b) {'#10
+               +#9'var ij = JSON.stringify(i);'#10
+               +#9'for (var k=f,n=a.length;k<n;k++)'#10
+               +#9#9'if (JSON.stringify(a[k])==ij) return k+b;'#10
+               +#9'return -1'#10
                +'}'),
       (Name : '$RemoveRecord';
-       Code : 'function $RemoveRecord(a,i,f) {'#13#10
-               +#9'var j = $IndexOfRecord(a,i,f);'#13#10
-               +#9'if (j>=0) a.splice(j,1);'#13#10
+       Code : 'function $RemoveRecord(a,i,f) {'#10
+               +#9'var j = $IndexOfRecord(a,i,f);'#10
+               +#9'if (j>=0) a.splice(j,1);'#10
                +'}';
        Dependency : 'IndexOfRecord' ),
       (Name : '$Remove';
-       Code : 'function $Remove(a,i,f) {'#13#10
-               +#9'var j = a.indexOf(i,f);'#13#10
-               +#9'if (j>=0) a.splice(j,1);'#13#10
+       Code : 'function $Remove(a,i,f) {'#10
+               +#9'var j = a.indexOf(i,f);'#10
+               +#9'if (j>=0) a.splice(j,1);'#10
                +'}'),
       (Name : '$StrSet';
-       Code : 'function $StrSet(s,i,v,z) {'#13#10
-               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#13#10
-               +#9'return s.substring(0,i-1)+v+s.substring(i);'#13#10
+       Code : 'function $StrSet(s,i,v,z) {'#10
+               +#9'if (i<1) throw Exception.Create($New(Exception),"Lower bound exceeded! Index "+i.toString()+z);'#10
+               +#9'if (i>s.length) throw Exception.Create($New(Exception),"Upper bound exceeded! Index "+i.toString()+z);'#10
+               +#9'return s.substring(0,i-1)+v+s.substring(i);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$StrSetF';
-       Code : 'function $StrSetF(o,f,i,v,z) {'#13#10
-               +#9'o[f]=$StrSet(o[f],i,v,z);'#13#10
+       Code : 'function $StrSetF(o,f,i,v,z) {'#10
+               +#9'o[f]=$StrSet(o[f],i,v,z);'#10
                +'}';
        Dependency : '$StrSet' ),
       (Name : '$Event';
-       Code : 'function $Event(i,f) {'#13#10
-               +#9'var li=i,lf=f;'#13#10
-               +#9'return function(){'#13#10
-                  +#9#9'var arg=Array.prototype.slice.call(arguments);'#13#10
-                  +#9#9'arg.unshift(li);'#13#10
-                  +#9#9'return lf.apply(li,arg)'#13#10
-               +#9'}'#13#10
+       Code : 'function $Event(i,f) {'#10
+               +#9'var li=i,lf=f;'#10
+               +#9'return function(){'#10
+                  +#9#9'var arg=Array.prototype.slice.call(arguments);'#10
+                  +#9#9'arg.unshift(li);'#10
+                  +#9#9'return lf.apply(li,arg)'#10
+               +#9'}'#10
                +'}'),
       (Name : '$Event0';
-       Code : 'function $Event0(i,f) {'#13#10
-               +#9'var li=i,lf=f;'#13#10
-               +#9'return function() {'#13#10
-                  +#9#9'return lf.call(li,li)'#13#10
-               +#9'}'#13#10
+       Code : 'function $Event0(i,f) {'#10
+               +#9'var li=i,lf=f;'#10
+               +#9'return function() {'#10
+                  +#9#9'return lf.call(li,li)'#10
+               +#9'}'#10
                +'}'),
       (Name : '$Event1';
-       Code : 'function $Event1(i,f) {'#13#10
-               +#9'var li=i,lf=f;'#13#10
-               +#9'return function(a) {'#13#10
-                  +#9#9'return lf.call(li,li,a)'#13#10
-               +#9'}'#13#10
+       Code : 'function $Event1(i,f) {'#10
+               +#9'var li=i,lf=f;'#10
+               +#9'return function(a) {'#10
+                  +#9#9'return lf.call(li,li,a)'#10
+               +#9'}'#10
                +'}'),
       (Name : '$Event2';
-       Code : 'function $Event2(i,f) {'#13#10
-               +#9'var li=i,lf=f;'#13#10
-               +#9'return function(a,b) {'#13#10
-                  +#9#9'return lf.call(li,li,a,b)'#13#10
-               +#9'}'#13#10
+       Code : 'function $Event2(i,f) {'#10
+               +#9'var li=i,lf=f;'#10
+               +#9'return function(a,b) {'#10
+                  +#9#9'return lf.call(li,li,a,b)'#10
+               +#9'}'#10
                +'}'),
       (Name : '$Event3';
-       Code : 'function $Event3(i,f) {'#13#10
-               +#9'var li=i,lf=f;'#13#10
-               +#9'return function(a,b,c) {'#13#10
-                  +#9#9'return lf.call(li,li,a,b,c)'#13#10
-               +#9'}'#13#10
+       Code : 'function $Event3(i,f) {'#10
+               +#9'var li=i,lf=f;'#10
+               +#9'return function(a,b,c) {'#10
+                  +#9#9'return lf.call(li,li,a,b,c)'#10
+               +#9'}'#10
                +'}'),
       (Name : '$OrdS';
        Code : 'function $OrdS(s) { return (s.length>0)?$uniCharCodeAt(s,0):0 }';
        Dependency : '$uniCharCodeAt' ),
       (Name : '$Ord';
-       Code : 'function $Ord(s,z) {'#13#10
-               +#9'switch (Object.prototype.toString.call(s)) {'#13#10
-                  +#9#9'case "[object Number]": return parseInt(s);'#13#10
-                  +#9#9'case "[object Boolean]": return s?1:0;'#13#10
-                  +#9#9'case "[object String]": return (s.length>0)?s.charCodeAt(0):0;'#13#10
-               +#9'}'#13#10
-               +#9'throw Exception.Create($New(Exception),"Not an ordinal! "+z);'#13#10
+       Code : 'function $Ord(s,z) {'#10
+               +#9'switch (Object.prototype.toString.call(s)) {'#10
+                  +#9#9'case "[object Number]": return parseInt(s);'#10
+                  +#9#9'case "[object Boolean]": return s?1:0;'#10
+                  +#9#9'case "[object String]": return (s.length>0)?s.charCodeAt(0):0;'#10
+               +#9'}'#10
+               +#9'throw Exception.Create($New(Exception),"Not an ordinal! "+z);'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : '$EnumToName';
        Code : 'function $EnumToName(s,v) { var r=s[v]; return (r!==undefined)?r:"?" }'),
       (Name : '$EnumToOrd';
-       Code : 'function $EnumToOrd(s,n,d) {'#13#10
-               +#9'var $ = s.$; if (!$) {'#13#10
-                  +#9#9'$ = {};'#13#10
-                  +#9#9'for (var t in s) $[s[t]]=1*t;'#13#10
-                  +#9#9's.$ = $;'#13#10
-                  +#9'}'#13#10
-               +#9'var r = $[n];'#13#10
-               +#9'return (r!==undefined)?r:d;'#13#10
+       Code : 'function $EnumToOrd(s,n,d) {'#10
+               +#9'var $ = s.$; if (!$) {'#10
+                  +#9#9'$ = {};'#10
+                  +#9#9'for (var t in s) $[s[t]]=1*t;'#10
+                  +#9#9's.$ = $;'#10
+                  +#9'}'#10
+               +#9'var r = $[n];'#10
+               +#9'return (r!==undefined)?r:d;'#10
                +'}'),
       (Name : '$uniCharAt';
        Code : '';
@@ -491,24 +501,24 @@ const
       (Name : '$Sign';
        Code : 'function $Sign(v) { return v>0?1:v<0?-1:v===v?0:NaN }'),
       (Name : '$GetName';
-       Code : 'function $GetName(obj) {'#13#10
-              +#9'if (obj && obj.constructor && obj.constructor.toString) {'#13#10
-                 +#9#9'var arr = obj.constructor.toString().match(/function\s*(\w+)/);'#13#10
-                 +#9#9'if (arr && arr.length == 2) return arr[1];'#13#10
-              +#9'}'#13#10
-              +#9'return undefined;'#13#10
+       Code : 'function $GetName(obj) {'#10
+              +#9'if (obj && obj.constructor && obj.constructor.toString) {'#10
+                 +#9#9'var arr = obj.constructor.toString().match(/function\s*(\w+)/);'#10
+                 +#9#9'if (arr && arr.length == 2) return arr[1];'#10
+              +#9'}'#10
+              +#9'return undefined;'#10
               +'}'),
       (Name : '$Extend';
-       code : 'function $Extend(base, sub, props) {'#13#10
-              +#9'function F() {};'#13#10
-              +#9'F.prototype = base.prototype;'#13#10
-              +#9'sub.prototype = new F();'#13#10
-              +#9'sub.prototype.constructor = sub;'#13#10
-              +#9'for (var n in props) {'#13#10
-                 +#9#9'if (props.hasOwnProperty(n)) {'#13#10
-                    +#9#9#9'sub.prototype[n]=props[n];'#13#10
-                 +#9#9'}'#13#10
-              +#9'}'#13#10
+       code : 'function $Extend(base, sub, props) {'#10
+              +#9'function F() {};'#10
+              +#9'F.prototype = base.prototype;'#10
+              +#9'sub.prototype = new F();'#10
+              +#9'sub.prototype.constructor = sub;'#10
+              +#9'for (var n in props) {'#10
+                 +#9#9'if (props.hasOwnProperty(n)) {'#10
+                    +#9#9#9'sub.prototype[n]=props[n];'#10
+                 +#9#9'}'#10
+              +#9'}'#10
               +'}'),
       (Name : '_';
        code : 'function _(t) { return t }'),
@@ -528,91 +538,79 @@ const
        code : 'function $SetSub(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]&(~b[i])); return r }'),
       (Name : '$SetMul';
        code : 'function $SetMul(a,b) { var r=[]; for(var i=0;i<a.length;i++) r.push(a[i]&b[i]); return r }'),
-      (Name : '$TZ';
-       code : 'var $TZ = 1, $fmt = { '#13#10
-              +#9'ShortDayNames : [ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" ],'#13#10
-              +#9'LongDayNames : [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" ],'#13#10
-              +#9'ShortMonthNames : [ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" ],'#13#10
-              +#9'LongMonthNames : [ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" ],'#13#10
-              +#9'ShortDateFormat : "yyyy-mm-dd",'#13#10
-              +#9'ShortTimeFormat : "hh:nn",'#13#10
-              +#9'LongTimeFormat : "hh:nn:ss",'#13#10
-              +#9'TimeAMString : "AM",'#13#10
-              +#9'TimePMString : "PM"'#13#10
-              +'}'),
 
       // RTL classes
 
       (Name : 'TObject';
-       Code : 'var TObject={'#13#10
-               +#9'$ClassName: "TObject",'#13#10
-               +#9'$Parent: null,'#13#10
-               +#9'ClassName: function (s) { return s.$ClassName },'#13#10
-               +#9'ClassType: function (s) { return s },'#13#10
-               +#9'ClassParent: function (s) { return s.$Parent },'#13#10
-               +#9'$Init: function (s) {},'#13#10
-               +#9'Create: function (s) { return s },'#13#10
-               +#9'Destroy: function (s) { for (var prop in s) if (s.hasOwnProperty(prop)) delete s[prop] },'#13#10
-               +#9'Destroy'+TdwsJSCodeGen.cVirtualPostfix+': function(s) { return s.ClassType.Destroy(s) },'#13#10
-               +#9'Free: function (s) { if (s!==null) s.ClassType.Destroy(s) }'#13#10
+       Code : 'var TObject={'#10
+               +#9'$ClassName: "TObject",'#10
+               +#9'$Parent: null,'#10
+               +#9'ClassName: function (s) { return s.$ClassName },'#10
+               +#9'ClassType: function (s) { return s },'#10
+               +#9'ClassParent: function (s) { return s.$Parent },'#10
+               +#9'$Init: function (s) {},'#10
+               +#9'Create: function (s) { return s },'#10
+               +#9'Destroy: function (s) { for (var prop in s) if (s.hasOwnProperty(prop)) delete s[prop] },'#10
+               +#9'Destroy'+TdwsJSCodeGen.cVirtualPostfix+': function(s) { return s.ClassType.Destroy(s) },'#10
+               +#9'Free: function (s) { if (s!==null) s.ClassType.Destroy(s) }'#10
                +'}';
        Dependency : '$New'),
       (Name : 'Exception';
-       Code : 'var Exception={'#13#10
-               +#9'$ClassName: "Exception",'#13#10
-               +#9'$Parent: TObject,'#13#10
-               +#9'$Init: function (s) { FMessage="" },'#13#10
-               +#9'Create: function (s,Msg) { s.FMessage=Msg; return s }'#13#10
+       Code : 'var Exception={'#10
+               +#9'$ClassName: "Exception",'#10
+               +#9'$Parent: TObject,'#10
+               +#9'$Init: function (s) { FMessage="" },'#10
+               +#9'Create: function (s,Msg) { s.FMessage=Msg; return s }'#10
                +'}';
        Dependency : 'TObject'),
       (Name : 'EAssertionFailed';
-       Code : 'var EAssertionFailed={'#13#10
-               +#9'$ClassName: "EAssertionFailed",'#13#10
-               +#9'$Parent: Exception,'#13#10
-               +#9'$Init: Exception.$Init'#13#10
+       Code : 'var EAssertionFailed={'#10
+               +#9'$ClassName: "EAssertionFailed",'#10
+               +#9'$Parent: Exception,'#10
+               +#9'$Init: Exception.$Init'#10
                +'}';
        Dependency : 'Exception'),
 
       // RTTI functions
 
       (Name : 'RTTIPropertyAttribute';
-       Code : 'var RTTIPropertyAttribute={'#13#10
-               +#9'$ClassName: "RTTIPropertyAttribute",'#13#10
-               +#9'$Parent: TCustomAttribute,'#13#10
-               +#9'$Init: function () { },'#13#10
-               +#9'Name: function (s) { return s.N },'#13#10
-               +#9'Typ: function (s) { return s.T },'#13#10
-               +#9'Capabilities: function (s) { return s.C },'#13#10
-               +#9'Getter: function (s,h) { return s.G(h) },'#13#10
-               +#9'Setter: function (s,h,v) { return s.S(h,v) }'#13#10
+       Code : 'var RTTIPropertyAttribute={'#10
+               +#9'$ClassName: "RTTIPropertyAttribute",'#10
+               +#9'$Parent: TCustomAttribute,'#10
+               +#9'$Init: function () { },'#10
+               +#9'Name: function (s) { return s.N },'#10
+               +#9'Typ: function (s) { return s.T },'#10
+               +#9'Capabilities: function (s) { return s.C },'#10
+               +#9'Getter: function (s,h) { return s.G(h) },'#10
+               +#9'Setter: function (s,h,v) { return s.S(h,v) }'#10
                +'}';
        Dependency : 'TObject'),
       (Name : 'RTTIMethodAttribute';
-       Code : 'var RTTIMethodAttribute={'#13#10
-               +#9'$ClassName: "RTTIMethodAttribute",'#13#10
-               +#9'$Parent: TCustomAttribute,'#13#10
-               +#9'$Init: function () { },'#13#10
-               +#9'Name: function (s) { return s.N },'#13#10
-               +#9'Typ: function (s) { return s.T?s.T:{ID:0} },'#13#10
-               +#9'Info: function (s) { return s.I },'#13#10
-               +#9'VMTIndex: function (s,h) { return s.V?s.V:-1 },'#13#10
-               +#9'Call: function (s,i,a) { if (!(s.I&4)) a.unshift(i); return s.F.apply(i,a) }'#13#10        // infoStatic = 4
+       Code : 'var RTTIMethodAttribute={'#10
+               +#9'$ClassName: "RTTIMethodAttribute",'#10
+               +#9'$Parent: TCustomAttribute,'#10
+               +#9'$Init: function () { },'#10
+               +#9'Name: function (s) { return s.N },'#10
+               +#9'Typ: function (s) { return s.T?s.T:{ID:0} },'#10
+               +#9'Info: function (s) { return s.I },'#10
+               +#9'VMTIndex: function (s,h) { return s.V?s.V:-1 },'#10
+               +#9'Call: function (s,i,a) { if (!(s.I&4)) a.unshift(i); return s.F.apply(i,a) }'#10        // infoStatic = 4
                +'}';
        Dependency : 'TObject'),
 
       (Name : 'TypeOf$_TClass_';
        Code : 'function TypeOf$_TClass_(v) { return {ID:v} }'),
       (Name : 'RTTIRawAttributes';
-       Code :  'var $RTTI_rdy = false;'#13#10
-              +'function RTTIRawAttributes() {'#13#10
-               +#9'if (!$RTTI_rdy) {'#13#10
-                  +#9#9'for (var i=0; i<$RTTI.length; i++) {'#13#10
-                     +#9#9#9'var r = $RTTI[i];'#13#10
-                     +#9#9#9'if (r.A instanceof Function) r.A = r.A();'#13#10
-                  +#9#9'}'#13#10
-                  +#9#9'$RTTI_rdy = true;'#13#10
-               +#9'}'#13#10
-               +#9'return $RTTI'#13#10
+       Code :  'var $RTTI_rdy = false;'#10
+              +'function RTTIRawAttributes() {'#10
+               +#9'if (!$RTTI_rdy) {'#10
+                  +#9#9'for (var i=0; i<$RTTI.length; i++) {'#10
+                     +#9#9#9'var r = $RTTI[i];'#10
+                     +#9#9#9'if (r.A instanceof Function) r.A = r.A();'#10
+                  +#9#9'}'#10
+                  +#9#9'$RTTI_rdy = true;'#10
+               +#9'}'#10
+               +#9'return $RTTI'#10
                +'}'),
       (Name : 'SameRTTITypeInfo$_TRTTITypeInfo_TRTTITypeInfo_';
        Code : 'function SameRTTITypeInfo$_TRTTITypeInfo_TRTTITypeInfo_(a,b) { return a.ID==b.ID }'),
@@ -655,10 +653,10 @@ const
       (Name : 'CharAt';
        Code : 'function CharAt(s,p) { return s.charAt(p-1) }'),
       (Name : 'Chr';
-       Code : 'function Chr(c) {'#13#10
-              +#9'if (c<=0xFFFF) return String.fromCharCode(c);'#13#10
-              +#9'c-=0x10000;'#13#10
-              +#9'return String.fromCharCode(0xD800+(c>>10))+String.fromCharCode(0xDC00+(c&0x3FF));'#13#10
+       Code : 'function Chr(c) {'#10
+              +#9'if (c<=0xFFFF) return String.fromCharCode(c);'#10
+              +#9'c-=0x10000;'#10
+              +#9'return String.fromCharCode(0xD800+(c>>10))+String.fromCharCode(0xDC00+(c&0x3FF));'#10
               +'}'),
       (Name : 'Clamp';
        Code : 'function Clamp(v,mi,ma) { return v<mi ? mi : v>ma ? ma : v }'),
@@ -689,18 +687,18 @@ const
        Code : 'function $Date(v) { return Math.round(Now()-0.5) }';
        Dependency : 'Now' ),
       (Name : 'DateTimeToDate';
-       Code : 'function DateTimeToDate(v) {'#13#10
-               +#9'return new Date(Math.round((v-25569)*864e5));'#13#10
+       Code : 'function DateTimeToDate(v) {'#10
+               +#9'return new Date(Math.round((v-25569)*864e5));'#10
                +'}';
        Dependency : 'FormatDateTime' ),
       (Name : 'DateTimeToISO8601';
-       Code : 'function DateTimeToISO8601(v) {'#13#10
-               +#9'return FormatDateTime("yyyy-mm-dd", v, 2)+"T"+FormatDateTime("hh:nn:ss", v, 2)+"Z"'#13#10
+       Code : 'function DateTimeToISO8601(v) {'#10
+               +#9'return FormatDateTime("yyyy-mm-dd", v, 2)+"T"+FormatDateTime("hh:nn:ss", v, 2)+"Z"'#10
                +'}';
        Dependency : 'FormatDateTime' ),
       (Name : 'DateTimeToRFC822';
-       Code : 'function DateTimeToRFC822(v) {'#13#10
-               +#9'return (new Date(Math.round((v-25569)*864e5))).toUTCString();'#13#10
+       Code : 'function DateTimeToRFC822(v) {'#10
+               +#9'return (new Date(Math.round((v-25569)*864e5))).toUTCString();'#10
                +'}' ),
       (Name : 'DateTimeToStr';
        Code : 'function DateTimeToStr(v, u) { return FormatDateTime($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, v, u) }';
@@ -716,8 +714,8 @@ const
       (Name : 'DateTimeToUnixTime';
        Code : 'function DateTimeToUnixTime(t) { return Math.floor((t-25569)*86400) }' ),
       (Name : 'DateToISO8601';
-       Code : 'function DateToISO8601(v) {'#13#10
-               +#9'return FormatDateTime("yyyy-mm-dd", v)'#13#10
+       Code : 'function DateToISO8601(v) {'#10
+               +#9'return FormatDateTime("yyyy-mm-dd", v)'#10
                +'}';
        Dependency : 'FormatDateTime' ),
       (Name : 'DateToStr';
@@ -727,54 +725,54 @@ const
        Code : 'var DateToWeekNumber = WeekNumber';
        Dependency : 'WeekNumber'),
       (Name : 'DayOfMonth';
-       Code : 'function DayOfMonth(v) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return o.getDate();'#13#10
+       Code : 'function DayOfMonth(v) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'return o.getDate();'#10
                +'}';
        Dependency: 'DateTimeToDate'),
       (Name : 'DayOfYear';
-       Code : 'function DayOfYear(v) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=o.getFullYear(), m=o.getMonth(), d=o.getDate();'#13#10
-               +#9'return 1+Math.round((Date.UTC(y,m,d)-Date.UTC(y,0,1))/864e5);'#13#10
+       Code : 'function DayOfYear(v) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'var y=o.getFullYear(), m=o.getMonth(), d=o.getDate();'#10
+               +#9'return 1+Math.round((Date.UTC(y,m,d)-Date.UTC(y,0,1))/864e5);'#10
                +'}';
        Dependency: 'DateTimeToDate'),
       (Name : 'DayOfWeek';
-       Code : 'function DayOfWeek(v) {'#13#10
-               +#9'return DateTimeToDate(v).getDay()+1;'#13#10
+       Code : 'function DayOfWeek(v) {'#10
+               +#9'return DateTimeToDate(v).getDay()+1;'#10
                +'}';
        Dependency : 'DateTimeToDate'),
       (Name : 'DayOfTheWeek';
        Code : 'function DayOfTheWeek(v) { return ((DayOfWeek(v)+5)%7)+1 };';
        Dependency : 'DayOfWeek' ),
       (Name : 'DecodeDate';
-       Code : 'function DecodeDate(dt,y,m,d,u) {'#13#10
-               +#9'var o=DateTimeToDate(dt);'#13#10
-               +#9'if ((u||$TZ)==2) {'#13#10
-               +#9#9'y.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCFullYear();'#13#10
-               +#9#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMonth()+1;'#13#10
-               +#9#9'd.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCDate();'#13#10
-               +#9'} else {'#13#10
-               +#9#9'y.'+TdwsJSCodeGen.cBoxFieldName+'=o.getFullYear();'#13#10
-               +#9#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMonth()+1;'#13#10
-               +#9#9'd.'+TdwsJSCodeGen.cBoxFieldName+'=o.getDate();'#13#10
-               +#9'}'#13#10
+       Code : 'function DecodeDate(dt,y,m,d,u) {'#10
+               +#9'var o=DateTimeToDate(dt);'#10
+               +#9'if ((u||$TZ)==2) {'#10
+               +#9#9'y.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCFullYear();'#10
+               +#9#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMonth()+1;'#10
+               +#9#9'd.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCDate();'#10
+               +#9'} else {'#10
+               +#9#9'y.'+TdwsJSCodeGen.cBoxFieldName+'=o.getFullYear();'#10
+               +#9#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMonth()+1;'#10
+               +#9#9'd.'+TdwsJSCodeGen.cBoxFieldName+'=o.getDate();'#10
+               +#9'}'#10
                +'}';
        Dependency : 'DateTimeToDate,$TZ'),
       (Name : 'DecodeTime';
-       Code : 'function DecodeTime(dt,h,m,s,z,u) {'#13#10
-               +#9'var o=DateTimeToDate(dt);'#13#10
-               +#9'if ((u||$TZ)==2) {'#13#10
-               +#9'h.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCHours();'#13#10
-               +#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMinutes();'#13#10
-               +#9's.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCSeconds();'#13#10
-               +#9'z.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMilliseconds();'#13#10
-               +#9'} else {'#13#10
-               +#9'h.'+TdwsJSCodeGen.cBoxFieldName+'=o.getHours();'#13#10
-               +#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMinutes();'#13#10
-               +#9's.'+TdwsJSCodeGen.cBoxFieldName+'=o.getSeconds();'#13#10
-               +#9'z.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMilliseconds();'#13#10
-               +#9'}'#13#10
+       Code : 'function DecodeTime(dt,h,m,s,z,u) {'#10
+               +#9'var o=DateTimeToDate(dt);'#10
+               +#9'if ((u||$TZ)==2) {'#10
+               +#9'h.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCHours();'#10
+               +#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMinutes();'#10
+               +#9's.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCSeconds();'#10
+               +#9'z.'+TdwsJSCodeGen.cBoxFieldName+'=o.getUTCMilliseconds();'#10
+               +#9'} else {'#10
+               +#9'h.'+TdwsJSCodeGen.cBoxFieldName+'=o.getHours();'#10
+               +#9'm.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMinutes();'#10
+               +#9's.'+TdwsJSCodeGen.cBoxFieldName+'=o.getSeconds();'#10
+               +#9'z.'+TdwsJSCodeGen.cBoxFieldName+'=o.getMilliseconds();'#10
+               +#9'}'#10
                +'}';
        Dependency : 'DateTimeToDate'),
       (Name : 'DegToRad';
@@ -802,45 +800,45 @@ const
       (Name : 'Factorial';
        Code : 'function Factorial(i) { var r=1; while (i>1) { r*=i; i--; } return r }'),
       (Name : 'FirstDayOfMonth';
-       Code : 'function FirstDayOfMonth(v, u) {'#13#10
-               +#9'var o=(v===0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
-               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#13#10
-               +#9'return EncodeDate(y, m+1, 1, u)'#13#10
+       Code : 'function FirstDayOfMonth(v, u) {'#10
+               +#9'var o=(v===0)?new Date():DateTimeToDate(v);'#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#10
+               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#10
+               +#9'return EncodeDate(y, m+1, 1, u)'#10
                +'}';
        Dependency : 'DateTimeToDate,EncodeDate' ),
       (Name : 'FirstDayOfNextMonth';
-       Code : 'function FirstDayOfNextMonth(v,u) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
-               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#13#10
-               +#9'if (m==11) { m=0; y++ } else m++;'#13#10
-               +#9'return EncodeDate(y, m+1, 1, u)'#13#10
+       Code : 'function FirstDayOfNextMonth(v,u) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#10
+               +#9'var m=((u||$TZ)===2) ? o.getUTCMonth() : o.getMonth();'#10
+               +#9'if (m==11) { m=0; y++ } else m++;'#10
+               +#9'return EncodeDate(y, m+1, 1, u)'#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfNextYear';
-       Code : 'function FirstDayOfNextYear(v,u) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
-               +#9'return EncodeDate(y+1,1,1,u)'#13#10
+       Code : 'function FirstDayOfNextYear(v,u) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#10
+               +#9'return EncodeDate(y+1,1,1,u)'#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfYear';
-       Code : 'function FirstDayOfYear(v,u) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#13#10
-               +#9'return EncodeDate(y,1,1)'#13#10
+       Code : 'function FirstDayOfYear(v,u) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'var y=((u||$TZ)===2) ? o.getUTCFullYear() : o.getFullYear();'#10
+               +#9'return EncodeDate(y,1,1)'#10
                +'}';
        Dependency : 'EncodeDate,DateTimeToDate' ),
       (Name : 'FirstDayOfWeek';
-       Code : 'function FirstDayOfWeek(v,u) {'#13#10
-               +#9'var o=DateTimeToDate(v);'#13#10
-               +#9'var d=((u||$TZ)===2) ? o.getUTCDay() : o.getDay();'#13#10
-               +#9'return (d==0)?v-6:v-(d-1)'#13#10
+       Code : 'function FirstDayOfWeek(v,u) {'#10
+               +#9'var o=DateTimeToDate(v);'#10
+               +#9'var d=((u||$TZ)===2) ? o.getUTCDay() : o.getDay();'#10
+               +#9'return (d==0)?v-6:v-(d-1)'#10
                +'}';
        Dependency : 'DateTimeToDate' ),
       (Name : 'FloatToStr';
-       Code : 'function FloatToStr$_Float_(i) { return i.toString() }'#13#10
+       Code : 'function FloatToStr$_Float_(i) { return i.toString() }'#10
               +'function FloatToStr$_Float_Integer_(i,p) { return (p==99)?i.toString():i.toFixed(p) }'),
       (Name : 'FloatToStr$_Float_';
        Code : '';
@@ -863,26 +861,26 @@ const
       (Name : 'Gcd$_Integer_Integer_';
        Code : 'function Gcd$_Integer_Integer_(a, b) { var r; while (b!=0) { r=a%b; a=b; b=r; } return a }'),
       (Name : 'HexToInt';
-       Code : 'function HexToInt(v) {'#13#10
-               +#9'var r=parseInt(v,16);'#13#10
-               +#9'if (isFinite(r)) return r;'#13#10
-               +#9'throw Exception.Create($New(Exception),"''"+v.toString()+"'' is not a valid hexadecimal value");'#13#10
+       Code : 'function HexToInt(v) {'#10
+               +#9'var r=parseInt(v,16);'#10
+               +#9'if (isFinite(r)) return r;'#10
+               +#9'throw Exception.Create($New(Exception),"''"+v.toString()+"'' is not a valid hexadecimal value");'#10
                +'}';
        Dependency : 'Exception' ),
       (Name : 'Hypot';
        Code : 'function Hypot(x,y) { return Math.sqrt(x*x+y*y) }'),
       (Name : 'IncMonth';
-       Code : 'function IncMonth(v, n, u) {'#13#10
-               +#9'var utc=(u||$TZ)===2, o=DateTimeToDate(v), y, m, b;'#13#10
-               +#9'if (utc) {'#13#10
-               +#9#9'y=o.getUTCFullYear(); m=o.getUTCMonth(); b=Date.UTC(y,m,1);'#13#10
-               +#9'} else {'#13#10
-               +#9#9'y=o.getFullYear(); m=o.getMonth(); b=new Date(y,m,1).getTime();'#13#10
-               +#9'}'#13#10
-               +#9'm+=n;'#13#10
-               +#9'while (m>=12) { m-=12; y++ };'#13#10
-               +#9'while (m<0) { m+=12; y-- };'#13#10
-               +#9'return v+((utc?Date.UTC(y,m,1):new Date(y,m,1).getTime())-b)/864e5'#13#10
+       Code : 'function IncMonth(v, n, u) {'#10
+               +#9'var utc=(u||$TZ)===2, o=DateTimeToDate(v), y, m, b;'#10
+               +#9'if (utc) {'#10
+               +#9#9'y=o.getUTCFullYear(); m=o.getUTCMonth(); b=Date.UTC(y,m,1);'#10
+               +#9'} else {'#10
+               +#9#9'y=o.getFullYear(); m=o.getMonth(); b=new Date(y,m,1).getTime();'#10
+               +#9'}'#10
+               +#9'm+=n;'#10
+               +#9'while (m>=12) { m-=12; y++ };'#10
+               +#9'while (m<0) { m+=12; y-- };'#10
+               +#9'return v+((utc?Date.UTC(y,m,1):new Date(y,m,1).getTime())-b)/864e5'#10
                +'}';
        Dependency : 'DateTimeToDate,$TZ' ),
       (Name : 'Insert';
@@ -893,10 +891,10 @@ const
       (Name : 'IntPower$_Float_Integer_';
        Code : 'var IntPower$_Float_Integer_ = Math.pow'),
       (Name : 'ISO8601ToDateTime';
-       Code : 'function ISO8601ToDateTime(s) {'#13#10
-              +#9'var r = Date.parse(s)/864e5+25569;'#13#10
-              +#9'if (isNaN(r)) throw Exception.Create($New(Exception),"Invalid ISO8601")'#13#10
-              +#9'return r;'#13#10
+       Code : 'function ISO8601ToDateTime(s) {'#10
+              +#9'var r = Date.parse(s)/864e5+25569;'#10
+              +#9'if (isNaN(r)) throw Exception.Create($New(Exception),"Invalid ISO8601")'#10
+              +#9'return r;'#10
               +'}';
        Dependency : 'Exception' ),
       (Name : 'IntToBin';
@@ -918,17 +916,17 @@ const
        Code : 'function Lcm$_Integer_Integer_(a, b) { var g=Gcd$_Integer_Integer_(a,b); return (g!=0)?(Math.floor(a/g)*b):0 }';
        Dependency : 'Gcd$_Integer_Integer_' ),
       (Name : 'LeastFactor';
-       Code : 'function LeastFactor(n) {'#13#10
-               +#9'if (n<=1) return (n==1)?1:0;'#13#10
-               +#9'if (!(n&1)) return 2;'#13#10
-               +#9'if (!(n%3)) return 3;'#13#10
-               +#9'var lim=Math.sqrt(n);'#13#10
-               +#9'for (var i=5; i<=lim; i+=4) {'#13#10
-                  +#9#9'if (!(n%i)) return i;'#13#10
-                  +#9#9'i+=2;'#13#10
-                  +#9#9'if (!(n%i)) return i;'#13#10
-               +#9'}'#13#10
-               +'return n'#13#10
+       Code : 'function LeastFactor(n) {'#10
+               +#9'if (n<=1) return (n==1)?1:0;'#10
+               +#9'if (!(n&1)) return 2;'#10
+               +#9'if (!(n%3)) return 3;'#10
+               +#9'var lim=Math.sqrt(n);'#10
+               +#9'for (var i=5; i<=lim; i+=4) {'#10
+                  +#9#9'if (!(n%i)) return i;'#10
+                  +#9#9'i+=2;'#10
+                  +#9#9'if (!(n%i)) return i;'#10
+               +#9'}'#10
+               +'return n'#10
                +'}'),
       (Name : 'Ln';
        Code : 'var Ln = Math.log'),
@@ -961,9 +959,9 @@ const
       (Name : 'MinInt';
        Code : 'function MinInt(a,b) { return (a<b)?a:b }'),
       (Name : 'MonthOfYear';
-       Code : 'function MonthOfYear(v) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return o.getUTCMonth()+1;'#13#10
+       Code : 'function MonthOfYear(v) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'return o.getUTCMonth()+1;'#10
                +'}';
        Dependency : 'DateTimeToDate'),
       (Name : 'NormalizeString';
@@ -1007,14 +1005,14 @@ const
        Code : 'var Random = $alea()';
        Dependency : '!alea_js' ),
       (Name : 'RandG';
-       Code : 'function RandG(m, s) {'#13#10
-              +#9'var u, r, n;'#13#10
-              +#9'do {'#13#10
-                  +#9#9'u=2*Random()-1;'#13#10
-                  +#9#9'r=2*Random()-1;'#13#10
-                  +#9#9'n=u*u+r*r;'#13#10
-              +#9'} while (n<1);'#13#10
-              +#9'return m+Math.sqrt(-2*Math.log(n)/n)*u*s;'#13#10
+       Code : 'function RandG(m, s) {'#10
+              +#9'var u, r, n;'#10
+              +#9'do {'#10
+                  +#9#9'u=2*Random()-1;'#10
+                  +#9#9'r=2*Random()-1;'#10
+                  +#9#9'n=u*u+r*r;'#10
+              +#9'} while (n<1);'#10
+              +#9'return m+Math.sqrt(-2*Math.log(n)/n)*u*s;'#10
               +'}';
        Dependency : 'Random'),
       (Name : 'RandomInt';
@@ -1082,15 +1080,15 @@ const
        Code : 'function StringOfChar(c,n) { return StringOfString(c?c.charAt(0):" ",n) }';
        Dependency : 'StringOfString'),
       (Name : 'StringOfString';
-       Code : 'function StringOfString(s,n) {'
-                  + 'if (n<1) return "";'
-                  + 'var r="";'
-                  + 'while (n>0) {'
-                     + 'if (n&1) r+=s;'
-                     + 'n>>=1; s+=s;'
-                  + '}'
-                  + 'return r'
-               + '}'),
+       Code : 'function StringOfString(s,n) {'#10
+               + #9'if (n<1) return "";'#10
+               + #9'var r="";'#10
+               + #9'while (n>0) {'#10
+                  + #9#9'if (n&1) r+=s;'#10
+                  + #9#9'n>>=1; s+=s;'#10
+               + #9'}'#10
+               + #9'return r'#10
+            + '}'),
       (Name : 'StrJoin';
        Code : 'function StrJoin(a,d) { return a.join(d) }'),
       (Name : 'StrRegExp';
@@ -1119,19 +1117,19 @@ const
       (Name : 'StrToFloatDef';
        Code : 'function StrToFloatDef(v,d) { var r=parseFloat(v); return isNaN(r)?d:r }'),
       (Name : 'StrToHtml';
-       Code : 'function StrToHtml(v) { return v.replace(/[&<>"'']/g, StrToHtml.e) }'#13#10
+       Code : 'function StrToHtml(v) { return v.replace(/[&<>"'']/g, StrToHtml.e) }'#10
               +'StrToHtml.e = function(c) { return { "&":"&amp;", "<":"&lt;", ">":"&gt;", ''"'':"&quot;", "''":"&#39;" }[c] }' ),
       (Name : 'StrToHtmlAttribute';
-       Code : 'function StrToHtmlAttribute(v) {'#13#10
-              + #9'for (var r = "", i = 0; i < v.length; i++) {'#13#10
-                 + #9#9'var c = v.charCodeAt(i);'#13#10
-                 + #9#9'if ((c >= 64 && c < 91) || (c > 96 && c < 123) || (c > 47 && c < 58) || c > 127) {'#13#10
-                    + #9#9#9'r += v.charAt(i);'#13#10
-                 + #9#9'} else {'#13#10
-                    + #9#9#9'r += "&#" + c + ";";'#13#10
-                 + #9#9'}'#13#10
-              + #9'}'#13#10
-              + #9'return r;'#13#10
+       Code : 'function StrToHtmlAttribute(v) {'#10
+              + #9'for (var r = "", i = 0; i < v.length; i++) {'#10
+                 + #9#9'var c = v.charCodeAt(i);'#10
+                 + #9#9'if ((c >= 64 && c < 91) || (c > 96 && c < 123) || (c > 47 && c < 58) || c > 127) {'#10
+                    + #9#9#9'r += v.charAt(i);'#10
+                 + #9#9'} else {'#10
+                    + #9#9#9'r += "&#" + c + ";";'#10
+                 + #9#9'}'#10
+              + #9'}'#10
+              + #9'return r;'#10
               + '}';
        Dependency : 'StrToHtml' ),
       (Name : 'StrToInt';
@@ -1141,20 +1139,20 @@ const
       (Name : 'StrToJSON';
        Code : 'function StrToJSON(v) { return JSON.stringify(v) }'),
       (Name : 'StrMatches';
-       Code : 'function StrMatches(v,r) {'#13#10
-                  +#9'if (!r) return false;'#13#10
-                  +#9'var f = r.split("");'#13#10
-                  +#9'for (var i=0; i<f.length; i++) {'#13#10
-                     +#9#9'if (/\\|\^|\$|\+|\.|\(|\)|\!|\{|\}|\[|\]|\|/g.test(f[i])) {'#13#10
-                        +#9#9#9'f[i]="\\"+f[i]'#13#10
-                     +#9#9'} else if (f[i]=="*") {'#13#10
-                        +#9#9#9'f[i]="[\\s\\S]*"'#13#10
-                     +#9#9'} else if (f[i]=="?") {'#13#10
-                        +#9#9#9'f[i]="[\\s\\S]"'#13#10
-                     +#9#9'}'#13#10
-                  +#9'}'#13#10
-                  +#9'return (new RegExp(f.join(""), "g")).test(v)'#13#10
-               +'}'#13#10),
+       Code : 'function StrMatches(v,r) {'#10
+                  +#9'if (!r) return false;'#10
+                  +#9'var f = r.split("");'#10
+                  +#9'for (var i=0; i<f.length; i++) {'#10
+                     +#9#9'if (/\\|\^|\$|\+|\.|\(|\)|\!|\{|\}|\[|\]|\|/g.test(f[i])) {'#10
+                        +#9#9#9'f[i]="\\"+f[i]'#10
+                     +#9#9'} else if (f[i]=="*") {'#10
+                        +#9#9#9'f[i]="[\\s\\S]*"'#10
+                     +#9#9'} else if (f[i]=="?") {'#10
+                        +#9#9#9'f[i]="[\\s\\S]"'#10
+                     +#9#9'}'#10
+                  +#9'}'#10
+                  +#9'return (new RegExp(f.join(""), "g")).test(v)'#10
+               +'}'#10),
       (Name : 'StrToTime';
        Code : 'function StrToTime(s) { return strToDateTimeDef($fmt.LongTimeFormat, s, 0)||strToDateTimeDef($fmt.ShortTimeFormat, s, 0) }';
        Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
@@ -1162,7 +1160,7 @@ const
        Code : 'function StrToTimeDef(s,d) { return strToDateTimeDef($fmt.LongTimeFormat, s, 0)||strToDateTimeDef($fmt.ShortTimeFormat, s, 0)||d }';
        Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
       (Name : 'StrToXML';
-       Code : 'function StrToXML(v) { return v.replace(/[&<>"'']/g, StrToXML.e) }'#13#10
+       Code : 'function StrToXML(v) { return v.replace(/[&<>"'']/g, StrToXML.e) }'#10
               +'StrToXML.e = function(c) { return { "&":"&amp;", "<":"&lt;", ">":"&gt;", ''"'':"&quot;", "''":"&apos;" }[c] }' ),
       (Name : 'SubStr';
        Code : 'function SubStr(s,f) { return s.substr(f-1) }'),
@@ -1211,14 +1209,14 @@ const
       (Name : 'UTCDateTime';
        Code : 'function UTCDateTime() { var d=new Date(); return d.getTime()/8.64e7+25569 }'),
       (Name : 'VarAsType';
-       Code : 'function VarAsType(v,t) {'#13#10
-               +#9'switch (t) {'#13#10
-                  +#9#9'case 258: return String(v);'#13#10 // varUString
-                  +#9#9'case 3: case 20: return parseInt(v);'#13#10 // varInteger, varInt64
-                  +#9#9'case 5: return parseFloat(v);'#13#10 // varDouble
-                  +#9#9'case 0xB: return v?true:false;'#13#10 // varBoolean
-                  +#9#9'default : return v;'#13#10
-               +#9'}'#13#10
+       Code : 'function VarAsType(v,t) {'#10
+               +#9'switch (t) {'#10
+                  +#9#9'case 258 : return String(v);'#10 // varUString
+                  +#9#9'case 3 : case 20 : return parseInt(v);'#10 // varInteger, varInt64
+                  +#9#9'case 5 : return parseFloat(v);'#10 // varDouble
+                  +#9#9'case 0xB : return v?true:false;'#10 // varBoolean
+                  +#9#9'default : return v;'#10
+               +#9'}'#10
                +'}'),
       (Name : 'VarClear$_Variant_';
        Code : 'function VarClear$_Variant_(v) { var u; v.v=u }'),
@@ -1236,55 +1234,114 @@ const
        Code : 'function VarToStr(v) { return (typeof v === "undefined")?"":v.toString() }'),
       (Name : '$VarToBool';
        Code : 'function $VarToBool(v) { return !!(typeof v == "string" ? {"1":1,"t":1,"y":1,"true":1}[v.toLowerCase()] : v) }'),
+      (Name : '$VarToInt';
+       Code : 'function $VarToInt(v,z) {'#10
+               + #9'var r = parseInt(v || 0, 10);'#10
+               + #9'if (isNaN(r)) throw Exception.Create($New(Exception),"Not a valid integer: "+v+z);'#10
+               + #9'return r'#10
+               + '}';
+       Dependency : 'Exception' ),
       (Name : 'VarToFloatDef';
-       Code : 'function VarToFloatDef(v, d) {'#13#10
-               + #9'if (v == null) return v === undefined ? d : 0;'#13#10
-               + #9'var r = parseFloat(v);'#13#10
-               + #9'if (!isNaN(r)) return r;'#13#10
-               + #9'if (v === true) return 1;'#13#10
-               + #9'if (v === false) return 0;'#13#10
-               + #9'return d;'#13#10
+       Code : 'function VarToFloatDef(v, d) {'#10
+               + #9'if (v == null) return v === undefined ? d : 0;'#10
+               + #9'var r = parseFloat(v);'#10
+               + #9'if (!isNaN(r)) return r;'#10
+               + #9'if (v === true) return 1;'#10
+               + #9'if (v === false) return 0;'#10
+               + #9'return d;'#10
                + '}'),
       (Name : 'VarType';
-       Code : 'function VarType(v) {'#13#10
-               +#9'switch (Object.prototype.toString.call(v)) {'#13#10
-                  +#9#9'case "[object Undefined]": return 0;'#13#10 // varEmpty
-                  +#9#9'case "[object String]": return 258;'#13#10 // varUString
-                  +#9#9'case "[object Number]": return (parseInt(v)==v)?20:5;'#13#10 // varInteger/varDouble
-                  +#9#9'case "[object Boolean]": return 0xB;'#13#10 // varBoolean
-                  +#9#9'default : return 0xC;'#13#10 // varVariant
-               +#9'}'#13#10
+       Code : 'function VarType(v) {'#10
+               +#9'switch (Object.prototype.toString.call(v)) {'#10
+                  +#9#9'case "[object Undefined]" : return 0;'#10 // varEmpty
+                  +#9#9'case "[object String]" : return 258;'#10 // varUString
+                  +#9#9'case "[object Number]" : return (parseInt(v)==v)?20:5;'#10 // varInteger/varDouble
+                  +#9#9'case "[object Boolean]" : return 0xB;'#10 // varBoolean
+                  +#9#9'default : return 0xC;'#10 // varVariant
+               +#9'}'#10
                +'}'),
       (Name : 'YearOf';
-       Code : 'function YearOf(v) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'return o.getFullYear();'#13#10
+       Code : 'function YearOf(v) {'#10
+               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#10
+               +#9'return o.getFullYear();'#10
                +'}';
        Dependency : 'WeekNumber,DateTimeToDate'),
       (Name : 'YearOfWeek';
-       Code : 'function YearOfWeek(v) {'#13#10
-               +#9'var o=(v==0)?new Date():DateTimeToDate(v);'#13#10
-               +#9'var y=o.getFullYear();'#13#10
-               +#9'var m=o.getMonth()+1;'#13#10
-               +#9'var d=o.getDate();'#13#10
-               +#9'if ((m==1)&&(d<4)) {'#13#10
-                  +#9#9'return (WeekNumber(v)==1)?y:y-1;'#13#10
-               +#9'} else if ((m==12)&&(d>=29)) {'#13#10
-                  +#9#9'return (WeekNumber(v)==1)?y+1:y;'#13#10
-               +#9'} else return y;'#13#10
+       Code : 'function YearOfWeek(v) {'#10
+               +#9'var o = (v==0)?new Date():DateTimeToDate(v),'#10
+               +#9#9'y = o.getFullYear(),'#10
+               +#9#9'm = o.getMonth()+1,'#10
+               +#9#9'd = o.getDate();'#10
+               +#9'if (m==1 && d<4) {'#10
+                  +#9#9'return (WeekNumber(v)==1)?y:y-1;'#10
+               +#9'} else if (m==12 && d>=29) {'#10
+                  +#9#9'return (WeekNumber(v)==1)?y+1:y;'#10
+               +#9'} else return y;'#10
                +'}';
        Dependency : 'WeekNumber,DateTimeToDate'),
       (Name : 'WeekNumber';
-       Code : 'function WeekNumber(v) {'#13#10
-               +#9'if (v==0) v=Now();'#13#10
-               +#9'var weekDay=((DayOfWeek(v)+5)%7)+1;'#13#10
-               +#9'v+=4-weekDay;'#13#10
-               +#9'var o=DateTimeToDate(v);'#13#10
-               +#9'return Math.floor((Math.floor(v)-EncodeDate(o.getFullYear(), 1, 1))/7)+1;'#13#10
+       Code : 'function WeekNumber(v) {'#10
+               +#9'if (v==0) v=Now();'#10
+               +#9'var weekDay = ((DayOfWeek(v)+5)%7)+1;'#10
+               +#9'v += 4-weekDay;'#10
+               +#9'var o = DateTimeToDate(v);'#10
+               +#9'return Math.floor((Math.floor(v)-EncodeDate(o.getFullYear(),1,1))/7)+1;'#10
                +'}';
        Dependency : 'DayOfWeek,Now,EncodeDate,DateTimeToDate')
 
    );
+
+var
+   vTZ_Dependency : TJSRTLDependency =
+      (Name : '$TZ';
+       code : 'var $TZ = 1, $fmt = { '#10
+              +#9'ShortDayNames : [ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" ],'#10
+              +#9'LongDayNames : [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" ],'#10
+              +#9'ShortMonthNames : [ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" ],'#10
+              +#9'LongMonthNames : [ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" ],'#10
+              +#9'ShortDateFormat : "yyyy-mm-dd",'#10
+              +#9'ShortTimeFormat : "hh:nn",'#10
+              +#9'LongTimeFormat : "hh:nn:ss",'#10
+              +#9'TimeAMString : "AM",'#10
+              +#9'TimePMString : "PM"'#10
+              +'}');
+
+// SetJSRTL_TZ_FromSettings
+//
+procedure SetJSRTL_TZ_FromSettings(const settings : TFormatSettings);
+var
+   wr : TdwsJSONWriter;
+
+   procedure WriteStrings(p : PString; nb : Integer);
+   begin
+      wr.BeginArray;
+      while nb > 0 do begin
+         wr.WriteString(p^);
+         Inc(p);
+         Dec(nb);
+      end;
+      wr.EndArray;
+   end;
+
+begin
+   wr := TdwsJSONWriter.Create;
+   try
+      wr.BeginObject;
+         wr.WriteName('ShortDayNames'); WriteStrings(@settings.ShortDayNames[1], 7);
+         wr.WriteName('LongDayNames'); WriteStrings(@settings.LongDayNames[1], 7);
+         wr.WriteName('ShortMonthNames'); WriteStrings(@settings.ShortMonthNames[1], 12);
+         wr.WriteName('LongMonthNames'); WriteStrings(@settings.LongMonthNames[1], 12);
+         wr.WriteString('ShortDateFormat', settings.ShortDateFormat);
+         wr.WriteString('ShortTimeFormat', settings.ShortTimeFormat);
+         wr.WriteString('LongTimeFormat', settings.LongTimeFormat);
+         wr.WriteString('TimeAMString', settings.TimeAMString);
+         wr.WriteString('TimePMString', settings.TimePMString);
+      wr.EndObject;
+      vTZ_Dependency.code := 'var $TZ=1,$fmt=' + wr.ToUnicodeString;
+   finally
+      wr.Free;
+   end;
+end;
 
 // FindJSRTLDependency
 //
@@ -1292,6 +1349,9 @@ function FindJSRTLDependency(const name : String) : PJSRTLDependency;
 var
    i : Integer;
 begin
+   if name = vTZ_Dependency.name then
+      Exit(@vTZ_Dependency);
+
    for i:=Low(cJSRTLDependencies) to High(cJSRTLDependencies) do begin
       Result:=@cJSRTLDependencies[i];
       if Result.Name=name then Exit;
@@ -1312,6 +1372,8 @@ begin
          wobs.WriteString(cJSRTLDependencies[i].Code);
          wobs.WriteString(#13#10);
       end;
+      wobs.WriteString(vTZ_Dependency.Code);
+      wobs.WriteString(#13#10);
       Result:=wobs.ToUnicodeString;
    finally
       wobs.Free;
@@ -1391,6 +1453,7 @@ begin
    FMagicCodeGens.AddObject('Sqr$_Float_', TJSSqrMagicExpr.Create);
    FMagicCodeGens.AddObject('Sqrt', TdwsExprGenericCodeGen.Create(['Math.sqrt', '(', 0, ')']));
    FMagicCodeGens.AddObject('StrBeginsWith', TJSStrBeginsWithExpr.Create);
+   FMagicCodeGens.AddObject('StrEndsWith', TJSStrEndsWithExpr.Create);
    FMagicCodeGens.AddObject('StrDeleteLeft', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.substring', '(', 1, ')']));
    // slice not very efficient in browsers right now
    // FMagicCodeGens.AddObject('StrDeleteRight', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.slice', '(0,-', '(', 1, ')', ')']));
@@ -1698,6 +1761,76 @@ begin
    end;
 end;
 
+// ------------------
+// ------------------ TJSStrEndsWithExpr ------------------
+// ------------------
+
+// CodeGen
+//
+procedure TJSStrEndsWithExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+begin
+   if TMagicFuncExpr(expr).Args[1] is TConstStringExpr then begin
+      codeGen.WriteString('(');
+      CodeGenNoWrap(codeGen, expr as TTypedExpr);
+      codeGen.WriteString(')');
+   end else CodeGenNoWrap(codeGen, expr as TTypedExpr);
+end;
+
+// CodeGenNoWrap
+//
+procedure TJSStrEndsWithExpr.CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr);
+var
+   e : TMagicFuncExpr;
+   a, s : TExprBase;
+   c : TConstStringExpr;
+begin
+   e := (expr as TMagicFuncExpr);
+
+   s := e.Args[0];
+   a := e.Args[1];
+   if a is TConstStringExpr then begin
+
+      c := TConstStringExpr(a);
+      if c.Value = '' then begin
+         codeGen.WriteString('false');
+         Exit;
+      end;
+      if (Length(c.Value)=1) and (s is TStrVarExpr) then begin
+         codeGen.Compile(s);
+         if cgoObfuscate in codeGen.Options then begin
+            // slightly faster but less readable, so activate only under obfuscation
+            codeGen.WriteString('.charCodeAt(');
+            codeGen.Compile(s);
+            codeGen.WriteString('.length-1)==');
+            codeGen.WriteString(IntToStr(Ord(c.Value[1])));
+         end else begin
+            codeGen.WriteString('.charAt(');
+            codeGen.Compile(s);
+            codeGen.WriteString('.length-1)==');
+            codeGen.WriteLiteralString(c.Value);
+         end;
+         Exit;
+      end;
+      codeGen.Compile(s);
+      codeGen.WriteString('.substr(-');
+      codeGen.WriteString(IntToStr(Length(c.Value)));
+      codeGen.WriteString(',');
+      codeGen.WriteString(IntToStr(Length(c.Value)));
+      codeGen.WriteString(')==');
+      codeGen.WriteLiteralString(c.Value);
+
+   end else begin
+
+      codeGen.Dependencies.Add('StrEndsWith');
+
+      codeGen.WriteString('StrEndsWith(');
+      codeGen.CompileNoWrap(s as TTypedExpr);
+      codeGen.WriteString(',');
+      codeGen.CompileNoWrap(a as TTypedExpr);
+      codeGen.WriteString(')');
+
+   end;
+end;
 
 // ------------------
 // ------------------ TJSStrFindExpr ------------------

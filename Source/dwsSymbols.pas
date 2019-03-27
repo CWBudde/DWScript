@@ -23,9 +23,9 @@ unit dwsSymbols;
 
 interface
 
-uses SysUtils, Classes, System.Math,
+uses SysUtils, Classes, System.Math, TypInfo,
    dwsStrings, dwsErrors, dwsUtils, dwsDateTime, dwsScriptSource,
-   dwsTokenizer, dwsStack, dwsXPlatform, dwsDataContext
+   dwsTokenizer, dwsStack, dwsXPlatform, dwsDataContext, dwsArrayMethodKinds
    {$ifdef FPC},LazUTF8{$endif};
 
 type
@@ -395,7 +395,7 @@ type
          function FindLocalUnSorted(const name : String) : TSymbol;
 
       public
-         constructor Create(parent : TSymbolTable = nil; addrGenerator: TAddrGenerator = nil);
+         constructor Create(parent : TSymbolTable = nil; addrGenerator : TAddrGenerator = nil);
          destructor Destroy; override;
 
          procedure InsertParent(index : Integer; parent : TSymbolTable); virtual;
@@ -558,6 +558,7 @@ type
          FExternalName : String;
          FStackAddr : Integer;
          FLevel : SmallInt;
+         FUsedBySubLevel : Boolean;
 
          function GetDescription : String; override;
          function GetExternalName : String;
@@ -568,15 +569,22 @@ type
          function HasExternalName : Boolean;
          function IsWritable : Boolean; virtual;
 
-         function Specialize(const context : ISpecializationContext) : TSymbol; override;
-
          property ExternalName : String read GetExternalName write FExternalName;
          property Level : SmallInt read FLevel write FLevel;
+         property UsedBySubLevel : Boolean read FUsedBySubLevel write FUsedBySubLevel;
          property StackAddr: Integer read FStackAddr write FStackAddr;
    end;
 
    // used for script engine internal purposes
-   TScriptDataSymbol = class (TDataSymbol)
+   TScriptDataSymbol = class sealed (TDataSymbol)
+      public
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
+   end;
+
+   // used for variables
+   TVarDataSymbol = class sealed (TDataSymbol)
+      public
+         function Specialize(const context : ISpecializationContext) : TSymbol; override;
    end;
 
    TParamSymbolSemantics = (pssCopy, pssConst, pssVar, pssLazy);
@@ -1131,7 +1139,33 @@ type
          property CountValue : Integer read FCountValue write FCountValue;
    end;
 
-   TArraySymbol = class abstract (TTypeSymbol)
+   TTypeWithPseudoMethodsSymbol = class;
+
+   TPseudoMethodSymbol = class sealed (TFuncSymbol)
+      private
+         FOwnerTyp : TTypeWithPseudoMethodsSymbol;
+
+      public
+         constructor Create(owner : TTypeWithPseudoMethodsSymbol; const name : String; funcKind : TFuncKind; funcLevel : SmallInt);
+
+         property OwnerTyp : TTypeWithPseudoMethodsSymbol read FOwnerTyp write FOwnerTyp;
+   end;
+
+   TTypeWithPseudoMethodsSymbol = class abstract (TTypeSymbol)
+      private
+         FPseudoMethods : array [TArrayMethodKind] of TPseudoMethodSymbol;
+
+      protected
+         function InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol; virtual;
+
+      public
+         destructor Destroy; override;
+
+         function PseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+
+   end;
+
+   TArraySymbol = class abstract (TTypeWithPseudoMethodsSymbol)
       private
          FIndexType : TTypeSymbol;
          FSortFunctionType : TFuncSymbol;
@@ -1141,6 +1175,8 @@ type
       protected
          function ElementSize : Integer;
 
+         function InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol; override;
+
       public
          constructor Create(const name : String; elementType, indexType : TTypeSymbol);
          destructor Destroy; override;
@@ -1149,9 +1185,9 @@ type
 
          function AssignsAsDataExpr : Boolean; override;
 
-         function SortFunctionType(integerType : TBaseIntegerSymbol) : TFuncSymbol; virtual;
-         function MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol; virtual;
-         function FilterFunctionType(booleanType : TBaseBooleanSymbol) : TFuncSymbol; virtual;
+         function SortFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol; virtual;
+         function MapFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol; virtual;
+         function FilterFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol; virtual;
 
          property IndexType : TTypeSymbol read FIndexType write FIndexType;
    end;
@@ -1163,6 +1199,9 @@ type
       protected
          function GetCaption : String; override;
          function DoIsOfType(typSym : TTypeSymbol) : Boolean; override;
+
+      protected
+         function InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol; override;
 
       public
          constructor Create(const name : String; elementType, indexType : TTypeSymbol);
@@ -1212,7 +1251,7 @@ type
    end;
 
    // associative array aka dictionary
-   TAssociativeArraySymbol = class sealed (TTypeSymbol)
+   TAssociativeArraySymbol = class sealed (TTypeWithPseudoMethodsSymbol)
       private
          FKeyType : TTypeSymbol;
          FKeyArrayType : TDynamicArraySymbol;
@@ -1220,6 +1259,8 @@ type
       protected
          function GetCaption : String; override;
          function DoIsOfType(typSym : TTypeSymbol) : Boolean; override;
+
+         function InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol; override;
 
       public
          constructor Create(const name : String; elementType, keyType : TTypeSymbol);
@@ -1232,7 +1273,7 @@ type
          function IsPointerType : Boolean; override;
          function SameType(typSym : TTypeSymbol) : Boolean; override;
 
-         function KeysArrayType(integerType : TTypeSymbol) : TDynamicArraySymbol; virtual;
+         function KeysArrayType(baseSymbols : TdwsBaseSymbolsContext) : TDynamicArraySymbol; virtual;
 
          property KeyType : TTypeSymbol read FKeyType;
 
@@ -5820,24 +5861,24 @@ end;
 //
 function TDataSymbol.GetExternalName : String;
 begin
-   if FExternalName='' then
-      Result:=Name
-   else Result:=FExternalName;
+   if FExternalName = '' then
+      Result := Name
+   else Result := FExternalName;
 end;
 
 // AllocateStackAddr
 //
 procedure TDataSymbol.AllocateStackAddr(generator : TAddrGenerator);
 begin
-   FLevel:=generator.Level;
-   FStackAddr:=generator.GetStackAddr(Size);
+   FLevel := generator.Level;
+   FStackAddr := generator.GetStackAddr(Size);
 end;
 
 // HasExternalName
 //
 function TDataSymbol.HasExternalName : Boolean;
 begin
-   Result:=(FExternalName<>'');
+   Result := (FExternalName <> '');
 end;
 
 // IsWritable
@@ -5847,14 +5888,26 @@ begin
    Result := True;
 end;
 
+// ------------------
+// ------------------ TScriptDataSymbol ------------------
+// ------------------
+
 // Specialize
 //
-function TDataSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
+function TScriptDataSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
 begin
-   if ClassType <> TDataSymbol then
-      Exit(inherited Specialize(context));
+   Result := TScriptDataSymbol.Create(Name, context.SpecializeType(Typ));
+end;
 
-   Result := TDataSymbol.Create(Name, context.SpecializeType(Typ));
+// ------------------
+// ------------------ TVarDataSymbol ------------------
+// ------------------
+
+// Specialize
+//
+function TVarDataSymbol.Specialize(const context : ISpecializationContext) : TSymbol;
+begin
+   Result := TScriptDataSymbol.Create(Name, context.SpecializeType(Typ));
 end;
 
 // ------------------
@@ -6988,6 +7041,49 @@ begin
 end;
 
 // ------------------
+// ------------------ TPseudoMethodSymbol ------------------
+// ------------------
+
+// Create
+//
+constructor TPseudoMethodSymbol.Create(owner : TTypeWithPseudoMethodsSymbol; const name : String; funcKind : TFuncKind; funcLevel : SmallInt);
+begin
+   inherited Create(name, funcKind, funcLevel);
+   FOwnerTyp := owner;
+end;
+
+// ------------------
+// ------------------ TTypeWithPseudoMethodsSymbol ------------------
+// ------------------
+
+// InitializePseudoMethodSymbol
+//
+function TTypeWithPseudoMethodsSymbol.InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+begin
+   Result := nil;
+end;
+
+// Destroy
+//
+destructor TTypeWithPseudoMethodsSymbol.Destroy;
+var
+   f : TPseudoMethodSymbol;
+begin
+   inherited;
+   for f in FPseudoMethods do
+      f.Free;
+end;
+
+// PseudoMethodSymbol
+//
+function TTypeWithPseudoMethodsSymbol.PseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+begin
+   Result := FPseudoMethods[methodKind];
+   if Result = nil then
+      Result := InitializePseudoMethodSymbol(methodKind, baseSymbols);
+end;
+
+// ------------------
 // ------------------ TArraySymbol ------------------
 // ------------------
 
@@ -7023,6 +7119,29 @@ begin
    Result := True;
 end;
 
+// InitializePseudoMethodSymbol
+//
+function TArraySymbol.InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+var
+   methodName : String;
+begin
+   Result := nil;
+
+   methodName := Copy(GetEnumName(TypeInfo(TArrayMethodKind), Ord(methodKind)), 4);
+   case methodKind of
+      amkLength, amkCount : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := baseSymbols.TypInteger;
+      end;
+      amkHigh, amkLow : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := IndexType;
+      end;
+   end;
+   if Result <> nil then
+      FPseudoMethods[methodKind] := Result
+end;
+
 // ElementSize
 //
 function TArraySymbol.ElementSize : Integer;
@@ -7034,24 +7153,24 @@ end;
 
 // SortFunctionType
 //
-function TArraySymbol.SortFunctionType(integerType : TBaseIntegerSymbol) : TFuncSymbol;
+function TArraySymbol.SortFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol;
 begin
-   if FSortFunctionType=nil then begin
-      FSortFunctionType:=TFuncSymbol.Create('', fkFunction, 0);
-      FSortFunctionType.Typ:=integerType;
+   if FSortFunctionType = nil then begin
+      FSortFunctionType := TFuncSymbol.Create('', fkFunction, 0);
+      FSortFunctionType.Typ := baseSymbols.TypInteger;
       FSortFunctionType.AddParam(TParamSymbol.Create('left', Typ));
       FSortFunctionType.AddParam(TParamSymbol.Create('right', Typ));
    end;
-   Result:=FSortFunctionType;
+   Result := FSortFunctionType;
 end;
 
 // MapFunctionType
 //
-function TArraySymbol.MapFunctionType(anyType : TTypeSymbol) : TFuncSymbol;
+function TArraySymbol.MapFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol;
 begin
-   if FMapFunctionType=nil then begin
-      FMapFunctionType:=TFuncSymbol.Create('', fkFunction, 0);
-      FMapFunctionType.Typ:=anyType;
+   if FMapFunctionType = nil then begin
+      FMapFunctionType := TFuncSymbol.Create('', fkFunction, 0);
+      FMapFunctionType.Typ := baseSymbols.TypAnyType;
       FMapFunctionType.AddParam(TParamSymbol.Create('v', Typ));
    end;
    Result:=FMapFunctionType;
@@ -7059,11 +7178,11 @@ end;
 
 // FilterFunctionType
 //
-function TArraySymbol.FilterFunctionType(booleanType : TBaseBooleanSymbol) : TFuncSymbol;
+function TArraySymbol.FilterFunctionType(baseSymbols : TdwsBaseSymbolsContext) : TFuncSymbol;
 begin
    if FFilterFunctionType = nil then begin
       FFilterFunctionType := TFuncSymbol.Create('', fkFunction, 0);
-      FFilterFunctionType.Typ := booleanType;
+      FFilterFunctionType.Typ := baseSymbols.TypBoolean;
       FFilterFunctionType.AddParam(TParamSymbol.Create('v', Typ));
    end;
    Result := FFilterFunctionType;
@@ -7104,6 +7223,90 @@ function TDynamicArraySymbol.DoIsOfType(typSym : TTypeSymbol) : Boolean;
 begin
    Result:=   (typSym=Self)
            or ((typSym is TDynamicArraySymbol) and typSym.Typ.DoIsOfType(Typ));
+end;
+
+// InitializePseudoMethodSymbol
+//
+function TDynamicArraySymbol.InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+var
+   methodName : String;
+begin
+   Result := nil;
+
+   methodName := Copy(GetEnumName(TypeInfo(TArrayMethodKind), Ord(methodKind)), 4);
+   case methodKind of
+      amkAdd, amkPush : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('item', Typ));
+         Result.Typ := Self;
+      end;
+      amkIndexOf, amkRemove : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('item', Typ));
+         Result.Typ := IndexType;
+      end;
+      amkPop, amkPeek : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := Typ;
+      end;
+      amkMap : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('func', MapFunctionType(baseSymbols)));
+         Result.Typ := Self;
+      end;
+      amkSort : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('func', SortFunctionType(baseSymbols)));
+         Result.Typ := Self;
+      end;
+      amkFilter : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('func', FilterFunctionType(baseSymbols)));
+         Result.Typ := Self;
+      end;
+      amkDelete : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkProcedure, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('index', IndexType));
+         Result.Params.AddSymbol(TParamSymbolWithDefaultValue.Create('count', baseSymbols.TypInteger, [ Int64(0) ]));
+      end;
+      amkInsert : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkProcedure, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('index', baseSymbols.TypInteger));
+         Result.Params.AddSymbol(TParamSymbol.Create('item', Typ));
+      end;
+      amkSetLength : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkProcedure, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('newLength', baseSymbols.TypInteger));
+      end;
+      amkClear : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkProcedure, 0);
+      end;
+      amkSwap : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('index1', IndexType));
+         Result.Params.AddSymbol(TParamSymbol.Create('index2', IndexType));
+         Result.Typ := Self;
+      end;
+      amkMove : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('fromIndex', IndexType));
+         Result.Params.AddSymbol(TParamSymbol.Create('toIndex', IndexType));
+         Result.Typ := Self;
+      end;
+      amkCopy : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('startIndex', IndexType));
+         Result.Params.AddSymbol(TParamSymbolWithDefaultValue.Create('count', baseSymbols.TypInteger, [ Int64(0) ]));
+         Result.Typ := Self;
+      end;
+      amkReverse : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := Self;
+      end;
+   end;
+   if Result <> nil then
+      FPseudoMethods[methodKind] := Result
+   else Result := inherited InitializePseudoMethodSymbol(methodKind, baseSymbols);
 end;
 
 // IsCompatible
@@ -7337,10 +7540,10 @@ end;
 
 // KeysArrayType
 //
-function TAssociativeArraySymbol.KeysArrayType(integerType : TTypeSymbol) : TDynamicArraySymbol;
+function TAssociativeArraySymbol.KeysArrayType(baseSymbols : TdwsBaseSymbolsContext) : TDynamicArraySymbol;
 begin
    if FKeyArrayType = nil then
-      FKeyArrayType := TDynamicArraySymbol.Create('', KeyType, integerType);
+      FKeyArrayType := TDynamicArraySymbol.Create('', KeyType, baseSymbols.TypInteger);
    Result := FKeyArrayType;
 end;
 
@@ -7356,6 +7559,38 @@ end;
 function TAssociativeArraySymbol.DoIsOfType(typSym : TTypeSymbol) : Boolean;
 begin
    Result := SameType(typSym.UnAliasedType);
+end;
+
+// InitializePseudoMethodSymbol
+//
+function TAssociativeArraySymbol.InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+var
+   methodName : String;
+begin
+   Result := nil;
+
+   methodName := Copy(GetEnumName(TypeInfo(TArrayMethodKind), Ord(methodKind)), 4);
+   case methodKind of
+     amkLength, amkCount : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := baseSymbols.TypInteger;
+      end;
+      amkClear : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkProcedure, 0);
+      end;
+      amkDelete : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('key', KeyType));
+         Result.Typ := baseSymbols.TypBoolean;
+      end;
+      amkKeys : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Typ := KeysArrayType(baseSymbols);
+      end;
+   end;
+   if Result <> nil then
+      FPseudoMethods[methodKind] := Result
+   else Result := inherited InitializePseudoMethodSymbol(methodKind, baseSymbols);
 end;
 
 // ------------------
