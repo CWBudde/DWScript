@@ -1509,7 +1509,7 @@ implementation
 // ------------------------------------------------------------------
 
 uses
-  dwsPascalTokenizer;
+  SyncObjs, dwsPascalTokenizer;
 
 type
    EGenerationError = class(Exception);

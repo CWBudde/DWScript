@@ -232,7 +232,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsCompilerUtils;
+uses
+  SyncObjs, dwsCompilerUtils;
 
 var
    vInternalUnit : TInternalUnit;

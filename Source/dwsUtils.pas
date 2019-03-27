@@ -1124,6 +1124,9 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+uses
+  SyncObjs;
+
 // CoalesceableIsFalsey
 //
 function CoalesceableIsFalsey(const unk : IUnknown) : Boolean;
