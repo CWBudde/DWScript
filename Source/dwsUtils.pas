@@ -2075,7 +2075,7 @@ procedure VariantToString(const v : Variant; var s : String);
 var
    varData : PVarData;
 begin
-   varData:=PVarData(@v);
+   varData := PVarData(@v);
    case varData^.VType of
       {$ifdef FPC}
       varString :

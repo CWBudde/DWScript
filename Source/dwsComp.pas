@@ -279,6 +279,7 @@ type
          FIsGenerating: Boolean;
          FUnit: TdwsUnit;
 
+         procedure SetName(const val : String);
       protected
          procedure AssignTo(Dest: TPersistent); override;
 
@@ -286,11 +287,10 @@ type
          function  GetDataType(systemTable : TSystemSymbolTable; aTable : TSymbolTable; const aName : String) : TTypeSymbol;
          procedure Reset;
 
-         procedure SetName(const val : String);
+         procedure NameChanged; virtual;
          function Parse(const Value : String): String; virtual;
 
          property IsGenerating: Boolean read FIsGenerating write FIsGenerating;
-
       public
          constructor Create(Collection: TCollection); override;
 
@@ -333,14 +333,20 @@ type
       private
          FDataType: TDataType;
 
+         procedure SetDataType(const val : TDataType);
       protected
+         FDisplayName: String;
+
          function GetDisplayName: String; override;
+         procedure NameChanged; override;
+         procedure DataTypeChanged; virtual;
+         procedure UpdateDisplayName; virtual;
 
       public
          procedure Assign(Source: TPersistent); override;
 
       published
-         property DataType: TDataType read FDataType write FDataType;
+         property DataType: TDataType read FDataType write SetDataType;
    end;
 
    TdwsVariables = class(TdwsCollection)
@@ -353,7 +359,7 @@ type
          function Add(const name, typName : String) : TdwsGlobal; overload;
    end;
 
-  TdwsVariablesClass = class of TdwsVariables;
+   TdwsVariablesClass = class of TdwsVariables;
 
    // TdwsParameter
    //
@@ -386,7 +392,7 @@ type
          property IsWritable : Boolean read FIsWritable write SetIsWritable default True;
          property HasDefaultValue : Boolean read FHasDefaultValue write SetHasDefaultValue default False;
          property DefaultValue: Variant read FDefaultValue write SetDefaultValue;
-  end;
+   end;
 
    TdwsParameters = class(TdwsVariables)
       protected
@@ -504,45 +510,45 @@ type
 
    TdwsFunctionsClass = class of TdwsFunctions;
 
-  // It would have better sense to derive both TdwsFunctionSymbol and TdwsDelegate
-  // from a common ancestor.
-  TdwsDelegate = class(TdwsSymbol)
-  private
-    FResultType : TDataType;
-    FParameters : TdwsParameters;
-    FDeprecated : String;
+   // It would have better sense to derive both TdwsFunctionSymbol and TdwsDelegate
+   // from a common ancestor.
+   TdwsDelegate = class(TdwsSymbol)
+   private
+      FResultType : TDataType;
+      FParameters : TdwsParameters;
+      FDeprecated : String;
 
-  protected
-    function GetDisplayName: String; override;
-    procedure SetResultType(const Value: TDataType); virtual;
-    procedure SetParameters(const Value: TdwsParameters);
-    function StoreParameters : Boolean;
-    function Parse(const Value : String): String; override;
+   protected
+      function GetDisplayName: String; override;
+      procedure SetResultType(const Value: TDataType); virtual;
+      procedure SetParameters(const Value: TdwsParameters);
+      function StoreParameters : Boolean;
+      function Parse(const Value : String): String; override;
 
-  public
-    constructor Create(Collection: TCollection); override;
-    destructor Destroy; override;
+   public
+      constructor Create(Collection: TCollection); override;
+      destructor Destroy; override;
 
-    procedure Assign(Source: TPersistent); override;
+      procedure Assign(Source: TPersistent); override;
 
-    function DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbolTable; ParentSym: TSymbol = nil): TSymbol; override;
-    function GetParameters(systemTable : TSystemSymbolTable; Table: TSymbolTable): TParamArray;
+      function DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbolTable; ParentSym: TSymbol = nil): TSymbol; override;
+      function GetParameters(systemTable : TSystemSymbolTable; Table: TSymbolTable): TParamArray;
 
-  published
-    property Parameters : TdwsParameters read FParameters write SetParameters stored StoreParameters;
-    property ResultType : TDataType read FResultType write SetResultType;
-    property Deprecated : String read FDeprecated write FDeprecated;
-  end;
+   published
+      property Parameters : TdwsParameters read FParameters write SetParameters stored StoreParameters;
+      property ResultType : TDataType read FResultType write SetResultType;
+      property Deprecated : String read FDeprecated write FDeprecated;
+   end;
 
-  TdwsDelegates = class(TdwsCollection)
-  protected
-    class function GetSymbolClass : TdwsSymbolClass; override;
-  public
-    function Add: TdwsDelegate; overload; inline;
-    function Add(const Name: String; const ResultType: String = '') : TdwsDelegate; overload;
-  end;
+   TdwsDelegates = class(TdwsCollection)
+   protected
+      class function GetSymbolClass : TdwsSymbolClass; override;
+   public
+      function Add: TdwsDelegate; overload; inline;
+      function Add(const Name: String; const ResultType: String = '') : TdwsDelegate; overload;
+   end;
 
-  TdwsDelegatesClass = class of TdwsDelegates;
+   TdwsDelegatesClass = class of TdwsDelegates;
 
    TdwsArray = class(TdwsSymbol)
       private
@@ -579,9 +585,13 @@ type
    TdwsArraysClass = class of TdwsArrays;
 
    TdwsConstant = class(TdwsVariable)
+   private
+      private
+         procedure SetValue(const Value: Variant);
       protected
          FValue: Variant;
-         function GetDisplayName: String; override;
+         procedure ValueChanged; virtual;
+         procedure UpdateDisplayName; override;
 
       public
          procedure Assign(Source: TPersistent); override;
@@ -589,7 +599,7 @@ type
                              ParentSym: TSymbol = nil): TSymbol; override;
 
       published
-         property Value: Variant read FValue write FValue;
+         property Value: Variant read FValue write SetValue;
    end;
 
    TdwsConstants = class(TdwsCollection)
@@ -630,20 +640,21 @@ type
          FVisibility : TdwsVisibility;
          FDefaultValue : Variant;
          FHasDefaultValue : Boolean;
-
+         procedure SetVisibility(const Value: TdwsVisibility);
       protected
          function GetDisplayName: String; override;
          procedure SetDefaultValue(const Value: Variant);
          function GetHasDefaultValue : Boolean;
          function Parse(const Value : String): String; override;
-
+         procedure VisibilityChanged; virtual;
+         procedure UpdateDisplayName; override;
       public
          constructor Create(Collection: TCollection); override;
          function DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbolTable;
                              ParentSym: TSymbol = nil): TSymbol; override;
 
       published
-         property Visibility : TdwsVisibility read FVisibility write FVisibility default cvPublic;
+         property Visibility : TdwsVisibility read FVisibility write SetVisibility default cvPublic;
          property DefaultValue : Variant read FDefaultValue write SetDefaultValue stored GetHasDefaultValue;
          property HasDefaultValue : Boolean read FHasDefaultValue write FHasDefaultValue default False;
    end;
@@ -917,7 +928,7 @@ type
 
       public
          function Add : TdwsClassConstant;
-  end;
+   end;
 
    // TdwsClass
    //
@@ -2765,34 +2776,71 @@ begin
    FIsGenerating := True;
    CheckName(Table, Name);
 
-   Result:=TConstSymbol.CreateValue(Name, GetDataType(systemTable, Table, DataType), Value);
+   Result := TConstSymbol.CreateValue(Name, GetDataType(systemTable, Table, DataType), Value);
    GetUnit.Table.AddSymbol(Result);
 end;
 
-// GetDisplayName
-//
-function TdwsConstant.GetDisplayName: String;
+procedure TdwsConstant.SetValue(const Value: Variant);
+begin
+   if FValue <> Value then
+   begin
+      FValue := Value;
+      ValueChanged;
+   end;
+end;
+
+procedure TdwsConstant.UpdateDisplayName;
 var
    valAsString : String;
 begin
    VariantToString(Value, valAsString);
    if ASCIISameText(DataType, SYS_STRING) then  // just for show
-      valAsString:=''''+valAsString+'''';
-   Result := Format('const %s: %s = %s;', [Name, DataType, valAsString]);
+      valAsString := '''' + valAsString + '''';
+   FDisplayName := Format('const %s: %s = %s;', [Name, DataType, valAsString]);
 end;
+
+procedure TdwsConstant.ValueChanged;
+begin
+   UpdateDisplayName;
+end;
+
 
 { TdwsVariable }
 
 procedure TdwsVariable.Assign(Source: TPersistent);
 begin
-  inherited;
-  if Source is TdwsVariable then
-    FDataType := TdwsVariable(Source).DataType;
+   inherited;
+   if Source is TdwsVariable then
+      FDataType := TdwsVariable(Source).DataType;
+end;
+
+procedure TdwsVariable.DataTypeChanged;
+begin
+   UpdateDisplayName;
+end;
+
+procedure TdwsVariable.UpdateDisplayName;
+begin
+   FDisplayName := Name + ' : ' + DataType;
 end;
 
 function TdwsVariable.GetDisplayName: String;
 begin
-  Result := Name + ' : ' + DataType;
+   Result := FDisplayName;
+end;
+
+procedure TdwsVariable.NameChanged;
+begin
+   UpdateDisplayName;
+end;
+
+procedure TdwsVariable.SetDataType(const val: TDataType);
+begin
+   if val <> FDataType then
+   begin
+      FDataType := val;
+      DataTypeChanged;
+   end;
 end;
 
 { TdwsVariables }
@@ -3073,15 +3121,15 @@ end;
 
 function TdwsParameter.GetDisplayName: String;
 begin
-   Result:=inherited GetDisplayName;
+   Result := inherited GetDisplayName;
    if IsVarParam then
       if IsWritable then
-         Result:='var '+Result
-      else Result:='const '+Result
+         Result := 'var ' + Result
+      else Result := 'const ' + Result
    else if IsLazy then
-      Result:='lazy '+Result;
+      Result := 'lazy ' + Result;
    if HasDefaultValue then
-      Result:=Result+Format(' = %s', [ValueToString(DefaultValue)]);
+      Result := Result + Format(' = %s', [ValueToString(DefaultValue)]);
 end;
 
 procedure TdwsParameter.SetDefaultValue(const Value: Variant);
@@ -3723,7 +3771,7 @@ end;
 //
 function TdwsField.GetDisplayName: String;
 begin
-   Result:=TClassSymbol.VisibilityToString(Visibility)+' '+inherited GetDisplayName;
+   Result := TClassSymbol.VisibilityToString(Visibility) + ' ' + inherited GetDisplayName;
 end;
 
 // SetDefaultValue
@@ -3732,6 +3780,26 @@ procedure TdwsField.SetDefaultValue(const Value: Variant);
 begin
    FDefaultValue:=Value;
    FHasDefaultValue:=True;
+end;
+
+procedure TdwsField.SetVisibility(const Value: TdwsVisibility);
+begin
+   if FVisibility <> Value then
+   begin
+      FVisibility := Value;
+      VisibilityChanged;
+   end;
+end;
+
+procedure TdwsField.UpdateDisplayName;
+begin
+   inherited UpdateDisplayName;
+   FDisplayName := TClassSymbol.VisibilityToString(Visibility) + ' ' + FDisplayName;
+end;
+
+procedure TdwsField.VisibilityChanged;
+begin
+   UpdateDisplayName;
 end;
 
 // GetHasDefaultValue
@@ -5023,25 +5091,39 @@ end;
 
 constructor TdwsSymbol.Create(Collection: TCollection);
 begin
-  inherited;
-  FUnit := TdwsCollection(Collection).GetUnit;
+   inherited;
+   FUnit := TdwsCollection(Collection).GetUnit;
 end;
 
 function TdwsSymbol.GetUnit: TdwsUnit;
 begin
-  Result := FUnit;
+   Result := FUnit;
+end;
+
+procedure TdwsSymbol.NameChanged;
+begin
+   // empty stub
 end;
 
 procedure TdwsSymbol.Reset;
 begin
-  FIsGenerating := False;
+   FIsGenerating := False;
 end;
 
 procedure TdwsSymbol.SetName(const val : String);
+var
+  NewName : String;
 begin
    if FUnit.ShouldParseName(val) then
-      FName:=Parse(val)
-   else FName:=val;
+      NewName := Parse(val)
+   else
+      NewName := val;
+
+   if FName <> NewName then
+   begin
+     FName := NewName;
+     NameChanged;
+   end;
 end;
 
 function TdwsSymbol.Parse(const Value: String): String;
