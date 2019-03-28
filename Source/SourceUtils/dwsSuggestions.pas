@@ -545,9 +545,12 @@ end;
 // AddStaticArrayHelpers
 //
 procedure TdwsSuggestions.AddStaticArrayHelpers(a : TArraySymbol; list : TSimpleSymbolList);
+var
+  p : TdwsCompilerContext;
+  amk : TArrayMethodKind;
 begin
-   var p := FProg.ProgramObject.CompilerContext;
-   for var amk in [
+   p := FProg.ProgramObject.CompilerContext;
+   for amk in [
          amkLow, amkHigh,
          amkLength, amkCount
       ] do begin
@@ -558,9 +561,12 @@ end;
 // AddDynamicArrayHelpers
 //
 procedure TdwsSuggestions.AddDynamicArrayHelpers(dyn : TDynamicArraySymbol; list : TSimpleSymbolList);
+var
+  p : TdwsCompilerContext;
+  amk : TArrayMethodKind;
 begin
-   var p := FProg.ProgramObject.CompilerContext;
-   for var amk in [
+   p := FProg.ProgramObject.CompilerContext;
+   for amk in [
          amkAdd, amkPush, amkPop, amkPeek, amkDelete, amkRemove, amkInsert,
          amkIndexOf,
          amkMove, amkSwap, amkReverse,
@@ -575,9 +581,12 @@ end;
 // AddAssociativeArrayHelpers
 //
 procedure TdwsSuggestions.AddAssociativeArrayHelpers(assoc : TAssociativeArraySymbol; list : TSimpleSymbolList);
+var
+  p : TdwsCompilerContext;
+  amk : TArrayMethodKind;
 begin
-   var p := FProg.ProgramObject.CompilerContext;
-   for var amk in [
+   p := FProg.ProgramObject.CompilerContext;
+   for amk in [
          amkCount, amkLength,
          amkClear, amkDelete,
          amkKeys

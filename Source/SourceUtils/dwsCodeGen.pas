@@ -47,8 +47,6 @@ type
 
    TdwsCodeGenIncludeRtlLevel = (ilDependent, ilAlways, ilNever);
 
-   TdwsCodeGenSymbolMaps = class;
-
    TdwsCodeGenSymbolMap = class (TRefCountedObject)
       private
          FRoot : TdwsCodeGenSymbolMap;
