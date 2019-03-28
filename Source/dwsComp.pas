@@ -2800,7 +2800,20 @@ begin
 end;
 
 procedure TdwsConstant.ValueChanged;
+var
+   varData : PVarData;
 begin
+   if FDataType = '' then
+   begin
+      varData := PVarData(@FValue);
+      case varData^.VType of
+         varString :
+            DataType := 'String';
+         varInteger :
+            DataType := 'Integer';
+      end;
+   end;
+
    UpdateDisplayName;
 end;
 
