@@ -922,6 +922,10 @@ type
          property Capacity : Integer read FCapacity write FCapacity;
    end;
 
+   TStringDynArrayHelper = record helper for TStringDynArray
+      function Join(const separator : String) : String;
+   end;
+
 const
    cMSecToDateTime : Double = 1/(24*3600*1000);
 
@@ -966,6 +970,7 @@ function StrEndsWithA(const aStr, aEnd : RawByteString) : Boolean;
 function StrContains(const aStr, aSubStr : String) : Boolean; overload;
 function StrContains(const aStr : String; aChar : Char) : Boolean; overload;
 function StrIndexOfChar(const aStr : String; aChar : Char) : Integer;
+function StrIndexOfCharA(const aStr : RawByteString; aChar : AnsiChar) : Integer;
 function LowerCaseA(const aStr : RawByteString) : RawByteString;
 
 function StrMatches(const aStr, aMask : String) : Boolean;
@@ -977,6 +982,8 @@ function StrAfterChar(const aStr : String; aChar : Char) : String;
 function StrBeforeChar(const aStr : String; aChar : Char) : String;
 
 function StrReplaceChar(const aStr : String; oldChar, newChar : Char) : String;
+function StrReplaceMacros(const aStr : String; const macros : array of String;
+                          const startDelimiter, stopDelimiter : String) : String;
 
 function StrCountChar(const aStr : String; c : Char) : Integer;
 
@@ -987,6 +994,7 @@ function SimpleStringHash(const s : String) : Cardinal; overload;
 function SimpleStringHash(p : PAnsiChar; sizeInChars : Integer) : Cardinal; overload;
 {$endif}
 function SimpleStringHash(const s : UnicodeString) : Cardinal; overload; inline;
+function SimpleStringHash(const s : RawByteString) : Cardinal; overload; inline;
 function SimpleStringHash(p : PWideChar; sizeInChars : Integer) : Cardinal; overload; inline;
 function SimpleByteHash(p : PByte; n : Integer) : Cardinal;
 
@@ -1182,6 +1190,13 @@ end;
 function SimpleStringHash(const s : UnicodeString) : Cardinal;
 begin
    Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(WideChar));
+end;
+
+// SimpleStringHash
+//
+function SimpleStringHash(const s : RawByteString) : Cardinal;
+begin
+   Result := xxHash32.Full(Pointer(s), Length(s)*SizeOf(AnsiChar));
 end;
 
 // SimpleStringHash
@@ -3568,6 +3583,17 @@ begin
    Result := 0;
 end;
 
+// StrIndexOfCharA
+//
+function StrIndexOfCharA(const aStr : RawByteString; aChar : AnsiChar) : Integer;
+var
+   i : Integer;
+begin
+   for i:=1 to Length(aStr) do
+      if aStr[i] = aChar then Exit(i);
+   Result := 0;
+end;
+
 // LowerCaseA
 //
 function LowerCaseA(const aStr : RawByteString) : RawByteString;
@@ -3654,6 +3680,66 @@ begin
    for i:=1 to Length(Result) do
       if Result[i]=oldChar then
          Result[i]:=newChar;
+end;
+
+// StrReplaceMacros
+//
+function StrReplaceMacros(const aStr : String; const macros : array of String;
+                          const startDelimiter, stopDelimiter : String) : String;
+var
+   macro : String;
+   p, start, startAfterDelimiter, stop, i : Integer;
+   wobs : TWriteOnlyBlockStream;
+   replaced : Boolean;
+begin
+   Assert(not Odd(Length(macros)));
+   if aStr = '' then Exit('');
+   if startDelimiter = '' then Exit('');
+   start := Pos(startDelimiter, aStr);
+   if start <= 0 then Exit(aStr);
+   p := 1;
+   wobs := TWriteOnlyBlockStream.Create;
+   try
+      while True do begin
+         startAfterDelimiter := start + Length(startDelimiter);
+         if stopDelimiter <> '' then
+            stop := Pos(stopDelimiter, aStr, startAfterDelimiter)
+         else stop := Pos(startDelimiter, aStr, startAfterDelimiter);
+         if stop <= 0 then begin
+            wobs.WriteSubString(aStr, p);
+            break;
+         end;
+         if start > p then
+            wobs.WriteSubString(aStr, p, start-p);
+         macro := Copy(aStr, startAfterDelimiter,  stop-startAfterDelimiter);
+         replaced := False;
+         for i := 0 to (Length(macros) div 2) - 1 do begin
+            if macro = macros[i*2] then begin
+               wobs.WriteString(macros[i*2+1]);
+               replaced := True;
+               Break;
+            end;
+         end;
+         if not replaced then begin
+            wobs.WriteString(startDelimiter);
+            wobs.WriteString(macro);
+            if stopDelimiter <> '' then
+               wobs.WriteString(stopDelimiter)
+            else wobs.WriteString(startDelimiter);
+         end;
+         if stopDelimiter <> '' then
+            p := stop + Length(stopDelimiter)
+         else p := stop + Length(startDelimiter);
+         start := Pos(startDelimiter, aStr, p);
+         if start <= 0 then begin
+            wobs.WriteSubString(aStr, p);
+            Break;
+         end;
+      end;
+      Result := wobs.ToString;
+   finally
+      wobs.Free;
+   end;
 end;
 
 // StrCountChar
@@ -7061,6 +7147,34 @@ begin
    end;
    if obj<>nil then
       obj.Destroy;
+end;
+
+// ------------------
+// ------------------ TStringDynArrayHelper ------------------
+// ------------------
+
+function TStringDynArrayHelper.Join(const separator : String) : String;
+var
+   i : Integer;
+   wobs : TWriteOnlyBlockStream;
+begin
+   case Length(Self) of
+      0 : Result := '';
+      1 : Result := Self[0];
+      2 : Result := Self[0] + separator + Self[1];
+   else
+      wobs := TWriteOnlyBlockStream.AllocFromPool;
+      try
+         wobs.WriteString(Self[0]);
+         for i := 1 to High(Self) do begin
+            wobs.WriteString(separator);
+            wobs.WriteString(Self[i]);
+         end;
+         Result := wobs.ToString;
+      finally
+         wobs.ReturnToPool;
+      end;
+   end;
 end;
 
 // ------------------

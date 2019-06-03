@@ -33,6 +33,7 @@ type
          procedure EmptyOptimizedLocalTable;
          procedure StringTest;
          procedure StaticArrayTest;
+         procedure StaticArrayRecordTest;
          procedure DynamicArrayTest;
          procedure ObjectArrayTest;
          procedure AssociativeArrayTest;
@@ -42,11 +43,13 @@ type
          procedure SuggestInUsesSection;
          procedure SuggestAfterCall;
          procedure SuggestAcrossLines;
+         procedure ForVariable;
          procedure ReferencesVars;
          procedure InvalidExceptSuggest;
          procedure EnumerationNamesAndValues;
          procedure BigEnumerationNamesAndValues;
          procedure EnumerationSuggest;
+         procedure SetOfSuggest;
          procedure StaticClassSuggest;
          procedure ClassFieldSuggest;
          procedure RecordConstSuggest;
@@ -376,6 +379,24 @@ begin
    CheckEquals('High', sugg.Code[0], 's.h 0');
 end;
 
+// StaticArrayRecordTest
+//
+procedure TSourceUtilsTests.StaticArrayRecordTest;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog:=FCompiler.Compile( 'const s : array [1..2] of record xy : Integer end = [('#13#10
+                           +' )];');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 1);
+   sugg := TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
+
+   CheckTrue(sugg.Count > 0, 'rec field');
+   CheckEquals('xy', sugg.Code[0], 'sugg 0');
+end;
+
 // DynamicArrayTest
 //
 procedure TSourceUtilsTests.DynamicArrayTest;
@@ -631,6 +652,28 @@ begin
    CheckEquals('LowerCase', sugg.Code[1], '.L 1');
 end;
 
+// ForVariable
+//
+procedure TSourceUtilsTests.ForVariable;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog:=FCompiler.Compile('var a : array of String;'#10
+                           +'for var test1 := 0 to 10 do'#10
+                           +'for var test2 in a do begin'#10
+                           +'teS'#10
+                           +'end;');
+
+   scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 4, 4);
+   sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
+
+   CheckEquals(2, sugg.Count, 'tes');
+   CheckEquals('test1', sugg.Code[0], 'tes 0');
+   CheckEquals('test2', sugg.Code[1], 'tes 1');
+end;
+
 // ReferencesVars
 //
 procedure TSourceUtilsTests.ReferencesVars;
@@ -750,7 +793,8 @@ begin
    prog:=FCompiler.Compile( 'type TTest = (One);'#13#10
                            +'Print(TTest.One.Name);'#13#10
                            +'var i : TTest;'#13#10
-                           +'Print(i.Value);'#13#10);
+                           +'Print(i.Value);'#13#10
+                           +'Print(i.QualifiedName);'#13#10);
 
    CheckEquals('', prog.Msgs.AsInfo, 'compiled with errors');
 
@@ -769,8 +813,35 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 4, 10);
 
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
-   CheckEquals(1, sugg.Count, 'column 10');
+   CheckEquals(1, sugg.Count, 'column 10 v');
    CheckEquals('Value', sugg.Code[0], 'sugg 4, 10, 0');
+
+   scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 5, 10);
+
+   sugg:=TdwsSuggestions.Create(prog, scriptPos);
+   CheckEquals(1, sugg.Count, 'column 10 q');
+   CheckEquals('QualifiedName', sugg.Code[0], 'sugg 5, 10, 0');
+end;
+
+// SetOfSuggest
+//
+procedure TSourceUtilsTests.SetOfSuggest;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog:=FCompiler.Compile( 'type TTest = (One);'#13#10
+                           +'type TSet = set of TTest;'#13#10
+                           +'var i : TSet;'#13#10
+                           +'i.');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 4, 3);
+
+   sugg := TdwsSuggestions.Create(prog, scriptPos);
+   CheckEquals(2, sugg.Count, 'set of methods');
+   CheckEquals('Exclude', sugg.Code[0], 'sugg 0');
+   CheckEquals('Include', sugg.Code[1], 'sugg 1');
 end;
 
 // StaticClassSuggest

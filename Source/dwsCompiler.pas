@@ -654,7 +654,7 @@ type
          function ReadScript(sourceFile : TSourceFile; scriptType : TScriptSourceType) : TProgramExpr;
          procedure ReadScriptImplementations;
          function ReadSpecialFunction(const namePos : TScriptPos; specialKind : TSpecialKeywordKind) : TProgramExpr;
-         function ReadIncludeExclude(const namePos : TScriptPos; specialKind : TSpecialKeywordKind;
+         function ReadIncludeExclude(const namePos : TScriptPos; methodKind : TArrayMethodKind;
                                      var argExpr : TTypedExpr; const argPos : TScriptPos) : TProgramExpr;
 
          function ReadStatement(var action : TdwsStatementAction; initVarBlockExpr : TBlockExpr) : TProgramExpr;
@@ -3296,9 +3296,11 @@ begin
             if pdoType in declOptions then begin
 
                if FTok.TestDelete(ttOF) then begin
-                  if FTok.TestDelete(ttOBJECT) then
-                     FMsgs.AddCompilerHint(FTok.HotPos, CPH_OfObjectIsLegacy, hlPedantic)
-                  else FMsgs.AddCompilerError(FTok.HotPos, CPE_OfObjectExpected);
+                  if FTok.TestDelete(ttOBJECT) then begin
+                     if not (coDelphiDialect in CompilerContext.Options) then
+                        FMsgs.AddCompilerHint(FTok.HotPos, CPH_OfObjectIsLegacy, hlPedantic);
+                     Result.IsOfObject := True;
+                  end else FMsgs.AddCompilerError(FTok.HotPos, CPE_OfObjectExpected);
                end;
                ReadProcCallQualifiers(result);
 
@@ -6329,24 +6331,27 @@ begin
          FSourceContextMap.OpenContext(FTok.CurrentPos, nil, ttFOR);
       CurrentProg.EnterSubTable(blockExpr.Table);
    end;
-   Result:=blockExpr;
+   Result := blockExpr;
    try
       try
-         Result:=ReadForStep(forPos, forExprClass, iterVarExpr,
-                             fromExpr, toExpr, readArrayItemExpr);
+         Result := ReadForStep(forPos, forExprClass, iterVarExpr,
+                               fromExpr, toExpr, readArrayItemExpr);
       except
-         OrphanAndNil(blockExpr);
+         Result := nil;
+         OrphanObject(blockExpr);
          raise;
       end;
       if Optimize then
-         Result:=Result.Optimize(FCompilerContext);
+         Result := Result.Optimize(FCompilerContext);
    finally
-      if blockExpr<>nil then begin
+      if blockExpr <> nil then begin
          CurrentProg.LeaveSubTable;
-         blockExpr.AddStatement(Result);
-         if Optimize then
-            Result:=blockExpr.Optimize(FCompilerContext)
-         else Result:=blockExpr;
+         if Result <> nil then begin
+            blockExpr.AddStatement(Result);
+            if Optimize then
+               Result := blockExpr.Optimize(FCompilerContext)
+            else Result := blockExpr;
+         end else Result := blockExpr;
          if coContextMap in FOptions then begin
             if blockExpr is TBlockExpr then
                FSourceContextMap.Current.LocalTable:=TBlockExpr(blockExpr).Table;
@@ -7474,7 +7479,7 @@ begin
 
    end else FMsgs.AddCompilerError(typePos, CPE_EnumerationExpected);
 
-   Result:=TSetOfSymbol.Create(typeName, elementType, aMin, aMax);
+   Result := TSetOfSymbol.Create(typeName, elementType, aMin, aMax);
 end;
 
 // ReadArrayType
@@ -8233,24 +8238,21 @@ end;
 function TdwsCompiler.ReadSetOfMethod(const name : String; const namePos : TScriptPos;
                                       baseExpr : TTypedExpr) : TProgramExpr;
 var
-   sk : TSpecialKeywordKind;
+   amk : TArrayMethodKind;
 begin
    try
       if not FTok.TestDelete(ttBLEFT) then
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_BrackLeftExpected);
 
-      sk:=IdentifySpecialName(name);
+      amk := NameToArrayMethod(name, FMsgs, namePos);
 
-      case sk of
-         skInclude, skExclude :
-            Result:=ReadIncludeExclude(namePos, sk, baseExpr, namePos);
+      case amk of
+         amkInclude, amkExclude :
+            Result := ReadIncludeExclude(namePos, amk, baseExpr, namePos);
       else
          Result:=nil;
          FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
       end;
-
-      if not (coHintsDisabled in FOptions) then
-         CheckSpecialNameCase(name, sk, namePos);
 
       if not FTok.TestDelete(ttBRIGHT) then begin
          OrphanAndNil(Result);
@@ -10321,15 +10323,30 @@ function TdwsCompiler.ReadType(const typeName : String; typeContext : TdwsReadTy
       end;
    end;
 
-   function ReadProcType(token : TTokenType; const hotPos : TScriptPos) : TTypeSymbol;
+   function ReadProcType(initialToken : TTokenType; const hotPos : TScriptPos) : TTypeSymbol;
+   var
+      token : TTokenType;
    begin
-      Result:=ReadProcDecl(token, hotPos, [pdoType]);
+      if initialToken = ttREFERENCE then begin
+         if FTok.TestDelete(ttTO) then begin
+            if not (coDelphiDialect in FCompilerContext.Options) then
+               FMsgs.AddCompilerHint(FTok.HotPos, CPH_ReferenceToIsLegacy, hlPedantic);
+         end else FMsgs.AddCompilerError(FTok.HotPos, CPE_ToExpected);
+         token := FTok.TestDeleteAny([ttPROCEDURE, ttFUNCTION]);
+         if token = ttNone then begin
+            FMsgs.AddCompilerError(FTok.HotPos, CPE_ProcOrFuncExpected);
+            token := ttFUNCTION; // keep compiling
+         end;
+      end else begin
+         Assert(initialToken in [ttPROCEDURE, ttFUNCTION]);
+         token := initialToken;
+      end;
+      Result := ReadProcDecl(token, hotPos, [pdoType]);
       Result.SetName(typeName);
       (Result as TFuncSymbol).SetIsType;
       // close declaration context
       if coContextMap in Options then
          FSourceContextMap.CloseContext(FTok.HotPos);
-
    end;
 
 var
@@ -10432,19 +10449,11 @@ begin
       end;
 
       ttREFERENCE : begin
-         if FTok.TestDelete(ttTO) then
-            FMsgs.AddCompilerHint(FTok.HotPos, CPH_ReferenceToIsLegacy, hlPedantic)
-         else FMsgs.AddCompilerError(FTok.HotPos, CPE_ToExpected);
-         tt:=FTok.TestDeleteAny([ttPROCEDURE, ttFUNCTION]);
-         if tt=ttNone then begin
-            FMsgs.AddCompilerError(FTok.HotPos, CPE_ProcOrFuncExpected);
-            tt:=ttFUNCTION; // keep compiling
-         end;
-         Result:=ReadProcType(tt, hotPos)
+         Result := ReadProcType(tt, hotPos)
       end;
 
       ttPROCEDURE, ttFUNCTION : begin
-         Result:=ReadProcType(tt, hotPos);
+         Result := ReadProcType(tt, hotPos);
       end;
 
    else
@@ -10849,8 +10858,10 @@ begin
                         Result.Typ:=TBinaryOpExpr(Result).Left.Typ;
                      end;
                   end else if Result.Typ.IsOfType(FCompilerContext.TypVariant) then begin
-                     Result:=TCoalesceExpr.Create(FCompilerContext, hotPos, tt, Result, right);
-                     Result.Typ:=FCompilerContext.TypVariant;
+                     Result := TCoalesceExpr.Create(FCompilerContext, hotPos, tt, Result, right);
+                     if TCoalesceExpr(Result).Right.IsOfType(TCoalesceExpr(Result).Left.Typ) then
+                        Result.Typ := TCoalesceExpr(Result).Left.Typ
+                     else Result.Typ := FCompilerContext.TypVariant;
                   end else if Result.Typ.IsOfType(FCompilerContext.TypString) then begin
                      Result:=TCoalesceStrExpr.Create(FCompilerContext, hotPos, tt, Result, right);
                   end else if Result.Typ.UnAliasedType.ClassType=TClassSymbol then begin
@@ -13486,7 +13497,7 @@ function TdwsCompiler.CreateSetOperatorExpr(token : TTokenType; const scriptPos 
                                             aLeft, aRight : TTypedExpr) : TTypedExpr;
 var
    leftData, rightData : TDataExpr;
-   convertedData : TDataExpr;
+   convertedData : TConvStaticArrayToSetOfExpr;
    leftTyp, rightTyp : TTypeSymbol;
    setTyp : TSetOfSymbol;
 begin
@@ -13537,13 +13548,19 @@ begin
             Result := TSetOfLeftContainedInRightExpr.Create(FCompilerContext, scriptPos, ttGTREQ, rightData, leftData);
       end;
    except
-      convertedData.Free;
+      if convertedData <> nil then begin
+         convertedData.Expr := nil;
+         convertedData.Free;
+      end;
       raise;
    end;
 
-   if Result = nil then
-      convertedData.Free
-   else if Optimize then
+   if Result = nil then begin
+      if convertedData <> nil then begin
+         convertedData.Expr := nil;
+         convertedData.Free;
+      end;
+   end else if Optimize then
       Result:=Result.OptimizeToTypedExpr(FCompilerContext, scriptPos);
 end;
 
@@ -13648,6 +13665,7 @@ var
    argExpr, msgExpr, operandExpr : TTypedExpr;
    argTyp : TTypeSymbol;
    argPos : TScriptPos;
+   amk : TArrayMethodKind;
 begin
    msgExpr:=nil;
 
@@ -13889,7 +13907,10 @@ begin
          skInclude, skExclude : begin
             if not FTok.TestDelete(ttCOMMA) then
                FMsgs.AddCompilerStop(FTok.HotPos, CPE_CommaExpected);
-            Result:=ReadIncludeExclude(namePos, specialKind, argExpr, argPos);
+            if specialKind = skInclude then
+               amk := amkInclude
+            else amk := amkExclude;
+            Result := ReadIncludeExclude(namePos, amk, argExpr, argPos);
          end;
          skSwap : begin
             if not ((argExpr is TDataExpr) and TDataExpr(argExpr).IsWritable) then begin
@@ -13950,7 +13971,7 @@ end;
 
 // ReadIncludeExclude
 //
-function TdwsCompiler.ReadIncludeExclude(const namePos : TScriptPos; specialKind : TSpecialKeywordKind;
+function TdwsCompiler.ReadIncludeExclude(const namePos : TScriptPos; methodKind : TArrayMethodKind;
                                          var argExpr : TTypedExpr; const argPos : TScriptPos) : TProgramExpr;
 var
    operandExpr : TTypedExpr;
@@ -13975,10 +13996,10 @@ begin
    if (typ<>nil) and (operandExpr<>nil) and not operandExpr.IsOfType(typ) then
       IncompatibleTypes(operandPos, CPE_IncompatibleParameterTypes, typ, operandExpr.Typ);
 
-   if specialKind=skInclude then
-      Result:=TSetOfIncludeExpr.Create(FCompilerContext, namePos, TDataExpr(argExpr), operandExpr)
-   else Result:=TSetOfExcludeExpr.Create(FCompilerContext, namePos, TDataExpr(argExpr), operandExpr);
-   argExpr:=nil;
+   if methodKind = amkInclude then
+      Result := TSetOfIncludeExpr.Create(FCompilerContext, namePos, TDataExpr(argExpr), operandExpr)
+   else Result := TSetOfExcludeExpr.Create(FCompilerContext, namePos, TDataExpr(argExpr), operandExpr);
+   argExpr := nil;
 end;
 
 // ReadTypeCast

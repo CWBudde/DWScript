@@ -18,6 +18,8 @@ unit dwsPostgreSQLDatabase;
 
 interface
 
+{$define POSTGRES_AUTO_PREPARE}
+
 uses
    Classes, SysUtils,
    dwsUtils,  dwsDatabase, dwsXPlatform,
@@ -28,15 +30,33 @@ type
 
    TdwsPostgreSQLDataSet = class;
 
+   TdwsPostgreSQLPreparedQuery = record
+      SQL : RawByteString;
+      ParamTypes : TPGParamTypes;
+      Name : RawByteString;
+   end;
+
+   TdwsPostgreSQLPreparedQueries = class (TSimpleHash<TdwsPostgreSQLPreparedQuery>)
+      protected
+         FTemp : TdwsPostgreSQLPreparedQuery;
+
+         function SameItem(const item1, item2 : TdwsPostgreSQLPreparedQuery) : Boolean; override;
+         function GetItemHashCode(const item1 : TdwsPostgreSQLPreparedQuery) : Cardinal; override;
+   end;
+
    TdwsPostgreSQLDataBase = class (TdwsDataBase, IdwsDataBase)
       private
          FConn : PGconn;
          FInTransaction : Boolean;
          FDataSets : Integer;
 
+         FPreparedQueries : TdwsPostgreSQLPreparedQueries;
+
       protected
          procedure InternalExecute(const command : RawByteString; ignoreError : Boolean = False);
          procedure RaiseLastPGError;
+
+         function PreparedQueryFor(const sql : RawByteString; const paramTypes : TPGParamTypes; var pgRes : PGresult) : RawByteString;
 
       public
          constructor Create(const parameters : array of String);
@@ -48,15 +68,16 @@ type
          function InTransaction : Boolean;
          function CanReleaseToPool : String;
 
-         procedure Exec(const sql : String; const parameters : TData; context : TExprBase);
-         function Query(const sql : String; const parameters : TData; context : TExprBase) : IdwsDataSet;
+         procedure Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
+         function Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
 
          function VersionInfoText : String;
    end;
 
    TdwsPostgreSQLDataSetMode = (
       dsmAutomatic,
-      dsmForceArrayMode
+      dsmForceArray,
+      dsmForceCursor
    );
 
    TdwsPostgreSQLDataSet = class (TdwsDataSet)
@@ -82,7 +103,7 @@ type
          function GetLength(index : Integer) : Integer;
 
       public
-         constructor Create(db : TdwsPostgreSQLDataBase; const sql : String; const parameters : TData;
+         constructor Create(db : TdwsPostgreSQLDataBase; const sql : String; const parameters : IDataContext;
                             aMode : TdwsPostgreSQLDataSetMode = dsmAutomatic);
          destructor Destroy; override;
 
@@ -110,7 +131,7 @@ type
          function DataType : TdwsDataFieldType; override;
 
          function IsNull : Boolean; override;
-         function AsString : String; override;
+         procedure AsString(var Result : String); override;
          function AsInteger : Int64; override;
          function AsFloat : Double; override;
          function AsBoolean : Boolean; override;
@@ -130,7 +151,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsRandom;
+uses dwsRandom, dwsXXHash;
 
 const
    cInitialFetch = 'FETCH 2 in ';
@@ -177,20 +198,20 @@ type
       Formats : TPGParamFormats;
    end;
 
-procedure PreparePGParams(const data : TData; var params : TPosgreSQLParams);
+procedure PreparePGParams(const data : IDataContext; var params : TPosgreSQLParams);
 var
    i, n : Integer;
    p : PVarData;
    dt : Int64;
 begin
-   n := Length(data);
+   n := data.DataLength;
    params.Length := n;
    SetLength(params.Types, n);
    SetLength(params.Values, n);
    SetLength(params.Lengths, n);
    SetLength(params.Formats, n);
    for i := 0 to n-1 do begin
-      p := @data[i];
+      p := PVarData(data.AsPVariant(i));
       case p.VType of
          varInt64 : begin
             if Abs(p.VInt64) < MaxInt then begin
@@ -261,6 +282,29 @@ begin
 end;
 
 // ------------------
+// ------------------ TdwsPostgreSQLPreparedQueries ------------------
+// ------------------
+
+// SameItem
+//
+function TdwsPostgreSQLPreparedQueries.SameItem(const item1, item2 : TdwsPostgreSQLPreparedQuery) : Boolean;
+begin
+   Result := (item1.SQL = item2.SQL) and PostgreSQLSameParamTypes(item1.ParamTypes, item2.ParamTypes);
+end;
+
+// GetItemHashCode
+//
+function TdwsPostgreSQLPreparedQueries.GetItemHashCode(const item1 : TdwsPostgreSQLPreparedQuery) : Cardinal;
+var
+   hash : xxHash32;
+begin
+   hash.Init;
+   hash.Update(Pointer(item1.SQL), Length(item1.SQL)*SizeOf(AnsiChar));
+   hash.Update(Pointer(item1.ParamTypes), Length(item1.ParamTypes)*SizeOf(Oid));
+   Result := hash.Digest;
+end;
+
+// ------------------
 // ------------------ TdwsPostgreSQLDataBase ------------------
 // ------------------
 
@@ -278,6 +322,10 @@ begin
       RefCount := 0;
       raise;
    end;
+
+   {$ifdef POSTGRES_AUTO_PREPARE }
+   FPreparedQueries := TdwsPostgreSQLPreparedQueries.Create;
+   {$endif}
 end;
 
 // Destroy
@@ -288,6 +336,7 @@ begin
       vLibpq.PQfinish(FConn);
       FConn := nil;
    end;
+   FreeAndNil(FPreparedQueries);
    inherited;
 end;
 
@@ -319,6 +368,27 @@ var
 begin
    msg := UTF8ToString(vLibpq.PQerrorMessage(FConn));
    raise EDWSDataBase.Create(msg);
+end;
+
+// TdwsPostgreSQLDataBase.PreparedQueryFor
+//
+function TdwsPostgreSQLDataBase.PreparedQueryFor(const sql : RawByteString; const paramTypes : TPGParamTypes; var pgRes : PGresult) : RawByteString;
+begin
+   FPreparedQueries.FTemp.SQL := sql;
+   FPreparedQueries.FTemp.ParamTypes := paramTypes;
+   if FPreparedQueries.Match(FPreparedQueries.FTemp) then
+      Result := FPreparedQueries.FTemp.Name
+   else begin
+      NewPGName(FPreparedQueries.FTemp.Name);
+      pgRes := vLibpq.PQprepare(
+         FConn, Pointer(FPreparedQueries.FTemp.Name), Pointer(sql),
+         Length(paramTypes), paramTypes
+      );
+      if vLibpq.PQresultStatus(pgRes) = PGRES_COMMAND_OK then begin
+         FPreparedQueries.Add(FPreparedQueries.FTemp);
+         Result := FPreparedQueries.FTemp.Name;
+      end else Result := '';
+   end;
 end;
 
 // BeginTransaction
@@ -371,20 +441,33 @@ end;
 
 // Exec
 //
-procedure TdwsPostgreSQLDataBase.Exec(const sql : String; const parameters : TData; context : TExprBase);
+procedure TdwsPostgreSQLDataBase.Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
 var
    query : RawByteString;
 
    function PQExecParams : PGresult;
    var
       params : TPosgreSQLParams;
+      prepName : RawByteString;
    begin
       PreparePGParams(parameters, params);
-      Result := vLibpq.PQexecParams(
+
+      if FPreparedQueries <> nil then begin
+         prepName := PreparedQueryFor(query, params.Types, Result);
+         if prepName <> '' then begin
+            Result := vLibpq.PQexecPrepared(
+               FConn, Pointer(prepName),
+               params.Length,params.Values, params.Lengths, params.Formats,
+               1
+            );
+         end;
+      end else begin
+         Result := vLibpq.PQexecParams(
             FConn, PAnsiChar(query),
             params.Length, params.Types, params.Values, params.Lengths, params.Formats,
             1
          );
+      end;
    end;
 
 var
@@ -396,11 +479,11 @@ begin
       res := PQExecParams
    else begin
       res := vLibpq.PQexecParams(
-            FConn, PAnsiChar(query),
-            0, nil, nil, nil, nil,
-            1
-         );
-      end;
+         FConn, PAnsiChar(query),
+         0, nil, nil, nil, nil,
+         1
+      );
+   end;
 
    try
       case vLibpq.PQresultStatus(res) of
@@ -416,7 +499,7 @@ end;
 
 // Query
 //
-function TdwsPostgreSQLDataBase.Query(const sql : String; const parameters : TData; context : TExprBase) : IdwsDataSet;
+function TdwsPostgreSQLDataBase.Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
 var
    ds : TdwsPostgreSQLDataSet;
 begin
@@ -431,9 +514,9 @@ var
    ds : TdwsPostgreSQLDataSet;
    i : IdwsDataSet;
 begin
-   ds := TdwsPostgreSQLDataSet.Create(Self, 'SELECT version()', nil, dsmForceArrayMode);
+   ds := TdwsPostgreSQLDataSet.Create(Self, 'SELECT version()', nil, dsmForceArray);
    i := ds;
-   Result := i.GetField(0).AsString;
+   i.GetField(0).GetAsString(Result);
 end;
 
 // ------------------
@@ -467,7 +550,7 @@ end;
 //
 constructor TdwsPostgreSQLDataSet.Create(
       db : TdwsPostgreSQLDataBase;
-      const sql : String; const parameters : TData;
+      const sql : String; const parameters : IDataContext;
       aMode : TdwsPostgreSQLDataSetMode = dsmAutomatic
       );
 
@@ -495,12 +578,14 @@ begin
    try
       FSQL := UTF8Encode(sql);
 
-      if FDB.InTransaction and (aMode = dsmAutomatic) then begin
-         // within transactions, we use cursors by default
+      if (aMode = dsmForceCursor) or (FDB.InTransaction and (aMode = dsmAutomatic)) then begin
+         // within transactions, we use cursors by default for selects
          // they can be aborted mid-way and support multiple large blobs
-         NewPGName(FCursorName);
-         FSQL := 'DECLARE ' + FCursorName + ' NO SCROLL CURSOR FOR ' + FSQL;
-         FFetchNext := cInitialFetch + FCursorName;
+         if StrIBeginsWith(sql, 'select')  then begin
+            NewPGName(FCursorName);
+            FSQL := 'DECLARE ' + FCursorName + ' NO SCROLL CURSOR FOR ' + FSQL;
+            FFetchNext := cInitialFetch + FCursorName;
+         end;
       end;
 
       if parameters <> nil then begin
@@ -766,13 +851,16 @@ end;
 
 // AsString
 //
-function TdwsPostgreSQLDataField.AsString : String;
+procedure TdwsPostgreSQLDataField.AsString(var Result : String);
 var
    oid : Integer;
    p : Pointer;
    buf : RawByteString;
 begin
-   if FDataSet.GetIsNull(Index) then Exit('');
+   if FDataSet.GetIsNull(Index) then begin
+      Result := '';
+      Exit;
+   end;
 
    p := FDataSet.GetPValue(Index);
    oid := FDataSet.GetType(Index);
@@ -790,6 +878,7 @@ begin
          dftInteger : Result := IntToStr(AsInteger);
          dftFloat : Result := FloatToStr(AsFloat);
          dftDateTime : Result := DateTimeToISO8601(AsFloat, True);
+         dftBlob : RawByteStringToScriptString(AsBlob, Result);
       else
          // unknown
          SetString(buf, PAnsiChar(p), FDataSet.GetLength(Index));
@@ -803,10 +892,15 @@ end;
 function TdwsPostgreSQLDataField.AsInteger : Int64;
 
    function Fallback : Int64;
+   var
+      s : String;
    begin
       case DataType of
          dftFloat : Result := Trunc(AsFloat);
-         dftString : Result := StrToInt64(AsString);
+         dftString : begin
+            GetAsString(s);
+            Result := StrToInt64(s);
+         end;
          dftDateTime : Result := Round((AsFloat+25596)*86400);
       else
          RaiseUnsupportedConversion('Integer');
@@ -862,7 +956,7 @@ begin
          SwapInt64(p, @Result);
       end;
       NUMERICOID : begin
-         Result := PotsgreSQLNumericToFloat(p);
+         Result := PostgreSQLNumericToFloat(p);
       end;
       TIMESTAMPOID : begin
          SwapInt64(p, @dt);

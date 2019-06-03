@@ -778,7 +778,7 @@ type
    end;
 
    TFuncSymbolFlag = (fsfStateless, fsfExternal, fsfType, fsfOverloaded, fsfLambda,
-                      fsfInline, fsfProperty, fsfExport);
+                      fsfInline, fsfProperty, fsfExport, fsfOfObject);
    TFuncSymbolFlags = set of TFuncSymbolFlag;
 
    // A script function / procedure: procedure X(param: Integer);
@@ -813,6 +813,8 @@ type
          procedure SetIsOverloaded(const val : Boolean);
          function GetIsLambda : Boolean; inline;
          procedure SetIsLambda(const val : Boolean);
+         function GetIsOfObject : Boolean; inline;
+         procedure SetIsOfObject(const val : Boolean);
          function GetSourcePosition : TScriptPos; virtual;
          procedure SetSourcePosition(const val : TScriptPos); virtual;
          function GetExternalName : String;
@@ -864,6 +866,7 @@ type
          property IsExternal : Boolean read GetIsExternal write SetIsExternal;
          property IsExport : Boolean read GetIsExport write SetIsExport;
          property IsProperty : Boolean read GetIsProperty write SetIsProperty;
+         property IsOfObject : Boolean read GetIsOfObject write SetIsOfObject;
          property Kind : TFuncKind read FKind write FKind;
          property ExternalName : String read GetExternalName write FExternalName;
          function HasExternalName : Boolean;
@@ -1114,31 +1117,6 @@ type
          function SupportsEmptyParam : Boolean; virtual;
    end;
 
-   TSetOfSymbol = class sealed (TTypeSymbol)
-      private
-         FMinValue : Integer;
-         FCountValue : Integer;
-
-      protected
-         function GetMaxValue : Integer; inline;
-
-      public
-         constructor Create(const name : String; indexType : TTypeSymbol;
-                            aMin, aMax : Integer);
-
-         function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
-         procedure InitData(const data : TData; offset : Integer); override;
-
-         function AssignsAsDataExpr : Boolean; override;
-
-         function ValueToOffsetMask(value : Integer; var mask : Int64) : Integer; inline;
-         function ValueToByteOffsetMask(value : Integer; var mask : Byte) : Integer; inline;
-
-         property MinValue : Integer read FMinValue write FMinValue;
-         property MaxValue : Integer read GetMaxValue;
-         property CountValue : Integer read FCountValue write FCountValue;
-   end;
-
    TTypeWithPseudoMethodsSymbol = class;
 
    TPseudoMethodSymbol = class sealed (TFuncSymbol)
@@ -1163,6 +1141,38 @@ type
 
          function PseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
 
+   end;
+
+   TEnumerationSymbol = class;
+   TElementSymbol = class;
+
+   TSetOfSymbol = class sealed (TTypeWithPseudoMethodsSymbol)
+      private
+         FMinValue : Integer;
+         FCountValue : Integer;
+
+      protected
+         function GetMaxValue : Integer; inline;
+
+         function InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol; override;
+
+      public
+         constructor Create(const name : String; indexType : TTypeSymbol;
+                            aMin, aMax : Integer);
+
+         function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
+         procedure InitData(const data : TData; offset : Integer); override;
+
+         function AssignsAsDataExpr : Boolean; override;
+
+         function ValueToOffsetMask(value : Integer; var mask : Int64) : Integer; inline;
+         function ValueToByteOffsetMask(value : Integer; var mask : Byte) : Integer; inline;
+
+         function ElementByValue(value : Integer) : TElementSymbol;
+
+         property MinValue : Integer read FMinValue write FMinValue;
+         property MaxValue : Integer read GetMaxValue;
+         property CountValue : Integer read FCountValue write FCountValue;
    end;
 
    TArraySymbol = class abstract (TTypeWithPseudoMethodsSymbol)
@@ -1817,8 +1827,6 @@ type
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          procedure InitData(const data : TData; offset : Integer); override;
    end;
-
-   TEnumerationSymbol = class;
 
    // Element of an enumeration type. E. g. "type DummyEnum = (Elem1, Elem2, Elem3);"
    TElementSymbol = class sealed (TConstSymbol)
@@ -3838,6 +3846,22 @@ begin
    else Exclude(FFlags, fsfLambda);
 end;
 
+// GetIsOfObject
+//
+function TFuncSymbol.GetIsOfObject : Boolean;
+begin
+   Result := (fsfOfObject in FFlags);
+end;
+
+// SetIsOfObject
+//
+procedure TFuncSymbol.SetIsOfObject(const val : Boolean);
+begin
+   if val then
+      Include(FFlags, fsfOfObject)
+   else Exclude(FFlags, fsfOfObject);
+end;
+
 // GetSourcePosition
 //
 function TFuncSymbol.GetSourcePosition : TScriptPos;
@@ -5830,7 +5854,10 @@ end;
 
 function TConstSymbol.GetDescription : String;
 begin
-   Result := 'const ' + inherited GetDescription + ' = ' + VariantToString(FData[0]);
+   Result := 'const ' + inherited GetDescription + ' = ';
+   if Length(FData) > 0 then
+      Result := Result + VariantToString(FData[0])
+   else Result := Result + '???';
 end;
 
 // GetIsDeprecated
@@ -7029,8 +7056,15 @@ end;
 //
 function TSetOfSymbol.ValueToByteOffsetMask(value : Integer; var mask : Byte) : Integer;
 begin
-   Result:=(value-MinValue) shr 3;
-   mask:=1 shl (value and 7);
+   Result := (value-MinValue) shr 3;
+   mask := 1 shl (value and 7);
+end;
+
+// ElementByValue
+//
+function TSetOfSymbol.ElementByValue(value : Integer) : TElementSymbol;
+begin
+   Result := (Typ.UnAliasedType as TEnumerationSymbol).ElementByValue(value)
 end;
 
 // GetMaxValue
@@ -7038,6 +7072,25 @@ end;
 function TSetOfSymbol.GetMaxValue : Integer;
 begin
    Result:=MinValue+CountValue-1;
+end;
+
+// InitializePseudoMethodSymbol
+//
+function TSetOfSymbol.InitializePseudoMethodSymbol(methodKind : TArrayMethodKind; baseSymbols : TdwsBaseSymbolsContext) : TPseudoMethodSymbol;
+var
+   methodName : String;
+begin
+   Result := nil;
+
+   methodName := Copy(GetEnumName(TypeInfo(TArrayMethodKind), Ord(methodKind)), 4);
+   case methodKind of
+      amkInclude, amkExclude : begin
+         Result := TPseudoMethodSymbol.Create(Self, methodName, fkFunction, 0);
+         Result.Params.AddSymbol(TParamSymbol.Create('element', Typ));
+      end;
+   end;
+   if Result <> nil then
+      FPseudoMethods[methodKind] := Result
 end;
 
 // ------------------

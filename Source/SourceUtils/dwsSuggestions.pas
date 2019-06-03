@@ -148,6 +148,7 @@ type
                                const args : array of const;
                                forceParenthesis : Boolean = False) : TFuncSymbol;
          procedure AddEnumerationElementHelpers(list : TSimpleSymbolList);
+         procedure AddSetOfHelpers(setOf : TSetOfSymbol; list : TSimpleSymbolList);
          procedure AddStringHelpers(list : TSimpleSymbolList);
          procedure AddStaticArrayHelpers(a : TArraySymbol; list : TSimpleSymbolList);
          procedure AddDynamicArrayHelpers(dyn : TDynamicArraySymbol; list : TSimpleSymbolList);
@@ -519,10 +520,23 @@ begin
       FEnumElementHelpers:=TSymbolTable.Create;
       p:=FProg.ProgramObject.CompilerContext;
       FEnumElementHelpers.AddSymbol(CreateHelper('Name', p.TypString, []));
+      FEnumElementHelpers.AddSymbol(CreateHelper('QualifiedName', p.TypString, []));
       FEnumElementHelpers.AddSymbol(CreateHelper('Value', p.TypInteger, []));
    end;
 
    list.AddSymbolTable(FEnumElementHelpers);
+end;
+
+// AddSetOfHelpers
+//
+procedure TdwsSuggestions.AddSetOfHelpers(setOf : TSetOfSymbol; list : TSimpleSymbolList);
+begin
+   var p := FProg.ProgramObject.CompilerContext;
+   for var amk in [
+         amkInclude, amkExclude
+      ] do begin
+      list.Add(setOf.PseudoMethodSymbol(amk, p));
+   end;
 end;
 
 // AddStringHelpers
@@ -789,6 +803,10 @@ begin
                      or (FPreviousSymbol.Typ is TEnumerationSymbol) then begin
 
             AddEnumerationElementHelpers(list);
+
+         end else if FPreviousSymbol.Typ is TSetOfSymbol then begin
+
+            AddSetOfHelpers(TSetOfSymbol(FPreviousSymbol.Typ), list);
 
          end else if (FPreviousSymbol.Typ is TBaseVariantSymbol) and (FPreviousSymbol.Typ.Name='JSONVariant') then begin
 
