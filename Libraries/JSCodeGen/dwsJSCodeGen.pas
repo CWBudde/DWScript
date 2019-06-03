@@ -3389,7 +3389,8 @@ begin
       resultTyp := resultTyp.UnAliasedType;
 
       // optimize to a straight "return" statement for trivial functions
-      if     (not resultIsBoxed) and (proc.Table.Count = 0)
+      if     (not resultIsBoxed) and ((proc.Table.Count = 0) or
+         ((proc.Table.Count = 1) and (proc.Table[0].Typ = nil)))
          and ((proc.InitExpr = nil) or (proc.InitExpr.SubExprCount = 0))
          and (proc.Expr is TAssignExpr) then begin
 
