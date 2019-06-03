@@ -9927,6 +9927,7 @@ var
    destPVariant : PVariant;
    loopCallback : TArrayDataEnumeratorCallback;
 
+{$IFDEF FPC}
    function A(n : Integer) : PVariant;
    begin
       funcPointer.EvalAsVariant(exec, MapFuncExpr, destPVariant^);
@@ -9949,6 +9950,7 @@ var
       destPVariant := initial(n);
       Result := itemPtr;
    end;
+{$ENDIF}
 
 begin
    MapFuncExpr.EvalAsFuncPointer(exec, funcPointer);
@@ -9957,12 +9959,39 @@ begin
    itemPtr := @exec.Stack.Data[itemAddr];
 
    destSize := Typ.Typ.Size;
+{$IFDEF FPC}
    if destSize = 1 then begin
       loopCallback := @A;
    end else begin
       loopCallback := @B;
    end;
    BaseAsCallback(exec, @C, loopCallback);
+{$ELSE}
+   if destSize = 1 then begin
+      loopCallback := function(n : Integer) : PVariant
+      begin
+         funcPointer.EvalAsVariant(exec, MapFuncExpr, destPVariant^);
+         destPVariant := callback(n);
+         Result := itemPtr;
+      end;
+   end else begin
+      loopCallback := function(n : Integer) : PVariant
+      var
+         dc : IDataContext;
+      begin
+         dc := funcPointer.EvalDataPtr(exec,  MapFuncExpr, MapFuncExpr.ResultAddr);
+         dc.CopyData(destPVariant^, 0, destSize);
+         destPVariant := callback(n);
+         Result := itemPtr;
+      end;
+   end;
+   BaseAsCallback(exec,
+      function(n : Integer) : PVariant
+      begin
+         destPVariant := initial(n);
+         Result := itemPtr;
+      end, loopCallback);
+{$ENDIF}
 end;
 
 // EvalAsCallbackString
@@ -9974,6 +10003,7 @@ var
    funcPointer : IFuncPointer;
    destString : PString;
 
+{$IFDEF FPC}
    function A(n : Integer) : PVariant;
    begin
       Result := itemPtr;
@@ -9986,6 +10016,7 @@ var
       Result := itemPtr;
       destString := callback(n);
    end;
+{$ENDIF}
 
 begin
    MapFuncExpr.EvalAsFuncPointer(exec, funcPointer);
@@ -9993,7 +10024,23 @@ begin
    itemAddr := exec.Stack.BasePointer + FItem.StackAddr;
    itemPtr := @exec.Stack.Data[itemAddr];
 
+{$IFDEF FPC}
    BaseAsCallback(exec, @A, @B);
+{$ELSE}
+   BaseAsCallback(exec,
+      function(n : Integer) : PVariant
+      begin
+         Result := itemPtr;
+         destString := initial(n);
+      end,
+      function(n : Integer) : PVariant
+      begin
+         funcPointer.EvalAsString(exec, MapFuncExpr, destString^);
+         Result := itemPtr;
+         destString := callback(n);
+      end
+   );
+{$ENDIF}
 end;
 
 // GetSubExpr

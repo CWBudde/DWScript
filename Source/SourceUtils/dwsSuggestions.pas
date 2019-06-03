@@ -530,9 +530,12 @@ end;
 // AddSetOfHelpers
 //
 procedure TdwsSuggestions.AddSetOfHelpers(setOf : TSetOfSymbol; list : TSimpleSymbolList);
+var
+   p: TdwsCompilerContext;
+   amk: TArrayMethodKind;
 begin
-   var p := FProg.ProgramObject.CompilerContext;
-   for var amk in [
+   p := FProg.ProgramObject.CompilerContext;
+   for amk in [
          amkInclude, amkExclude
       ] do begin
       list.Add(setOf.PseudoMethodSymbol(amk, p));
