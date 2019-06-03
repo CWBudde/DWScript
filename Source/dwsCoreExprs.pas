@@ -838,8 +838,13 @@ type
    // - first call with number of items as parameter (<0 if unknown), will return storage for 1st item
    // - second call with n=0, after having stored the first item, returns storage for second item (can be same)
    // - etc
+   {$IFDEF FPC}
+   TArrayDataEnumeratorCallback = function(n : Integer) : PVariant;
+   TArrayDataEnumeratorCallbackString = function(n : Integer) : PString;
+   {$ELSE}
    TArrayDataEnumeratorCallback = reference to function(n : Integer) : PVariant;
    TArrayDataEnumeratorCallbackString = reference to function(n : Integer) : PString;
+   {$ENDIF}
 
    // Map a dynamic array
    TArrayMapExpr = class sealed (TArrayTypedExpr)
@@ -4807,8 +4812,13 @@ begin
    {$else}
    lazyContext := @exec.Stack.Data[exec.Stack.BasePointer + FStackAddr];
    Assert(lazyContext.VType = varRecord);
+   {$ifdef FPC}
+     // TODO
+   {$ELSE}
    lazyExpr := TExprBase(lazyContext.VRecord.PRecord);
    lazyBasePointer := Integer(lazyContext.VRecord.RecInfo);
+   {$ENDIF}
+
    {$endif}
 
    oldBasePointer := exec.Stack.BasePointer;
@@ -9916,6 +9926,30 @@ var
    funcPointer : IFuncPointer;
    destPVariant : PVariant;
    loopCallback : TArrayDataEnumeratorCallback;
+
+   function A(n : Integer) : PVariant;
+   begin
+      funcPointer.EvalAsVariant(exec, MapFuncExpr, destPVariant^);
+      destPVariant := callback(n);
+      Result := itemPtr;
+   end;
+
+   function B(n : Integer) : PVariant;
+   var
+      dc : IDataContext;
+   begin
+      dc := funcPointer.EvalDataPtr(exec,  MapFuncExpr, MapFuncExpr.ResultAddr);
+      dc.CopyData(destPVariant^, 0, destSize);
+      destPVariant := callback(n);
+      Result := itemPtr;
+   end;
+
+   function C(n : Integer) : PVariant;
+   begin
+      destPVariant := initial(n);
+      Result := itemPtr;
+   end;
+
 begin
    MapFuncExpr.EvalAsFuncPointer(exec, funcPointer);
 
@@ -9924,31 +9958,11 @@ begin
 
    destSize := Typ.Typ.Size;
    if destSize = 1 then begin
-      loopCallback := function (n : Integer) : PVariant
-                      begin
-                         funcPointer.EvalAsVariant(exec, MapFuncExpr, destPVariant^);
-                         destPVariant := callback(n);
-                         Result := itemPtr;
-                      end;
+      loopCallback := @A;
    end else begin
-      loopCallback := function (n : Integer) : PVariant
-                      var
-                         dc : IDataContext;
-                      begin
-                         dc := funcPointer.EvalDataPtr(exec,  MapFuncExpr, MapFuncExpr.ResultAddr);
-                         dc.CopyData(destPVariant^, 0, destSize);
-                         destPVariant := callback(n);
-                         Result := itemPtr;
-                      end;
+      loopCallback := @B;
    end;
-   BaseAsCallback(exec,
-      function (n : Integer) : PVariant
-      begin
-         destPVariant := initial(n);
-         Result := itemPtr;
-      end,
-      loopCallback
-   );
+   BaseAsCallback(exec, @C, loopCallback);
 end;
 
 // EvalAsCallbackString
@@ -9959,25 +9973,27 @@ var
    itemPtr : PVariant;
    funcPointer : IFuncPointer;
    destString : PString;
+
+   function A(n : Integer) : PVariant;
+   begin
+      Result := itemPtr;
+      destString := initial(n);
+   end;
+
+   function B(n : Integer) : PVariant;
+   begin
+      funcPointer.EvalAsString(exec, MapFuncExpr, destString^);
+      Result := itemPtr;
+      destString := callback(n);
+   end;
+
 begin
    MapFuncExpr.EvalAsFuncPointer(exec, funcPointer);
 
    itemAddr := exec.Stack.BasePointer + FItem.StackAddr;
    itemPtr := @exec.Stack.Data[itemAddr];
 
-   BaseAsCallback(exec,
-      function (n : Integer) : PVariant
-      begin
-         Result := itemPtr;
-         destString := initial(n);
-      end,
-      function (n : Integer) : PVariant
-      begin
-         funcPointer.EvalAsString(exec, MapFuncExpr, destString^);
-         Result := itemPtr;
-         destString := callback(n);
-      end
-   );
+   BaseAsCallback(exec, @A, @B);
 end;
 
 // GetSubExpr

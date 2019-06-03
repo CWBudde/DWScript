@@ -1255,12 +1255,29 @@ var
    mapExpr : TArrayMapExpr;
    wobs : TWriteOnlyBlockStream;
    delim, buf : String;
+{$IFDEF FPC}
+   function A(n : Integer) : PString;
+   begin
+      Result := @buf;
+   end;
+
+   function B(n : Integer) : PString;
+   begin
+      if n > 0 then
+         wobs.WriteString(delim);
+      wobs.WriteString(buf);
+      Result := @buf;
+   end;
+{$ENDIF}
 begin
    mapExpr := args.ExprBase[0] as TArrayMapExpr;
    args.EvalAsString(1, delim);
    buf := '';
    wobs := TWriteOnlyBlockStream.AllocFromPool;
    try
+{$IFDEF FPC}
+      mapExpr.EvalAsCallbackString(args.Exec, @A, @B);
+{$ELSE}
       mapExpr.EvalAsCallbackString(args.Exec,
          function (n : Integer) : PString
          begin
@@ -1274,6 +1291,7 @@ begin
             Result := @buf;
          end
       );
+{$ENDIF}
       Result := wobs.ToString;
    finally
       wobs.ReturnToPool;

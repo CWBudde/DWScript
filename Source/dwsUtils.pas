@@ -1672,7 +1672,11 @@ begin
    if val = 0 then
       s := '0'
    else begin
+      {$IFDEF FPC}
+      n := FloatToText(buffer, val, ffGeneral, 15, 0, fmtSettings);
+      {$ELSE}
       n := FloatToText(buffer, val, fvExtended, ffGeneral, 15, 0, fmtSettings);
+      {$ENDIF}
       SetString(s, buffer, n);
    end;
 end;
@@ -2232,9 +2236,11 @@ begin
          Result := 0;
       varUnknown :
          UnknownAsFloat(IUnknown(TVarData(v).VUnknown), Result);
+{$IFNDEF FPC}
       varUString :
          if not TryStrToDouble(PChar(TVarData(v).VUString), Result) then
             raise EConvertError.CreateFmt(CPE_InvalidFloatFormat, [ String(TVarData(v).VUString) ]);
+{$ENDIF}
    else
       Result := v;
    end;
@@ -2905,8 +2911,12 @@ begin
       VarSetDefaultString(result)
    else begin
       VarClearSafe(result);
+      {$ifdef FPC}
+      TVarData(result).VType := varString;
+      {$else}
       TVarData(result).VType := varUString;
-      RawByteStringToScriptString(s, String(TVarData(result).VString));
+      {$endif}
+      RawByteStringToScriptString(s, UnicodeString(TVarData(result).VString));
    end;
 end;
 

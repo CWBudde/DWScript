@@ -1203,7 +1203,7 @@ const
    );
 
 {$ifndef WIN32_ASM}
-function ToLowerW(Ch: Word): Word; inline
+function ToLowerW(Ch: Word): Word; inline;
 begin
    Result := ch + CCaseMapLower[CCaseMapLower[ch shr 8] + (ch and $ff)];
 end;
