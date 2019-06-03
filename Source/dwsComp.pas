@@ -281,6 +281,7 @@ type
 
          procedure SetName(const val : String);
       protected
+         FDisplayName: String;
          procedure AssignTo(Dest: TPersistent); override;
 
          procedure CheckName(aTable : TSymbolTable; const aName : String; overloaded : Boolean = False);
@@ -288,6 +289,8 @@ type
          procedure Reset;
 
          procedure NameChanged; virtual;
+         procedure UpdateDisplayName; virtual;
+
          function Parse(const Value : String): String; virtual;
 
          property IsGenerating: Boolean read FIsGenerating write FIsGenerating;
@@ -335,12 +338,10 @@ type
 
          procedure SetDataType(const val : TDataType);
       protected
-         FDisplayName: String;
-
          function GetDisplayName: String; override;
          procedure NameChanged; override;
          procedure DataTypeChanged; virtual;
-         procedure UpdateDisplayName; virtual;
+         procedure UpdateDisplayName; override;
 
       public
          procedure Assign(Source: TPersistent); override;
@@ -592,6 +593,7 @@ type
          FValue: Variant;
          procedure ValueChanged; virtual;
          procedure UpdateDisplayName; override;
+         function Parse(const Value : String): String; override;
 
       public
          procedure Assign(Source: TPersistent); override;
@@ -642,7 +644,6 @@ type
          FHasDefaultValue : Boolean;
          procedure SetVisibility(const Value: TdwsVisibility);
       protected
-         function GetDisplayName: String; override;
          procedure SetDefaultValue(const Value: Variant);
          function GetHasDefaultValue : Boolean;
          function Parse(const Value : String): String; override;
@@ -1092,7 +1093,8 @@ type
          procedure SetIsUserDef(const Value: Boolean);
 
      protected
-         function GetDisplayName: String; override;
+         procedure NameChanged; override;
+         procedure UpdateDisplayName; virtual;
 
       public
          procedure Assign(Source: TPersistent); override;
@@ -2780,6 +2782,64 @@ begin
    GetUnit.Table.AddSymbol(Result);
 end;
 
+function TdwsConstant.Parse(const Value: String): String;
+var
+   rules : TPascalTokenizerStateRules;
+   tok : TTokenizer;
+   sourceFile : TSourceFile;
+begin
+   rules := TPascalTokenizerStateRules.Create;
+   tok := TTokenizer.Create(rules, nil);
+   sourceFile := TSourceFile.Create;
+   try
+      sourceFile.Code := Value;
+      tok.BeginSourceFile(sourceFile);
+      if tok.TestName then begin
+         Result := tok.GetToken.AsString;
+         tok.KillToken;
+      end else raise Exception.Create('name expected');
+
+      // check whether data type is present. Otherwise skip parsing
+      if tok.TestDelete(ttCOLON) then
+      begin
+         // set data type
+         if tok.TestName then begin
+            DataType := tok.GetToken.AsString;
+            tok.KillToken;
+         end else raise Exception.Create('Data type expected');
+      end;
+
+      // get constant value
+      if tok.TestDelete(ttEQ) then begin
+         case tok.TestAny([ttStrVal, ttIntVal, ttFloatVal]) of
+            ttStrVal: begin
+               Self.Value := tok.GetToken.AsString;
+               tok.KillToken;
+            end;
+            ttIntVal: begin
+               Self.Value := tok.GetToken.FInteger;
+               tok.KillToken;
+            end;
+            ttFloatVal: begin
+               Self.Value := tok.GetToken.FFloat;
+               tok.KillToken;
+            end;
+         else
+            if tok.TestName then begin
+               Self.Value := tok.GetToken.AsString;
+               tok.KillToken;
+            end else raise Exception.Create('Value expected');
+         end;
+      end;
+
+      tok.EndSourceFile;
+   finally
+      sourceFile.Free;
+      tok.Free;
+      rules.Free;
+   end;
+end;
+
 procedure TdwsConstant.SetValue(const Value: Variant);
 begin
    if FValue <> Value then
@@ -2807,10 +2867,14 @@ begin
    begin
       varData := PVarData(@FValue);
       case varData^.VType of
-         varString :
-            DataType := 'String';
-         varInteger :
+         varSmallint, varInteger, varShortInt .. varUInt64 :
             DataType := 'Integer';
+         varBoolean :
+            DataType := 'Boolean';
+         varSingle, varDouble :
+            DataType := 'Integer';
+         varString {$IFNDEF FPC}, varUString {$ENDIF}:
+            DataType := 'String';
       end;
    end;
 
@@ -2862,35 +2926,35 @@ function TdwsVariables.GetDisplayName: String;
 var
   i: Integer;
 begin
-  if Count > 0 then
-  begin
-    Result := Items[0].GetDisplayName;
-    for i := 1 to Count - 1 do
-      Result := Result + '; ' + Items[i].GetDisplayName;
-  end
-  else
-    Result := '';
+   if Count > 0 then
+   begin
+      Result := Items[0].GetDisplayName;
+      for i := 1 to Count - 1 do
+         Result := Result + '; ' + Items[i].GetDisplayName;
+   end
+   else
+      Result := '';
 end;
 
 // Add
 //
 function TdwsVariables.Add : TdwsGlobal;
 begin
-   Result:=TdwsGlobal(inherited Add);
+   Result := TdwsGlobal(inherited Add);
 end;
 
 // Add
 //
 function TdwsVariables.Add(const name, typName : String) : TdwsGlobal;
 begin
-   Result:=Add;
-   Result.Name:=name;
-   Result.DataType:=typName;
+   Result := Add;
+   Result.Name := name;
+   Result.DataType := typName;
 end;
 
 class function TdwsVariables.GetSymbolClass: TdwsSymbolClass;
 begin
-  Result := TdwsGlobal;
+   Result := TdwsGlobal;
 end;
 
 { TdwsGlobal }
@@ -3778,13 +3842,6 @@ begin
       data[0]:=FDefaultValue;
       TFieldSymbol(Result).DefaultValue:=data;
    end;
-end;
-
-// GetDisplayName
-//
-function TdwsField.GetDisplayName: String;
-begin
-   Result := TClassSymbol.VisibilityToString(Visibility) + ' ' + inherited GetDisplayName;
 end;
 
 // SetDefaultValue
@@ -5115,7 +5172,12 @@ end;
 
 procedure TdwsSymbol.NameChanged;
 begin
-   // empty stub
+   UpdateDisplayName;
+end;
+
+procedure TdwsSymbol.UpdateDisplayName;
+begin
+   FDisplayName := FName;
 end;
 
 procedure TdwsSymbol.Reset;
@@ -5504,7 +5566,7 @@ constructor TdwsEnumeration.Create(Collection: TCollection);
 begin
   inherited;
   FElements := TdwsElements.Create(Self);
-  FStyle:=enumClassic;
+  FStyle := enumClassic;
 end;
 
 destructor TdwsEnumeration.Destroy;
@@ -5548,18 +5610,18 @@ function TdwsEnumeration.GetDisplayName: String;
 var
    i : Integer;
 begin
-   Result:=Name+' =';
+   Result := Name + ' =';
    case Style of
-      enumScoped : Result:=Result+' enum';
-      enumFlags : Result:=Result+' flags';
+      enumScoped : Result := Result + ' enum';
+      enumFlags : Result := Result + ' flags';
    end;
-   Result:=Result+' (';
-   for i:=0 to FElements.Count-1 do begin
-      if i<>0 then
-         Result:=Result + ', ';
-      Result:=Result+TdwsElement(FElements.Items[i]).GetDisplayName;
+   Result := Result + ' (';
+   for i := 0 to FElements.Count - 1 do begin
+      if i <> 0 then
+         Result := Result + ', ';
+      Result := Result + TdwsElement(FElements.Items[i]).GetDisplayName;
    end;
-   Result:=Result+');';
+   Result := Result + ');';
 end;
 
 // Parse
@@ -5655,35 +5717,46 @@ begin
    TElementSymbol(Result).DeprecatedMessage := FDeprecated;
 end;
 
-function TdwsElement.GetDisplayName: String;
+procedure TdwsElement.NameChanged;
 begin
-  if FIsUserDef then
-    Result := Name + ' = ' + IntToStr(FUserDefValue)
-  else
-    Result := Name;
+  inherited;
+
 end;
 
 procedure TdwsElement.Assign(Source: TPersistent);
 begin
-  inherited;
-  if Source is TdwsElement then begin
-    FIsUserDef := TdwsElement(Source).IsUserDef;
-    FUserDefValue := TdwsElement(Source).UserDefValue;
-  end;
+   inherited;
+   if Source is TdwsElement then begin
+      FIsUserDef := TdwsElement(Source).IsUserDef;
+      FUserDefValue := TdwsElement(Source).UserDefValue;
+   end;
 end;
 
 procedure TdwsElement.SetIsUserDef(const Value: Boolean);
 begin
-  FIsUserDef := Value;
-  if not Value then
-    FUserDefValue := 0;
+   FIsUserDef := Value;
+   if not Value then
+      FUserDefValue := 0;
+   UpdateDisplayName;
 end;
 
 procedure TdwsElement.SetUserDefValue(const Value: Integer);
 begin
-  FIsUserDef := True;
-  FUserDefValue := Value;
+   FIsUserDef := True;
+   FUserDefValue := Value;
+   UpdateDisplayName;
 end;
+
+procedure TdwsElement.UpdateDisplayName;
+begin
+   TdwsSymbol(Collection.Owner).UpdateDisplayName;
+
+   if FIsUserDef then
+     FDisplayName := Name + ' = ' + IntToStr(FUserDefValue)
+   else
+     FDisplayName := Name;
+end;
+
 
 // ------------------
 // ------------------ TdwsCustomInstance ------------------
@@ -5728,51 +5801,51 @@ begin
    if Table.AddrGenerator=nil then
       raise Exception.Create(UNT_InstancesNotSupportedInStaticUnits);
 
-  // Get the type symbol of this variable
-  typSym := GetDataType(systemTable, Table, DataType);
+   // Get the type symbol of this variable
+   typSym := GetDataType(systemTable, Table, DataType);
 
-  if typSym is TClassSymbol then
-  begin
-    funcSym := TFuncSymbol.Create('', fkFunction, 1);
-    funcSym.Typ := typSym;
+   if typSym is TClassSymbol then
+   begin
+      funcSym := TFuncSymbol.Create('', fkFunction, 1);
+      funcSym.Typ := typSym;
 
-    dataSym := TScriptDataSymbol.Create('', typSym);
-    Table.AddSymbol(dataSym);
+      dataSym := TScriptDataSymbol.Create('', typSym);
+      Table.AddSymbol(dataSym);
 
-    instFunc := TInstantiateFunc.Create(funcSym);
-    instFunc.DataSym := dataSym;
-    instFunc.FClassSym := TClassSymbol(typSym);
-    instFunc.OnInstantiate := DoInstantiate;
-    instFunc.OnObjectDestroy := DoDestroy;
-    instFunc.OnInitSymbol := DoInitSymbol;
-    instFunc.OnInitExpr := DoInitExpr;
-    funcSym.Executable := ICallable(instFunc);
+      instFunc := TInstantiateFunc.Create(funcSym);
+      instFunc.DataSym := dataSym;
+      instFunc.FClassSym := TClassSymbol(typSym);
+      instFunc.OnInstantiate := DoInstantiate;
+      instFunc.OnObjectDestroy := DoDestroy;
+      instFunc.OnInitSymbol := DoInitSymbol;
+      instFunc.OnInitExpr := DoInitExpr;
+      funcSym.Executable := ICallable(instFunc);
 
-    Result := TExternalVarSymbol.Create(Name, typSym);
-    TExternalVarSymbol(Result).ReadFunc := funcSym;
-  end
-  else
-    raise Exception.CreateFmt(UNT_AutoInstantiateWithoutClass, [DataType]);
+      Result := TExternalVarSymbol.Create(Name, typSym);
+      TExternalVarSymbol(Result).ReadFunc := funcSym;
+   end
+   else
+      raise Exception.CreateFmt(UNT_AutoInstantiateWithoutClass, [DataType]);
 
-  GetUnit.Table.AddSymbol(Result);
+   GetUnit.Table.AddSymbol(Result);
 end;
 
 procedure TdwsCustomInstance.DoInitSymbol(Sender: TObject; Symbol: TSymbol);
 begin
-  if Assigned(FOnInitSymbol) then
-    FOnInitSymbol(Self,Symbol)
+   if Assigned(FOnInitSymbol) then
+      FOnInitSymbol(Self,Symbol)
 end;
 
 procedure TdwsCustomInstance.DoInitExpr(Sender: TObject; Expr: TExprBase);
 begin
-  if Assigned(FOnInitExpr) then
-    FOnInitExpr(Self,Expr)
+   if Assigned(FOnInitExpr) then
+      FOnInitExpr(Self,Expr)
 end;
 
 procedure TdwsCustomInstance.DoInstantiate(info : TProgramInfo; var ExternalObject: TObject);
 begin
-  if Assigned(FOnInstantiate) then
-    FOnInstantiate(info, ExternalObject);
+   if Assigned(FOnInstantiate) then
+      FOnInstantiate(info, ExternalObject);
 end;
 
 { TdwsFunctions }
@@ -6156,7 +6229,7 @@ end;
 //
 function TdwsElements.Add : TdwsElement;
 begin
-   Result:=TdwsElement(inherited Add);
+   Result := TdwsElement(inherited Add);
 end;
 
 { TdwsSynonyms }
