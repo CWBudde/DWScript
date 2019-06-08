@@ -24,7 +24,8 @@ unit dwsScriptSource;
 interface
 
 uses
-   SysUtils, dwsStrings, dwsUtils, dwsXPlatform;
+   SysUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsUtils, dwsXPlatform;
 
 type
 

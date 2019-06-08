@@ -25,7 +25,7 @@ interface
 
 uses
    Classes, Math,
-   dwsUtils, dwsStrings,
+   dwsUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsFunctions, dwsExprs, dwsSymbols, dwsMagicExprs, dwsXPlatform, dwsExprList;
 
 type

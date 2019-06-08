@@ -25,7 +25,8 @@ interface
 
 uses
    Variants,
-   dwsErrors, dwsStrings, dwsUtils, dwsScriptSource, dwsCompilerContext,
+   dwsErrors, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsUtils, dwsScriptSource, dwsCompilerContext,
    dwsSymbols, dwsDataContext, dwsStack, dwsFunctions,
    dwsExprs, dwsExprList;
 

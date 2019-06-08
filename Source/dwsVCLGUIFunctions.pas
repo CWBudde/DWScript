@@ -25,7 +25,7 @@ interface
 
 uses
    Windows, Forms, Dialogs, Classes,
-   dwsUtils, dwsStrings,
+   dwsUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsFunctions, dwsExprs, dwsSymbols, dwsMagicExprs, dwsExprList;
 
 type

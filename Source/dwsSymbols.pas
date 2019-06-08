@@ -3604,7 +3604,7 @@ begin
       paramRec:=@FuncParams[i];
       if (typSym=nil) or not UnicodeSameText(typSym.Name, paramRec.ParamType) then
          typSym:=Table.FindTypeSymbol(paramRec.ParamType, cvMagic);
-      if (typSym = nil) and (paramRec.ParamType = 'array of Any Type') then begin
+      if (typSym = nil) and (paramRec.ParamType = SYS_ARRAY_OF_ANY) then begin
          typSym := TDynamicArraySymbol.Create('', table.FindTypeSymbol(SYS_ANY_TYPE, cvPublic), Table.FindTypeSymbol(SYS_INTEGER, cvPublic));
          table.AddSymbol(typSym);
       end;
@@ -7260,7 +7260,7 @@ end;
 //
 function TDynamicArraySymbol.GetCaption : String;
 begin
-   Result := 'array of '+Typ.Caption
+   Result := SYS_ARRAY_OF + ' ' + Typ.Caption
 end;
 
 // InitData
@@ -7518,7 +7518,7 @@ end;
 //
 function TOpenArraySymbol.GetCaption : String;
 begin
-   Result:='array of const';
+   Result := SYS_ARRAY_OF_CONST;
 end;
 
 // ------------------

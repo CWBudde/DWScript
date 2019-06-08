@@ -23,7 +23,8 @@ interface
 
 uses
    Classes, SysUtils, Types, StrUtils, Masks, Variants,
-   dwsStrings, dwsXPlatform, Math, dwsXXHash;
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsXPlatform, Math, dwsXXHash;
 
 type
 
@@ -2170,7 +2171,7 @@ procedure VariantToInt64(const v : Variant; var r : Int64);
          // workaround for RTL bug that will sometimes report a failed cast to Int64
          // as being a failed cast to Boolean
          on E : EVariantError do begin
-            raise EdwsVariantTypeCastError.Create(v, 'Integer', E);
+            raise EdwsVariantTypeCastError.Create(v, SYS_INTEGER, E);
          end else raise;
       end;
    end;

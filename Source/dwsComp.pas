@@ -2868,13 +2868,13 @@ begin
       varData := PVarData(@FValue);
       case varData^.VType of
          varSmallint, varInteger, varShortInt .. varUInt64 :
-            DataType := 'Integer';
+            DataType := SYS_INTEGER;
          varBoolean :
-            DataType := 'Boolean';
+            DataType := SYS_BOOLEAN;
          varSingle, varDouble :
-            DataType := 'Integer';
+            DataType := SYS_INTEGER;
          varString {$IFNDEF FPC}, varUString {$ENDIF}:
-            DataType := 'String';
+            DataType := SYS_STRING;
       end;
    end;
 
@@ -4982,17 +4982,17 @@ begin
          case tok.TestAny([ttStrVal, ttIntVal, ttFloatVal]) of
             ttStrVal : begin
                IndexValue := tok.GetToken.AsString;
-               IndexType := 'String';
+               IndexType := SYS_STRING;
                tok.KillToken;
             end;
             ttIntVal : begin
                IndexValue := tok.GetToken.FInteger;
-               IndexType := 'Integer';
+               IndexType := SYS_INTEGER;
                tok.KillToken;
             end;
             ttFloatVal : begin
                IndexValue := tok.GetToken.FFloat;
-               IndexType := 'Float';
+               IndexType := SYS_FLOAT;
                tok.KillToken;
             end;
             else

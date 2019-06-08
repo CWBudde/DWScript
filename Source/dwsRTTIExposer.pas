@@ -22,7 +22,7 @@ interface
 
 uses
    Classes, SysUtils, RTTI, TypInfo,
-   dwsXPlatform, dwsStrings,
+   dwsXPlatform, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsComp, dwsSymbols, dwsExprs, dwsStack, dwsInfo;
 
 type
@@ -200,8 +200,8 @@ implementation
 // ------------------------------------------------------------------
 const
   cTYPEKIND_NAMES: array[TTypeKind] of string = (
-    'Unknown', 'Integer', 'Char', 'Enumeration', 'Float',
-    'String', 'Set', 'Class', 'Method', 'WChar', 'LString', 'WString',
+    'Unknown', SYS_INTEGER, 'Char', 'Enumeration', SYS_FLOAT,
+    SYS_STRING, 'Set', SYS_CLASS, 'Method', 'WChar', 'LString', 'WString',
     'Variant', 'Array', 'Record', 'Interface', 'Int64', 'DynArray', 'UString',
     'ClassRef', 'Pointer', 'Procedure');
 

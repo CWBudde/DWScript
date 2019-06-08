@@ -505,7 +505,7 @@ begin
          FDebugLastEvalResult:='';
          FDebugger.BeginDebug(exec);
          try
-            CheckEquals('array of String', FDebugLastEvalResult, 'a at line 2');
+            CheckEquals(SYS_ARRAY_OF_STRING, FDebugLastEvalResult, 'a at line 2');
          finally
             FDebugger.EndDebug;
          end;

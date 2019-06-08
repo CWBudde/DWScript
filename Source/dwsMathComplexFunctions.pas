@@ -23,7 +23,9 @@ interface
 uses
    SysUtils,
    dwsUtils, dwsXPlatform, dwsCompilerContext, dwsScriptSource,
-   dwsFunctions, dwsSymbols, dwsExprs, dwsStrings, dwsOperators, dwsExprList,
+   dwsFunctions, dwsSymbols, dwsExprs,
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsOperators, dwsExprList,
    dwsTokenizer,dwsMagicExprs, dwsUnitSymbols, dwsDataContext;
 
 type

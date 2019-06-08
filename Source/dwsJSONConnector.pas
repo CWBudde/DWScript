@@ -24,7 +24,8 @@ uses
    Classes, SysUtils, Variants,
    dwsLanguageExtension, dwsComp, dwsCompiler, dwsDataContext, dwsExprList,
    dwsExprs, dwsTokenizer, dwsSymbols, dwsErrors, dwsCoreExprs, dwsStack,
-   dwsStrings, dwsXPlatform, dwsUtils, dwsOperators, dwsUnitSymbols,
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsXPlatform, dwsUtils, dwsOperators, dwsUnitSymbols,
    dwsFunctions, dwsJSON, dwsMagicExprs, dwsConnectorSymbols, dwsScriptSource,
    dwsXXHash, dwsCompilerContext, dwsCompilerUtils, dwsUnicode;
 
@@ -621,11 +622,11 @@ begin
    );
 
    TJSONParseIntegerArrayMethod.Create(
-      table, SYS_JSON_PARSE_INTEGER_ARRAY, ['str', SYS_STRING], 'array of integer',
+      table, SYS_JSON_PARSE_INTEGER_ARRAY, ['str', SYS_STRING], SYS_ARRAY_OF_INTEGER,
       [iffStaticMethod], jsonObject, ''
    );
    TJSONParseFloatArrayMethod.Create(
-      table, SYS_JSON_PARSE_FLOAT_ARRAY, ['str', SYS_STRING], 'array of float',
+      table, SYS_JSON_PARSE_FLOAT_ARRAY, ['str', SYS_STRING], SYS_ARRAY_OF_FLOAT,
       [iffStaticMethod], jsonObject, ''
    );
    TJSONParseStringArrayMethod.Create(

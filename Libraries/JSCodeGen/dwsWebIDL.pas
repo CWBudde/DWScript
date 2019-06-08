@@ -758,12 +758,12 @@ end;
 
 function TWiSequence.GetPascalTypeName: string;
 begin
-   Result := 'array of ' + FElementType.PascalTypeName;
+   Result := SYS_ARRAY_OF + ' ' + FElementType.PascalTypeName;
 end;
 
 function TWiSequence.GetTypeName: string;
 begin
-   Result := 'array of ' + FElementType.TypeName;
+   Result := SYS_ARRAY_OF + ' ' + FElementType.TypeName;
 end;
 
 
@@ -771,12 +771,12 @@ end;
 
 function TWiArray.GetPascalTypeName: string;
 begin
-   Result := 'array of ' + FElementType.PascalTypeName;
+   Result := SYS_ARRAY_OF + ' ' + FElementType.PascalTypeName;
 end;
 
 function TWiArray.GetTypeName: string;
 begin
-   Result := 'array of ' + FElementType.TypeName;
+   Result := SYS_ARRAY_OF + ' ' + FElementType.TypeName;
 end;
 
 

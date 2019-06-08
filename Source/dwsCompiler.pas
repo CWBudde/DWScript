@@ -14508,11 +14508,11 @@ begin
       sysTable.AddSymbol(sysTable.TypVariant);
    end;
    if sysTable.TypVariant<>nil then begin
-      sysTable.AddSymbol(TConstSymbol.CreateValue('Null', sysTable.TypVariant, Null));
-      sysTable.AddSymbol(TConstSymbol.CreateValue('Unassigned', sysTable.TypVariant, Unassigned));
+      sysTable.AddSymbol(TConstSymbol.CreateValue(SYS_NULL, sysTable.TypVariant, Null));
+      sysTable.AddSymbol(TConstSymbol.CreateValue(SYS_UNASSIGNED, sysTable.TypVariant, Unassigned));
       if sysTable.TypVariant.SupportsEmptyParam then
          sysTable.AddSymbol(TConstSymbol.CreateValue('EmptyParam', sysTable.TypVariant, EmptyParam));
-      sysTable.AddSymbol(TOpenArraySymbol.Create('array of const', sysTable.TypVariant, sysTable.TypInteger));
+      sysTable.AddSymbol(TOpenArraySymbol.Create(SYS_ARRAY_OF_CONST, sysTable.TypVariant, sysTable.TypInteger));
    end;
 
    sysTable.TypNil:=TNilSymbol.Create;
@@ -14606,8 +14606,8 @@ begin
 
    // Runtime parameters
    if sysTable.TypVariant<>nil then
-      TParamFunc.Create(sysTable, 'Param', ['Index', SYS_INTEGER], SYS_VARIANT, []);
-   TParamStrFunc.Create(sysTable, 'ParamStr', ['Index', SYS_INTEGER], SYS_STRING, []);
+      TParamFunc.Create(sysTable, 'Param', [SYS_INDEX, SYS_INTEGER], SYS_VARIANT, []);
+   TParamStrFunc.Create(sysTable, 'ParamStr', [SYS_INDEX, SYS_INTEGER], SYS_STRING, []);
    TParamCountFunc.Create(sysTable, 'ParamCount', [], SYS_INTEGER, []);
 
    // CompilerVersion

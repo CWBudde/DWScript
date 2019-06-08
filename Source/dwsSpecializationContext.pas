@@ -19,7 +19,8 @@ unit dwsSpecializationContext;
 interface
 
 uses
-   dwsUtils, dwsSymbols, dwsScriptSource, dwsErrors, dwsStrings,
+   dwsUtils, dwsSymbols, dwsScriptSource, dwsErrors,
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsCompilerContext, dwsOperators, dwsXPlatform, dwsSpecializationMap;
 
 type

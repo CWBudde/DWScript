@@ -25,7 +25,8 @@ interface
 
 uses
   SysUtils, Classes, TypInfo,
-  dwsScriptSource, dwsErrors, dwsStrings, dwsXPlatform, dwsUtils, dwsXXHash
+  dwsScriptSource, dwsErrors, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+  dwsXPlatform, dwsUtils, dwsXXHash
   {$ifdef FPC},lazutf8{$endif};
 
 type

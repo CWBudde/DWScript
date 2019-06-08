@@ -201,20 +201,20 @@ type
    TVarTypeRec = packed record n : String; v : Word; end;
 const
    cVarTypes : array [0..24] of TVarTypeRec = (
-      (n:'Empty'; v:varEmpty),         (n:'Null'; v:varNull),
-      (n:'Smallint'; v:varSmallint),   (n:'Integer'; v:varInteger),
+      (n:'Empty'; v:varEmpty),         (n:SYS_NULL; v:varNull),
+      (n:'Smallint'; v:varSmallint),   (n:SYS_INTEGER; v:varInteger),
       (n:'Single'; v:varSingle),       (n:'Double'; v:varDouble),
       (n:'Currency'; v:varCurrency),   (n:'Date'; v:varDate),
       (n:'OleStr'; v:varOleStr),       (n:'Dispatch'; v:varDispatch),
-      (n:'Error'; v:varError),         (n:'Boolean'; v:varBoolean),
+      (n:'Error'; v:varError),         (n:SYS_BOOLEAN; v:varBoolean),
       (n:'Variant'; v:varVariant),     (n:'Unknown'; v:varUnknown),
       (n:'ShortInt'; v:varShortInt),   (n:'Byte'; v:varByte),
       (n:'Word'; v:varWord),           (n:'LongWord'; v:varLongWord),
       (n:'Int64'; v:varInt64),         (n:'StrArg'; v:varStrArg),
       {$ifdef FPC}
-      (n:'String'; v:varString),
+      (n:SYS_STRING; v:varString),
       {$else}
-      (n:'String'; v:varUString),
+      (n:SYS_STRING; v:varUString),
       {$endif}
       (n:'Any'; v:varAny),             (n:'TypeMask'; v:varTypeMask),
       (n:'Array'; v:varArray),         (n:'ByRef'; v:varByRef) );

@@ -21,7 +21,8 @@ interface
 
 uses Classes, SysUtils, Character,
    dwsExprs, dwsSymbols, dwsErrors, dwsUtils, dwsCoreExprs, dwsTokenizer,
-   dwsStrings, dwsUnitSymbols, dwsSymbolDictionary,
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsUnitSymbols, dwsSymbolDictionary,
    dwsGabelou, dwsGabelouStrings;
 
 type

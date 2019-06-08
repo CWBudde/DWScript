@@ -20,10 +20,56 @@
 unit dwsStrings;
 
 {$I dws.inc}
+{$DEFINE GERMAN}
 
 interface
 
 const
+{$IFDEF GERMAN}
+  // Constants of "System.pas"
+  SYS_INTEGER = 'Zahl';
+  SYS_FLOAT = 'Kommazahl';
+  SYS_STRING = 'Text';
+  SYS_BOOLEAN = 'Boolesch';
+  SYS_VARIANT = 'Variant';
+  SYS_VOID = 'Leere';
+  SYS_RESULT = 'Ergebnis';
+  SYS_SELF = 'Selbst';
+  SYS_INTERNAL = 'Intern';
+  SYS_SYSTEM = 'System';
+  SYS_DEFAULT = 'Default';
+  SYS_OBJECT = 'Objekt';
+  SYS_TCLASS = 'TKlasse';
+  SYS_TOBJECT = 'TObjekt';
+  SYS_TOBJECT_CREATE = 'Erzeuge';
+  SYS_TOBJECT_DESTROY = 'Vernichte';
+  SYS_TOBJECT_FREE = 'Befreie';
+  SYS_TOBJECT_CLASSNAME = 'KlassenName';
+  SYS_TOBJECT_CLASSTYPE = 'KlassenTyp';
+  SYS_TOBJECT_CLASSPARENT = 'KlassenEltern';
+  SYS_EXCEPTION = 'Ausnahme';
+  SYS_EXCEPTION_MESSAGE = 'Nachricht';
+  SYS_EXCEPTION_MESSAGE_FIELD = 'FNachricht';
+  SYS_EXCEPTION_STACKTRACE = 'StapelSpur';
+  SYS_EXCEPTION_DEBUGGER_FIELD = 'FDebuggerFeld';
+  SYS_EASSERTIONFAILED = 'EAnnahmeFehlgeschlagen';
+  SYS_EDELPHI = 'EDelphi';
+  SYS_EDELPHI_EXCEPTIONCLASS = 'AusnahmeKlasse';
+  SYS_EDELPHI_EXCEPTIONCLASS_FIELD = 'FAusnahmeKlasse';
+  SYS_TCUSTOMATTRIBUTE = 'TCustomAttribute';
+  SYS_IINTERFACE = 'ISchnittstelle';
+  SYS_ANY_TYPE = 'Jeder Typ';
+  SYS_NULL = 'Null';
+  SYS_UNASSIGNED = 'Unzugewiesen';
+  SYS_INDEX = 'Index';
+
+  SYS_ARRAY_OF = 'feld von';
+  SYS_ARRAY_OF_CONST = 'feld von konstant';
+  SYS_ARRAY_OF_STRING = 'feld von Text';
+  SYS_ARRAY_OF_INTEGER = 'feld von Zahl';
+  SYS_ARRAY_OF_FLOAT = 'feld of Kommazahl';
+  SYS_ARRAY_OF_ANY = 'feld von Irgendeinem Type';
+{$ELSE}
   // Constants of "System.pas"
   SYS_INTEGER = 'Integer';
   SYS_FLOAT = 'Float';
@@ -57,10 +103,16 @@ const
   SYS_TCUSTOMATTRIBUTE = 'TCustomAttribute';
   SYS_IINTERFACE = 'IInterface';
   SYS_ANY_TYPE = 'Any Type';
+  SYS_NULL = 'Null';
+  SYS_UNASSIGNED = 'Unassigned';
+  SYS_INDEX = 'Index';
 
+  SYS_ARRAY_OF = 'array of';
+  SYS_ARRAY_OF_CONST = 'array of const';
   SYS_ARRAY_OF_STRING = 'array of String';
   SYS_ARRAY_OF_INTEGER = 'array of Integer';
   SYS_ARRAY_OF_FLOAT = 'array of Float';
+{$ENDIF}
 
   SYS_COMPILER_VERSION = 'CompilerVersion';
 

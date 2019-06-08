@@ -21,7 +21,8 @@ unit dwsRTTIFunctions;
 interface
 
 uses
-   dwsFunctions, dwsSymbols, dwsExprs, dwsStrings, dwsOperators,
+   dwsFunctions, dwsSymbols, dwsExprs, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsOperators,
    dwsStack, dwsDataContext, dwsExprList, dwsInfo, dwsLegacy,
    dwsTokenizer, SysUtils, dwsUtils, dwsMagicExprs, dwsUnitSymbols, dwsCoreExprs;
 
@@ -186,7 +187,7 @@ begin
                                [], SYS_INTEGER,
                                clsMethAttribute, cvPublic, systemTable);
    TRTTIMethodCallMethod.Create(mkFunction, [], 'Call',
-                                ['instance', SYS_VARIANT, 'args', 'array of const'], SYS_VARIANT,
+                                ['instance', SYS_VARIANT, 'args', SYS_ARRAY_OF_CONST], SYS_VARIANT,
                                 clsMethAttribute, cvPublic, systemTable);
 
    systemTable.AddSymbol(

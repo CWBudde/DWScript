@@ -25,7 +25,8 @@ interface
 
 uses
    Classes, SysUtils, StrUtils, Math, Masks, Character,
-   dwsXPlatform, dwsUtils, dwsStrings,
+   dwsXPlatform, dwsUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+
    dwsFunctions, dwsSymbols, dwsExprs, dwsCoreExprs, dwsExprList,
    dwsConstExprs, dwsMagicExprs, dwsDataContext, dwsWebUtils, dwsJSON;
 
@@ -1368,7 +1369,7 @@ initialization
    RegisterInternalStringFunction(TStrToJSONFunc, 'StrToJSON', ['str', SYS_STRING], [iffStateLess], 'ToJSON');
    RegisterInternalStringFunction(TStrToXMLFunc, 'StrToXML', ['str', SYS_STRING], [iffStateLess], 'ToXML');
 
-   RegisterInternalStringFunction(TFormatFunc, 'Format', ['fmt', SYS_STRING, 'args', 'array of const'], [iffStateLess], 'Format');
+   RegisterInternalStringFunction(TFormatFunc, 'Format', ['fmt', SYS_STRING, 'args', SYS_ARRAY_OF_CONST], [iffStateLess], 'Format');
 
    RegisterInternalStringFunction(TCharAtFunc, 'CharAt', ['s', SYS_STRING, 'x', SYS_INTEGER], [iffStateLess, iffDeprecated]);
 
@@ -1421,7 +1422,7 @@ initialization
 
    RegisterInternalStringFunction(TStrReplaceFunc, 'StrReplace', ['str', SYS_STRING, 'sub', SYS_STRING,  'newSub', SYS_STRING], [iffStateLess], 'Replace');
    RegisterInternalStringFunction(TStrReplaceMacrosFunc, 'StrReplaceMacros',
-                                  ['str', SYS_STRING, 'macros', 'array of String',
+                                  ['str', SYS_STRING, 'macros', SYS_ARRAY_OF_STRING,
                                    'macroStart', SYS_STRING, 'macroEnd=', SYS_STRING], [iffStateLess], 'ReplaceMacros');
 
    RegisterInternalStringFunction(TStringOfCharFunc, 'StringOfChar', ['ch', SYS_STRING, 'count', SYS_INTEGER], []);

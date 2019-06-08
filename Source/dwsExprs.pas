@@ -7519,7 +7519,7 @@ end;
 //
 function TScriptDynamicArray.ToString : String;
 begin
-   Result := 'array of '+FElementTyp.Name;
+   Result := SYS_ARRAY_OF + ' ' + FElementTyp.Name;
 end;
 
 // ToStringArray

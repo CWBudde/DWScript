@@ -25,7 +25,8 @@ interface
 
 uses
    Classes, SysUtils,
-   dwsUtils, dwsStrings, dwsXPlatform, dwsDateTime,
+   dwsUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsXPlatform, dwsDateTime,
    dwsFunctions, dwsExprs, dwsSymbols, dwsUnitSymbols, dwsExprList,
    dwsMagicExprs, dwsExternalSymbols, dwsWebUtils;
 

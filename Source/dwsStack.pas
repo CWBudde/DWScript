@@ -25,7 +25,8 @@ interface
 
 uses
    Variants, Classes, SysUtils,
-   dwsStrings, dwsUtils, dwsXPlatform, dwsDataContext;
+   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
+   dwsUtils, dwsXPlatform, dwsDataContext;
 
 type
 

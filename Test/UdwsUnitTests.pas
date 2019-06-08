@@ -428,7 +428,7 @@ begin
    func.ResultType:='String';
    param:=func.Parameters.Add;
    param.Name:='p';
-   param.DataType:='array of const';
+   param.DataType:=SYS_ARRAY_OF_CONST;
    func.OnEval:=FuncOpenArrayEval;
 
    func:=FUnit.Functions.Add;
@@ -1911,7 +1911,7 @@ begin
 
       astr:=exec.Info.Vars['astr'];
 
-      CheckEquals('array of String', astr.ValueAsString, 'as string');
+      CheckEquals(SYS_ARRAY_OF_STRING, astr.ValueAsString, 'as string');
 
       CheckEquals(0, astr.Member['low'].ValueAsInteger, 'low');
       CheckEquals(1, astr.Member['high'].ValueAsInteger, 'high');
