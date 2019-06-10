@@ -5291,7 +5291,7 @@ end;
 
 function TdwsForward.GetDisplayName: String;
 begin
-  Result := Format('type %s = class;', [Name]);
+   Result := Format('type %s = class;', [Name]);
 end;
 
 { TReadVarEventFunc }
@@ -5300,9 +5300,14 @@ procedure TReadVarEventFunc.Execute(info : TProgramInfo);
 var
   Value: Variant;
 begin
-  if Assigned(FOnReadVar) then
-    FOnReadVar(info, Value);
-  Info.ResultAsVariant := Value;
+   if Assigned(FOnReadVar) then
+      FOnReadVar(info, Value);
+
+   // fix variant type
+   if PVarData(@Value).VType = varInteger then
+      PVarData(@Value).VType := varInt64;
+
+   Info.ResultAsVariant := Value;
 end;
 
 { TWriteVarEventFunc }
