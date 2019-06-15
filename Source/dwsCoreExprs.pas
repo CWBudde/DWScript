@@ -9908,7 +9908,7 @@ begin
       end else begin
          i := 0;
          while i < dyn.ArrayLength do begin
-            dyn.CopyData(i*dyn.ElementSize, destPVariant^, 0, dyn.ElementSize);
+            dyn.CopyData(i*dyn.ElementSize, TData(destPVariant^), 0, dyn.ElementSize);
             destPVariant := callback(i);
             Inc(i);
          end;
