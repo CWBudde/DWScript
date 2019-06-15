@@ -20,7 +20,7 @@ interface
 
 uses
    System.SysUtils, System.Generics.Collections, dwsErrors, dwsTokenizer,
-   dwsUtils, dwsCssTokenizer;
+   dwsUtils, dwsCssTokenizer, dwsScriptSource;
 
 type
    TCssSimpleSelector = class;
