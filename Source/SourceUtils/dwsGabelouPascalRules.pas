@@ -4,10 +4,11 @@ unit dwsGabelouPascalRules;
 
 interface
 
-uses Classes, SysUtils, Character,
+uses
+   Classes, SysUtils, Character,
    dwsExprs, dwsSymbols, dwsErrors, dwsUtils, dwsCoreExprs, dwsTokenizer,
-   dwsStrings, dwsUnitSymbols,
-   dwsGabelou, dwsGabelouStrings;
+   dwsStrings, dwsUnitSymbols, dwsGabelou, dwsGabelouStrings,
+   dwsSymbolDictionary;
 
 type
    TGR_InfixCapsParameters = class abstract (TdwsSymbolDictionaryGabelouRule)
