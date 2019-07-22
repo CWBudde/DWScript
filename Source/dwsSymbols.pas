@@ -391,6 +391,8 @@ type
          function GetCount : Integer; inline;
 
          procedure SortSymbols(minIndex, maxIndex : Integer);
+
+      strict private
          function FindLocalSorted(const name : String) : TSymbol;
          function FindLocalUnSorted(const name : String) : TSymbol;
 
@@ -778,7 +780,8 @@ type
    end;
 
    TFuncSymbolFlag = (fsfStateless, fsfExternal, fsfType, fsfOverloaded, fsfLambda,
-                      fsfInline, fsfProperty, fsfExport, fsfOfObject);
+                      fsfInline, fsfProperty, fsfExport,
+                      fsfOfObject, fsfReferenceTo);
    TFuncSymbolFlags = set of TFuncSymbolFlag;
 
    // A script function / procedure: procedure X(param: Integer);
@@ -796,25 +799,30 @@ type
          FExternalName : String;
          FExternalConvention: TTokenType;
 
-         procedure SetType(const Value: TTypeSymbol);
+         procedure SetType(const value : TTypeSymbol);
+
          function GetCaption : String; override;
          function GetDescription : String; override;
          function GetLevel : SmallInt; inline;
          function GetParamSize : Integer; inline;
+
          function GetIsStateless : Boolean; inline;
-         procedure SetIsStateless(const val : Boolean);
+         procedure SetIsStateless(const val : Boolean); inline;
          function GetIsExternal : Boolean; inline;
-         procedure SetIsExternal(const val : Boolean);
+         procedure SetIsExternal(const val : Boolean); inline;
          function GetIsExport : Boolean; inline;
-         procedure SetIsExport(const val : Boolean);
+         procedure SetIsExport(const val : Boolean); inline;
          function GetIsProperty : Boolean; inline;
-         procedure SetIsProperty(const val : Boolean);
+         procedure SetIsProperty(const val : Boolean); inline;
          function GetIsOverloaded : Boolean; inline;
-         procedure SetIsOverloaded(const val : Boolean);
+         procedure SetIsOverloaded(const val : Boolean); inline;
          function GetIsLambda : Boolean; inline;
-         procedure SetIsLambda(const val : Boolean);
+         procedure SetIsLambda(const val : Boolean); inline;
          function GetIsOfObject : Boolean; inline;
-         procedure SetIsOfObject(const val : Boolean);
+         procedure SetIsOfObject(const val : Boolean); inline;
+         function GetIsReferenceTo : Boolean; inline;
+         procedure SetIsReferenceTo(const val : Boolean); inline;
+
          function GetSourcePosition : TScriptPos; virtual;
          procedure SetSourcePosition(const val : TScriptPos); virtual;
          function GetExternalName : String;
@@ -867,6 +875,7 @@ type
          property IsExport : Boolean read GetIsExport write SetIsExport;
          property IsProperty : Boolean read GetIsProperty write SetIsProperty;
          property IsOfObject : Boolean read GetIsOfObject write SetIsOfObject;
+         property IsReferenceTo : Boolean read GetIsReferenceTo write SetIsReferenceTo;
          property Kind : TFuncKind read FKind write FKind;
          property ExternalName : String read GetExternalName write FExternalName;
          function HasExternalName : Boolean;
@@ -1348,7 +1357,7 @@ type
          FFirstField : TFieldSymbol;
 
       protected
-         function CreateMembersTable : TMembersSymbolTable; virtual;
+         function CreateMembersTable(addrGenerator : TAddrGenerator) : TMembersSymbolTable; virtual;
 
          function GetIsStatic : Boolean; virtual;
          function GetIsExternal : Boolean; virtual;
@@ -2572,9 +2581,9 @@ end;
 constructor TCompositeTypeSymbol.Create(const name : String; aUnit : TSymbol);
 begin
    inherited Create(name, nil);
-   FUnitSymbol:=aUnit;
-   FMembers:=CreateMembersTable;
-   FFirstField:=cFirstFieldUnprepared;
+   FUnitSymbol := aUnit;
+   FMembers := CreateMembersTable(nil);
+   FFirstField := cFirstFieldUnprepared;
 end;
 
 // Destroy
@@ -2665,9 +2674,9 @@ end;
 
 // CreateMembersTable
 //
-function TCompositeTypeSymbol.CreateMembersTable : TMembersSymbolTable;
+function TCompositeTypeSymbol.CreateMembersTable(addrGenerator : TAddrGenerator) : TMembersSymbolTable;
 begin
-   Result:=TMembersSymbolTable.Create(nil);
+   Result := TMembersSymbolTable.Create(nil, addrGenerator);
    Result.Owner:=Self;
 end;
 
@@ -3185,7 +3194,9 @@ end;
 //
 function TRecordSymbol.GetCaption : String;
 begin
-   Result:='record '+Name;
+   if Name = '' then
+      Result := 'anonymous record'
+   else Result := 'record ' + Name;
 end;
 
 // GetDescription
@@ -3860,6 +3871,22 @@ begin
    if val then
       Include(FFlags, fsfOfObject)
    else Exclude(FFlags, fsfOfObject);
+end;
+
+// GetIsReferenceTo
+//
+function TFuncSymbol.GetIsReferenceTo : Boolean;
+begin
+   Result := (fsfReferenceTo in FFlags);
+end;
+
+// SetIsReferenceTo
+//
+procedure TFuncSymbol.SetIsReferenceTo(const val : Boolean);
+begin
+   if val then
+      Include(FFlags, fsfReferenceTo)
+   else Exclude(FFlags, fsfReferenceTo);
 end;
 
 // GetSourcePosition
@@ -6371,12 +6398,14 @@ var
    i : Integer;
    ptrList : PObjectTightList;
 begin
-   ptrList:=FSymbols.List;
-   for i:=FSymbols.Count-1 downto 0 do begin
-      if UnicodeCompareText(TSymbol(ptrList[i]).Name, Name)=0 then
-         Exit(TSymbol(ptrList[i]));
+   if FSymbols.Count > 0 then begin
+      ptrList := FSymbols.List;
+      for i := FSymbols.Count-1 downto 0 do begin
+         if UnicodeCompareText(TSymbol(ptrList[i]).Name, Name)=0 then
+            Exit(TSymbol(ptrList[i]));
+      end;
    end;
-   Result:=nil;
+   Result := nil;
 end;
 
 // FindSymbol
@@ -6929,10 +6958,25 @@ end;
 // FindLocal
 //
 function TUnSortedSymbolTable.FindLocal(const aName : String; ofClass : TSymbolClass = nil) : TSymbol;
+var
+   n : Integer;
+   ptrList : PPointer;
 begin
-   Result:=FindLocalUnSorted(aName);
-   if (Result<>nil) and (ofClass<>nil) and (not (Result is ofClass)) then
-      Result:=nil;
+   n := FSymbols.Count;
+   if n > 0 then begin
+      ptrList := PPointer(FSymbols.List);
+      repeat
+         Result := TSymbol(ptrList^);
+         if UnicodeCompareText(Result.Name, aName) = 0 then begin
+            if (ofClass<>nil) and (not (Result is ofClass)) then
+               Result := nil;
+            Exit;
+         end;
+         Inc(ptrList);
+         Dec(n);
+      until n <= 0;
+   end;
+   Result := nil;
 end;
 
 // IndexOf

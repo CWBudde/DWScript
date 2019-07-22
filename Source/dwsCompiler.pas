@@ -233,7 +233,7 @@ type
                           tcParameter, tcResult, tcOperand, tcExceptionClass,
                           tcProperty, tcHelper, tcGeneric);
 
-   TdwsReadProcDeclOption = (pdoClassMethod, pdoType, pdoAnonymous);
+   TdwsReadProcDeclOption = (pdoClassMethod, pdoType, pdoAnonymous, pdoReferenceTo);
    TdwsReadProcDeclOptions = set of TdwsReadProcDeclOption;
 
    TdwsUnitSection = (secMixed, secHeader, secProgram, secInterface, secImplementation,
@@ -422,6 +422,9 @@ type
          procedure HintUnusedPrivateSymbols;
          procedure HintUnusedResult(resultSymbol : TDataSymbol);
          procedure HintReferenceConstVarParams(funcSym : TFuncSymbol);
+
+         procedure ReportNoMemberForType(const name : String; const namePos : TScriptPos; typ : TTypeSymbol; fatal : Boolean = True); overload;
+         procedure ReportNoMemberForType(const name : String; const namePos : TScriptPos; base : TTypedExpr); overload;
 
          function GetVarExpr(const aScriptPos: TScriptPos; dataSym : TDataSymbol): TVarExpr;
 
@@ -3302,6 +3305,8 @@ begin
                      Result.IsOfObject := True;
                   end else FMsgs.AddCompilerError(FTok.HotPos, CPE_OfObjectExpected);
                end;
+               if pdoReferenceTo in declOptions then
+                  Result.IsReferenceTo := True;
                ReadProcCallQualifiers(result);
 
             end else begin
@@ -4220,7 +4225,8 @@ begin
                            ttIN, ttIMPLIES, ttIMPLICIT,
                            ttSHL, ttSHR, ttSAR,
                            ttEQ, ttNOTEQ, ttGTR, ttGTREQ, ttLESS, ttLESSEQ,
-                           ttLESSLESS, ttGTRGTR, ttCARET]);
+                           ttLESSLESS, ttGTRGTR, ttCARET,
+                           ttEQEQ, ttEXCLEQ]);
    if tt=ttNone then
       FMsgs.AddCompilerError(FTok.HotPos, CPE_OverloadableOperatorExpected);
 
@@ -5834,7 +5840,7 @@ begin
 
             end else begin
 
-               FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+               ReportNoMemberForType(name, namePos, baseType);
 
             end;
 
@@ -5884,7 +5890,7 @@ begin
 
             end else begin
 
-               FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+               ReportNoMemberForType(name, namePos, baseType);
 
             end;
 
@@ -5927,7 +5933,7 @@ begin
                raise;
             end;
 
-         end else FMsgs.AddCompilerStop(namePos, CPE_NoMemberExpected);
+         end else ReportNoMemberForType(name, namePos, baseType);
 
       end else begin
 
@@ -8103,7 +8109,7 @@ begin
             end;
 
          else
-            FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+            ReportNoMemberForType(name, namePos, baseExpr);
          end;
       except
          OrphanAndNil(Result);
@@ -8184,7 +8190,7 @@ begin
             end;
 
          else
-            FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+            ReportNoMemberForType(name, namePos, baseExpr);
          end;
       except
          OrphanAndNil(Result);
@@ -8220,7 +8226,7 @@ begin
             Result := FUnifiedConstants.CreateInteger(1);
          end else begin
             Result:=nil;
-            FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+            ReportNoMemberForType(name, namePos, baseExpr);
          end;
 
       end;
@@ -8251,7 +8257,7 @@ begin
             Result := ReadIncludeExclude(namePos, amk, baseExpr, namePos);
       else
          Result:=nil;
-         FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [Name]);
+         ReportNoMemberForType(name, namePos, baseExpr);
       end;
 
       if not FTok.TestDelete(ttBRIGHT) then begin
@@ -8274,6 +8280,7 @@ var
    enumeration : TEnumerationSymbol;
    element : TElementSymbol;
    meth : TElementMethod;
+   baseTyp : TTypeSymbol;
 begin
    enumeration:=(baseExpr.Typ.UnAliasedType as TEnumerationSymbol);
 
@@ -8326,8 +8333,11 @@ begin
    else
 
       Result:=nil;
+      if baseExpr <> nil then
+         baseTyp := baseExpr.Typ
+      else baseTyp := nil;
       OrphanAndNil(baseExpr);
-      FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMember, [name]);
+      ReportNoMemberForType(name, namePos, baseTyp);
 
    end;
 end;
@@ -9273,7 +9283,7 @@ begin
    if (not classProperty) and FTok.TestDelete(ttSEMI) then begin
       // property visibility promotion
       if sym=nil then
-         FMsgs.AddCompilerErrorFmt(propNamePos, CPE_UnknownMember, [name])
+         ReportNoMemberForType(name, propNamePos, ownerSym, False)
       else if not (sym is TPropertySymbol) then
          FMsgs.AddCompilerErrorFmt(propNamePos, CPE_NotAProperty, [sym.Name])
       else begin
@@ -10280,7 +10290,7 @@ var
    exprTable : TExpressionSymbolTable;
    oldStructure : TCompositeTypeSymbol;
 begin
-   exprTable:=TExpressionSymbolTable.Create(ownerSymbol.Members);
+   exprTable:=TExpressionSymbolTable.Create(ownerSymbol.Members, ownerSymbol.Members.AddrGenerator);
    oldStructure:=FCurrentStructure;
    try
       FCurrentStructure:=ownerSymbol;
@@ -10296,7 +10306,7 @@ begin
       if exprTable.Count>0 then
          exprTable.TransferSymbolsTo(CurrentProg.Table);
    finally
-      FCurrentStructure:=oldStructure;
+      FCurrentStructure := oldStructure;
       OrphanObject(exprTable);
    end;
 end;
@@ -10326,8 +10336,11 @@ function TdwsCompiler.ReadType(const typeName : String; typeContext : TdwsReadTy
    function ReadProcType(initialToken : TTokenType; const hotPos : TScriptPos) : TTypeSymbol;
    var
       token : TTokenType;
+      declOptions : TdwsReadProcDeclOptions;
    begin
+      declOptions := [ pdoType ];
       if initialToken = ttREFERENCE then begin
+         Include(declOptions, pdoReferenceTo);
          if FTok.TestDelete(ttTO) then begin
             if not (coDelphiDialect in FCompilerContext.Options) then
                FMsgs.AddCompilerHint(FTok.HotPos, CPH_ReferenceToIsLegacy, hlPedantic);
@@ -10341,7 +10354,7 @@ function TdwsCompiler.ReadType(const typeName : String; typeContext : TdwsReadTy
          Assert(initialToken in [ttPROCEDURE, ttFUNCTION]);
          token := initialToken;
       end;
-      Result := ReadProcDecl(token, hotPos, [pdoType]);
+      Result := ReadProcDecl(token, hotPos, declOptions);
       Result.SetName(typeName);
       (Result as TFuncSymbol).SetIsType;
       // close declaration context
@@ -10588,7 +10601,8 @@ begin
    try
       // Read operator
       repeat
-         tt:=FTok.TestDeleteAny([ttEQ, ttNOTEQ, ttLESS, ttLESSEQ, ttGTR, ttGTREQ,
+         tt:=FTok.TestDeleteAny([ttEQ, ttNOTEQ, ttEQEQ, ttEXCLEQ, ttEQEQEQ,
+                                 ttLESS, ttLESSEQ, ttGTR, ttGTREQ,
                                  ttIN, ttIS, ttIMPLEMENTS, ttIMPLIES]);
          case tt of
             ttNone :
@@ -10643,8 +10657,8 @@ begin
                   end;
                else
                   opExpr := CreateTypedOperatorExpr(tt, hotPos, Result, right);
-                  if opExpr=nil then begin
-                     if     ((tt=ttEQ) or (tt=ttNOTEQ))
+                  if opExpr = nil then begin
+                     if     (tt in [ ttEQ, ttNOTEQ, ttEQEQ, ttEXCLEQ ])
                         and (rightTyp<>nil)
                         and (
                                 (Result.Typ is TClassSymbol)
@@ -10660,7 +10674,7 @@ begin
                            else FMsgs.AddCompilerError(hotPos, CPE_InterfaceExpected);
                         end;
                         if Result.Typ is TClassSymbol then
-                           if tt=ttNOTEQ then
+                           if tt in [ ttNOTEQ, ttEXCLEQ ] then
                               Result:=TObjCmpNotEqualExpr.Create(FCompilerContext, hotPos, tt, Result, right)
                            else Result:=TObjCmpEqualExpr.Create(FCompilerContext, hotPos, tt, Result, right)
                         else if Result.Typ is TClassOfSymbol then begin
@@ -10670,13 +10684,13 @@ begin
                            OrphanAndNil(right);
                         end else begin
                            Result:=TIntfCmpExpr.Create(FCompilerContext, hotPos, tt, Result, right);
-                           if tt=ttNOTEQ then
+                           if tt in [ ttNOTEQ, ttEXCLEQ ] then
                               Result:=TNotBoolExpr.Create(FCompilerContext, hotPos, Result);
                         end;
-                     end else if     ((tt=ttEQ) or (tt=ttNOTEQ))
+                     end else if     (tt in [ ttEQ, ttNOTEQ, ttEQEQ, ttEXCLEQ ])
                                  and (rightTyp=FCompilerContext.TypNil)
                                  and (Result.Typ.IsOfType(FCompilerContext.TypVariant)) then begin
-                        if tt=ttEQ then
+                        if tt in [ ttEQ, ttEQEQ ] then
                            Result:=TRelVarEqualNilExpr.Create(FCompilerContext, hotPos, Result)
                         else Result:=TRelVarNotEqualNilExpr.Create(FCompilerContext, hotPos, Result);
                         OrphanAndNil(right);
@@ -11402,9 +11416,11 @@ begin
       ttRECORD :
          Result:=ReadAnonymousRecord;
       ttCLASS : begin
+         if FCompilerContext.Table.AddrGenerator = nil then
+            FMsgs.AddCompilerStop(FTok.HotPos, CPE_AnonymousClassNotAllowedHere);
          if not (coAllowClosures in Options) then
             FMsgs.AddCompilerError(FTok.HotPos, CPE_AnonymousClassNotAllowed);
-         Result:=ReadAnonymousClass;
+         Result := ReadAnonymousClass;
       end;
    else
       if (FTok.TestAny([ttINHERITED, ttNEW])<>ttNone) or FTok.TestName then begin
@@ -11634,8 +11650,8 @@ begin
          FMsgs.AddCompilerStop(FTok.HotPos, CPE_NameExpected);
       sym:=symbol.Members.FindLocal(FTok.GetToken.AsString);
       if not (sym is TFieldSymbol) then begin
-         FMsgs.AddCompilerErrorFmt(FTok.GetToken.FScriptPos, CPE_UnknownMember, [FTok.GetToken.AsString]);
-         sym:=nil;
+         ReportNoMemberForType(FTok.GetToken.AsString, FTok.GetToken.FScriptPos, symbol);
+         sym := nil;
       end;
       memberSym:=TFieldSymbol(sym);
       if memberSym<>nil then begin
@@ -12929,6 +12945,34 @@ begin
       end;
 
    end;
+end;
+
+// ReportNoMemberForType
+//
+procedure TdwsCompiler.ReportNoMemberForType(const name : String; const namePos : TScriptPos; typ : TTypeSymbol; fatal : Boolean = True);
+var
+   typeDescription : String;
+begin
+   if typ = nil then
+      typeDescription := SYS_VOID
+   else if typ.Name = '' then
+      typeDescription := typ.Caption
+   else typeDescription := typ.Name;
+   if fatal then
+      FMsgs.AddCompilerStopFmt(namePos, CPE_UnknownMemberForType, [ name, typeDescription ])
+   else FMsgs.AddCompilerErrorFmt(namePos, CPE_UnknownMemberForType, [ name, typeDescription ]);
+end;
+
+// ReportNoMemberForType
+//
+procedure TdwsCompiler.ReportNoMemberForType(const name : String; const namePos : TScriptPos; base : TTypedExpr);
+var
+   typ : TTypeSymbol;
+begin
+   if base <> nil then
+      typ := base.Typ
+   else typ := nil;
+   ReportNoMemberForType(name, namePos, typ);
 end;
 
 // ReadConnectorSym

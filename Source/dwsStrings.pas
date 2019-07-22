@@ -267,6 +267,7 @@ const
   CPE_AnonymousMethodsNotAllowedHere = 'Anonymous methods not allowed here';
   CPE_AnonymousClassesMustBeFullyDefined = 'Anonymous classes must be fully defined';
   CPE_AnonymousClassNotAllowed = 'Anonymous class not allowed by compiler options';
+  CPE_AnonymousClassNotAllowedHere = 'Anonymous classes not allowed here';
 
   CPE_AttributeConstructorExpected = 'Attribute constructor expected';
   CPE_DanglingAttribute = 'Dangling attribute declaration';
@@ -331,7 +332,7 @@ const
   CPE_NameIsReserved = 'Name "%s" is reserved';
   CPE_TypeExpected = 'Type expected';
   CPE_InvalidType = '%s is not a Type';
-  CPE_UnknownMember = 'There is no accessible member with name "%s"';
+  CPE_UnknownMemberForType = 'There is no accessible member with name "%s" for type %s';
   CPE_NoMemberExpected = 'No member expected';
   CPE_NoArrayExpected = 'Not an array';
   CPE_NoMethodExpected = 'Not a method';
