@@ -838,6 +838,7 @@ var
    context : TdwsSourceContext;
    funcSym : TFuncSymbol;
    methSym : TMethodSymbol;
+   ownerSym : TCompositeTypeSymbol;
 begin
    if FPreviousSymbol<>nil then Exit;
 
@@ -868,7 +869,8 @@ begin
                   list.AddMembers(TRecordSymbol(context.ParentSym), TRecordSymbol(context.ParentSym), [amoInstance, amoMeta], AddToList, TFieldSymbol);
             end;
             ttPROPERTY : if context.ParentSym is TPropertySymbol then begin
-               list.AddMembers(TPropertySymbol(context.ParentSym).OwnerSymbol, nil, [amoInstance, amoMeta, amoTypedOnly], AddToList);
+               ownerSym := TPropertySymbol(context.ParentSym).OwnerSymbol;
+               list.AddMembers(ownerSym, ownerSym, [amoInstance, amoMeta, amoTypedOnly], AddToList);
                FList.Remove(context.ParentSym);
             end;
             ttIMPLEMENTATION : if context.ParentSym is TUnitMainSymbol then begin
