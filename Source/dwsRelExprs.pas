@@ -541,7 +541,9 @@ function TRelEqualVariantStrictExpr.EvalAsBoolean(exec : TdwsExecution) : Boolea
       Result := VarType(v);
       case Result of
          varSmallInt, varInteger, varShortInt : Result := varInt64;
-         varByte, varWord, varUInt32 : Result := varUInt64;
+         varByte, varWord,
+         {$IF CompilerVersion>=29.0} varUInt32 {$ELSE} varLongWord {$IFEND} :
+           Result := varUInt64;
          varSingle : Result := varDouble;
       end;
    end;
