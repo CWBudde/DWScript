@@ -1169,8 +1169,9 @@ var
 begin
    CheckName(name, namePos);
 
-   cvs:=TClassVarSymbol.Create(name, typ, FVisibility);
-   cvs.AllocateStackAddr(FCompiler.CurrentProg.Table.AddrGenerator);
+   cvs := TClassVarSymbol.Create(name, typ, FVisibility);
+   cvs.Level := 0;
+   cvs.StackAddr := FCompiler.FMainProg.GetGlobalAddr(typ.Size);
    if externalName<>'' then
       cvs.ExternalName:=externalName;
    FOwnerType.AddClassVar(cvs);
@@ -6205,7 +6206,7 @@ var
    arraySymbol : TArraySymbol;
    enumSymbol : TTypeSymbol;
    inPos : TScriptPos;
-   inExprAssignExpr : TAssignExpr;
+   inExprAssignExpr : TProgramExpr;
    readArrayItemExpr : TProgramExpr;
    inExprVarExpr : TVarExpr;
    blockExpr : TBlockExpr;
@@ -6273,9 +6274,13 @@ begin
 
          end else if inExpr.Typ is TSetOfSymbol then begin
 
-            if inExprAssignExpr <> nil then
-               inExprAssignExpr.Orphan(FCompilerContext);
-            Result:=ReadForInSetOf(forPos, inExpr as TDataExpr, loopVarExpr, loopVarName, loopVarNamePos);
+            Result := ReadForInSetOf(forPos, inExpr as TDataExpr, loopVarExpr, loopVarName, loopVarNamePos);
+            if inExprAssignExpr <> nil then begin
+               blockExpr := TBlockExpr.Create(FCompilerContext, forPos);
+               blockExpr.AddStatement(inExprAssignExpr);
+               blockExpr.AddStatement(Result);
+               Result := blockExpr;
+            end;
             Exit;
 
          end else begin
@@ -11416,8 +11421,6 @@ begin
       ttRECORD :
          Result:=ReadAnonymousRecord;
       ttCLASS : begin
-         if FCompilerContext.Table.AddrGenerator = nil then
-            FMsgs.AddCompilerStop(FTok.HotPos, CPE_AnonymousClassNotAllowedHere);
          if not (coAllowClosures in Options) then
             FMsgs.AddCompilerError(FTok.HotPos, CPE_AnonymousClassNotAllowed);
          Result := ReadAnonymousClass;

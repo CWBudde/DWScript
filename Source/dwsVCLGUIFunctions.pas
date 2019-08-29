@@ -24,7 +24,7 @@ unit dwsVCLGUIFunctions;
 interface
 
 uses
-   Windows, Forms, Dialogs, Classes,
+   WinApi.Windows, System.Classes, Vcl.Forms, Vcl.Dialogs,
    dwsUtils, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsFunctions, dwsExprs, dwsSymbols, dwsMagicExprs, dwsExprList;
 
