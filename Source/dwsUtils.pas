@@ -972,6 +972,7 @@ function StrContains(const aStr, aSubStr : String) : Boolean; overload;
 function StrContains(const aStr : String; aChar : Char) : Boolean; overload;
 function StrIndexOfChar(const aStr : String; aChar : Char) : Integer;
 function StrIndexOfCharA(const aStr : RawByteString; aChar : AnsiChar) : Integer;
+function StrLastIndexOfCharA(const aStr : RawByteString; aChar : AnsiChar) : Integer;
 function LowerCaseA(const aStr : RawByteString) : RawByteString;
 
 function StrMatches(const aStr, aMask : String) : Boolean;
@@ -3591,6 +3592,17 @@ var
    i : Integer;
 begin
    for i:=1 to Length(aStr) do
+      if aStr[i] = aChar then Exit(i);
+   Result := 0;
+end;
+
+// StrLastIndexOfCharA
+//
+function StrLastIndexOfCharA(const aStr : RawByteString; aChar : AnsiChar) : Integer;
+var
+   i : Integer;
+begin
+   for i := Length(aStr) downto 1 do
       if aStr[i] = aChar then Exit(i);
    Result := 0;
 end;
