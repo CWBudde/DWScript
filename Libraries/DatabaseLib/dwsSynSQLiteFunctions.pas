@@ -39,6 +39,9 @@ procedure SQLiteFunc_BitAndStep(context : TSQLite3FunctionContext; argc : Intege
 procedure SQLiteFunc_BitOrStep(context : TSQLite3FunctionContext; argc : Integer; var argv : TSQLite3ValueArray); cdecl;
 procedure SQLiteFunc_BitFinal(context: TSQLite3FunctionContext); cdecl;
 
+// Hamming Distance
+procedure SQLiteFunc_HammingDistance(context : TSQLite3FunctionContext; argc : Integer; var argv : TSQLite3ValueArray); cdecl;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -47,7 +50,14 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsUtils;
+{$ifdef DELPHI_XE2_PLUS}
+   {$if Defined(WIN32_ASM) or Defined(WIN64_ASM)}
+      {$define TEST_POPCNT}
+   {$ifend}
+{$endif}
+
+uses dwsUtils
+   {$ifdef TEST_POPCNT}, System.Math{$endif};
 
 type
    TNullableBoolean = (nbNull = 0, nbTrue, nbFalse);
@@ -228,6 +238,138 @@ begin
    if p^.NotNull then
       sqlite3.result_int64(context, p^.Value)
    else sqlite3.result_null(context);
+end;
+
+//
+// Hamming distance ---------------------------------------------------
+//
+
+// PopCntPascal
+//
+function PopCntPascal(v : Integer): Integer;
+begin
+   v      := (v and $55555555) + ((v shr  1) and $55555555);
+   v      := (v and $33333333) + ((v shr  2) and $33333333);
+   v      := (v and $0f0f0f0f) + ((v shr  4) and $0f0f0f0f);
+   v      := (v and $00ff00ff) + ((v shr  8) and $00ff00ff);
+   Result := (v and $0000ffff) + ((v shr 16) and $0000ffff);
+end;
+
+// PopCntAsm
+//
+{$ifdef TEST_POPCNT}
+function PopCntAsm(v : Integer): Integer;
+asm
+   POPCNT    eax, v
+end;
+{$endif}
+
+// HammingDistance
+//
+function HammingDistance(p1, p2 : PByte; n : Integer) : Integer;
+var
+   v : Integer;
+   fnPopCnt : function (v : Integer) : Integer;
+begin
+   {$ifdef TEST_POPCNT}
+   if (System.TestSSE or sePOPCNT) <> 0 then
+      fnPopCnt := PopCntAsm
+   else fnPopCnt := PopCntPascal;
+   {$else}
+   fnPopCnt := PopCntPascal;
+   {$endif}
+   Result := 0;
+   while n >= 4 do begin
+      Inc(Result, fnPopCnt(PInteger(p1)^ xor PInteger(p2)^));
+      Inc(p1, 4);
+      Inc(p2, 4);
+      Dec(n, 4);
+   end;
+   case n of
+      1 : v := p1^ xor p2^;
+      2 : v := PWord(p1)^ xor PWord(p2)^;
+      3 : v :=     ((PWord(p1)^ shl 16) or p1[2])
+               xor ((PWord(p2)^ shl 16) or p2[2]);
+   else
+      Exit
+   end;
+   Inc(Result, fnPopCnt(v));
+end;
+
+// SQLiteFunc_HammingDistance
+//
+procedure SQLiteFunc_HammingDistance(context : TSQLite3FunctionContext; argc : Integer; var argv : TSQLite3ValueArray); cdecl;
+
+   procedure HandleBlob;
+   var
+      buf1 : array of Byte;
+      size : Integer;
+   begin
+      size := sqlite3.value_bytes(argv[0]);
+      if sqlite3.value_bytes(argv[1]) <> size then begin
+         sqlite3.result_null(context);
+         Exit;
+      end;
+      if size = 0 then begin
+         sqlite3.result_int64(context, 0);
+         Exit;
+      end;
+      SetLength(buf1, size);
+      System.Move(sqlite3.value_blob(argv[0])^, buf1[0], size);
+      sqlite3.result_int64(context, HammingDistance(Pointer(buf1), sqlite3.value_blob(argv[1]), size));
+   end;
+
+   procedure HandleText;
+   var
+      buf1, buf2 : String;
+      size, i, n : Integer;
+      p1, p2 : PChar;
+   begin
+      size := sqlite3.value_bytes(argv[0]);
+      if sqlite3.value_bytes(argv[1]) <> size then begin
+         sqlite3.result_null(context);
+         Exit;
+      end;
+      if size = 0 then begin
+         sqlite3.result_int64(context, 0);
+         Exit;
+      end;
+      buf1 := UTF8ToUnicodeString(sqlite3.value_text(argv[0]));
+      buf2 := UTF8ToUnicodeString(sqlite3.value_text(argv[1]));
+      size := Length(buf1);
+      if Length(buf2) <> size then begin
+         sqlite3.result_null(context);
+         Exit;
+      end;
+      p1 := Pointer(buf1);
+      p2 := Pointer(buf2);
+      n := 0;
+      for i := 0 to size-1 do begin
+         if p1[i] <> p2[i] then
+            Inc(n);
+      end;
+      sqlite3.result_int64(context, n);
+   end;
+
+var
+   typ : Integer;
+   v1, v2 : Int64;
+begin
+   Assert(argc = 2);
+   typ := sqlite3.value_type(argv[0]);
+   if sqlite3.value_type(argv[1]) <> typ then
+      sqlite3.result_null(context)
+   else case typ of
+      SQLITE_INTEGER : begin
+         v1 := sqlite3.value_int64(argv[0]);
+         v2 := sqlite3.value_int64(argv[1]);
+         sqlite3.result_int64(context, HammingDistance(@v1, @v2, SizeOf(Int64)));
+      end;
+      SQLITE_TEXT : HandleText;
+      SQLITE_BLOB : HandleBlob;
+   else
+      sqlite3.result_null(context);
+   end;
 end;
 
 end.

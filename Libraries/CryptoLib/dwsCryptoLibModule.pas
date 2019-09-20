@@ -19,7 +19,6 @@ unit dwsCryptoLibModule;
 interface
 
 uses
-   SysUtils, Classes, Types,
    dwsComp, dwsExprs, dwsUtils, dwsXPlatform, dwsTokenStore, dwsCryptoXPlatform,
    dwsXXHash, dwsExprList, dwsSymbols;
 
@@ -100,6 +99,8 @@ type
       baseExpr: TTypedExpr; const args: TExprBaseListExec);
     procedure dwsCryptoClassesNoncesMethodsCollectFastEvalNoResult(
       baseExpr: TTypedExpr; const args: TExprBaseListExec);
+    function dwsCryptoFunctionsCompilationUniqueRandomFastEval(
+      const args: TExprBaseListExec): Variant;
   private
     { Private declarations }
     FNonces : TdwsTokenStore;
@@ -117,7 +118,7 @@ implementation
 
 {$R *.dfm}
 
-uses dwsCryptoUtils, SynCrypto, dwsCryptProtect, SynZip, SynEcc;
+uses dwsCryptoUtils, SynCrypto, dwsCryptProtect, SynZip, SynEcc, dwsCompilerContext;
 
 procedure PerformHashData(Info: TProgramInfo; h : THashFunction);
 var
@@ -349,6 +350,30 @@ procedure TdwsCryptoLib.dwsCryptoClassesHashSHA512MethodsHMACEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
    PerformHMAC(Info, HashSHA512, 128);
+end;
+
+function TdwsCryptoLib.dwsCryptoFunctionsCompilationUniqueRandomFastEval(
+  const args: TExprBaseListExec): Variant;
+const
+   cCompilationUniqueRandomGUID : TGUID = '{7EBA4F31-8255-4BB7-956D-76D001DB2C24}';
+
+   procedure Initialize(context : TdwsCompilerContext; var result : Variant);
+   var
+      n : String;
+   begin
+      n := CryptographicToken(6*42);
+      context.CustomStateCompareExchange(cCompilationUniqueRandomGUID, n, Unassigned, result);
+      if VarIsEmpty(result) then
+         VarCopySafe(result, n);
+   end;
+
+var
+   context : TdwsCompilerContext;
+begin
+   context := (args.Exec as TdwsProgramExecution).CompilerContext;
+   context.CustomStateGet(cCompilationUniqueRandomGUID, Result);
+   if VarIsEmpty(Result) then
+      Initialize(context, Result);
 end;
 
 function TdwsCryptoLib.dwsCryptoFunctionsCryptographicRandomFastEval(
