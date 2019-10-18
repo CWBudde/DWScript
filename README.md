@@ -18,3 +18,6 @@ DWScript is released under Mozilla Public License 1.1 which, in short, means tha
 If you can't or don't want to satisfy the above requirements, contact the project manager for use under other license schemes.
 
 The JavaScript CodeGen is currently licensed under GPL v3.
+
+## Fork notes ##
+This is my private fork, which might run out of sync with the original repository over time.
