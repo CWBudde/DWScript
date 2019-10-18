@@ -67,6 +67,7 @@ type
          procedure PropertyDescription;
          procedure ImplementationSuggest;
          procedure ParameterSuggest;
+         procedure FunctionCaptionDescription;
    end;
 
 // ------------------------------------------------------------------
@@ -474,8 +475,8 @@ end;
 //
 procedure TSourceUtilsTests.HelperSuggestTest;
 const
-   cSugg : array [0..18] of String = (
-      'Clamp', 'Compare', 'Compare', 'Factorial', 'Hello', 'IsOdd', 'IsPrime',
+   cSugg : array [0..19] of String = (
+      'Abs', 'Clamp', 'Compare', 'Compare', 'Factorial', 'Hello', 'IsOdd', 'IsPrime',
       'LeastFactor', 'Max', 'Min', 'Next', 'PopCount', 'Sign', 'Sqr', 'TestBit',
       'ToBin', 'ToHexString', 'ToString', 'Unsigned32'
       );
@@ -673,9 +674,10 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 4, 4);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
-   CheckEquals(2, sugg.Count, 'tes');
+   CheckEquals(3, sugg.Count, 'tes');
    CheckEquals('test1', sugg.Code[0], 'tes 0');
    CheckEquals('test2', sugg.Code[1], 'tes 1');
+   CheckEquals('TestBit', sugg.Code[2], 'tes 2');
 end;
 
 // ReferencesVars
@@ -1119,6 +1121,30 @@ begin
    CheckTrue(sugg.Count > 2);
    CheckEquals('att : Boolean', sugg.Caption[0]);
    CheckEquals('lcl : Boolean', sugg.Caption[1]);
+end;
+
+// FunctionCaptionDescription
+//
+procedure TSourceUtilsTests.FunctionCaptionDescription;
+var
+   prog : IdwsProgram;
+begin
+   prog := FCompiler.Compile(
+          'function  Test1(a, b : Integer; const c : String; var d : Boolean; e : type Boolean) : String; begin end;'#10
+         +'function  Test2(const a, b : String; c : String; var d : Boolean; var e : Boolean) : String; begin end;'#10
+         +'procedure Test3(a, b : Integer; c : type Integer; d : Boolean; var e : Boolean); begin end;'#10
+         +'procedure Test4(var a, b : Integer; const c : Integer; d : Boolean; e : Boolean); begin end;'#10
+   );
+   CheckFalse(prog.Msgs.HasErrors, prog.Msgs.AsInfo);
+
+   CheckEquals('function Test1(a: Integer; b: Integer; const c: String; var d: Boolean; e: type Boolean): String',
+               prog.Table.FindSymbol('Test1', cvMagic).Description, 'Test1');
+   CheckEquals('function Test2(const a: String; const b: String; c: String; var d: Boolean; var e: Boolean): String',
+               prog.Table.FindSymbol('Test2', cvMagic).Description, 'Test2');
+   CheckEquals('procedure Test3(a: Integer; b: Integer; c: type Integer; d: Boolean; var e: Boolean)',
+               prog.Table.FindSymbol('Test3', cvMagic).Description, 'Test3');
+   CheckEquals('procedure Test4(var a: Integer; var b: Integer; const c: Integer; d: Boolean; e: Boolean)',
+               prog.Table.FindSymbol('Test4', cvMagic).Description, 'Test4');
 end;
 
 // SuggestInBlockWithError

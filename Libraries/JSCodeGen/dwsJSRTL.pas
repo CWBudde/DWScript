@@ -16,6 +16,8 @@
 {**********************************************************************}
 unit dwsJSRTL;
 
+{$I dws.inc}
+
 interface
 
 uses
@@ -169,7 +171,7 @@ uses dwsJSON;
 {$R dwsJSRTL.res}
 
 const
-   cJSRTLDependencies : array [1..291] of TJSRTLDependency = (
+   cJSRTLDependencies : array [1..296{$ifdef JS_BIGINTEGER} + 11{$endif}] of TJSRTLDependency = (
       // codegen utility functions
       (Name : '$CheckStep';
        Code : 'function $CheckStep(s,z) { if (s>0) return s; throw Exception.Create($New(Exception),"FOR loop STEP should be strictly positive: "+s.toString()+z); }';
@@ -620,6 +622,12 @@ const
 
       // RTL functions
 
+       (Name : 'Abs$_Float_';
+       Code : 'var Abs$_Float_ = Math.abs;'),
+       (Name : 'Abs$_Integer_';
+       Code : 'var Abs$_Integer_ = Math.abs;'),
+       (Name : 'Abs$_Variant_';
+       Code : 'var Abs$_Variant_ = Math.abs;'),
       (Name : 'AnsiCompareStr';
        Code : 'function AnsiCompareStr(a,b) { return a.localeCompare(b) }'),
       (Name : 'AnsiCompareText';
@@ -630,17 +638,17 @@ const
       (Name : 'AnsiUpperCase';
        Code : 'function AnsiUpperCase(v) { return v.toLocaleUpperCase() }'),
       (Name : 'ArcCos';
-       Code : 'var ArcCos = Math.acos'),
+       Code : 'var ArcCos = Math.acos;'),
       (Name : 'ArcCosh';
        Code : 'function ArcCosh(v) { return Math.log(v+Math.sqrt((v-1)/(v+1))*(v+1)) }'),
       (Name : 'ArcSin';
-       Code : 'var ArcSin = Math.asin'),
+       Code : 'var ArcSin = Math.asin;'),
       (Name : 'ArcSinh';
        Code : 'function ArcSinh(v) { return Math.log(v+Math.sqrt(v*v+1)) }'),
       (Name : 'ArcTan';
-       Code : 'var ArcTan = Math.atan'),
+       Code : 'var ArcTan = Math.atan;'),
       (Name : 'ArcTan2';
-       Code : 'var ArcTan2 = Math.atan2'),
+       Code : 'var ArcTan2 = Math.atan2;'),
       (Name : 'ArcTanh';
        Code : 'function ArcTanh(v) { return 0.5*Math.log((1+v)/(1-v)) }'),
       (Name : 'BoolToStr';
@@ -991,6 +999,16 @@ const
       (Name : 'ParseDateTime';
        Code : 'function ParseDateTime(f, s, u) { return strToDateTimeDef(f, s, 0, u) }';
        Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+      (Name : 'PopCount';
+       Code : 'function PopCount(i) {'#10
+               + #9'if (i > 0xffffffff) return i.toString(2).replace(/0/g,"").length;'#10
+               + #9'i = i - ((i >> 1) & 0x55555555);'#10
+               + #9'i = (i & 0x33333333) + ((i >> 2) & 0x33333333);'#10
+               + #9'i = (i + (i >> 4)) & 0x0f0f0f0f;'#10
+               + #9'i = i + (i >> 8);'#10
+               + #9'i = i + (i >> 16);'#10
+               + #9'return i & 0x3f;'#10
+            + '}'),
       (Name : 'Pos';
        Code : 'function Pos(a,b) { return b.indexOf(a)+1 }'),
       (Name : 'PosEx';
@@ -1180,6 +1198,8 @@ const
        Code : 'var Tan = Math.tan'),
       (Name : 'Tanh';
        Code : 'function Tanh(v) { return (v==0)?0:(Math.exp(v)-Math.exp(-v))/(Math.exp(v)+Math.exp(-v)) }'),
+      (Name : 'TestBit';
+       Code : 'function TestBit(i, b) { return b >=0 && b < 32 && (i & (1 << b)) != 0 }'),
       (Name : 'Time';
        Code : 'function Time() { var r=Now(); return r-Math.floor(r) }';
        Dependency : 'Now'),
@@ -1290,6 +1310,39 @@ const
                +#9'return Math.floor((Math.floor(v)-EncodeDate(o.getFullYear(),1,1))/7)+1;'#10
                +'}';
        Dependency : 'DayOfWeek,Now,EncodeDate,DateTimeToDate')
+
+   {$ifdef JS_BIGINTEGER}
+      ,
+      (Name : 'BigInteger$BitLength';
+       Code : 'function BigInteger$BitLength(v) { return v ? ((b < 0 ? -b : b).toString(2).length) : 0 }'),
+      (Name : 'BigInteger$ClearBit';
+       Code : 'function BigInteger$ClearBit(v,b) { if (b<0) return; var m = 1n << BigInt(b); if (v.v & m) v.v ^= m }'),
+      (Name : 'BigInteger$PopCount';
+       Code : 'function BigInteger$PopCount(b) { return b.toString(2).replace(/0/g,"").length }'),
+      (Name : 'BigInteger$SetBit$_BigInteger_Integer_';
+       Code : 'function BigInteger$SetBit$_BigInteger_Integer_(v,b) { if (b >= 0) v.v |= 1n << BigInt(b) }'),
+      (Name : 'BigInteger$SetBit$_BigInteger_Integer_Boolean_';
+       Code : 'function BigInteger$SetBit$_BigInteger_Integer_Boolean_(v,b,t) { if (t) { BigInteger$SetBit$_BigInteger_Integer_(v,b) } else BigInteger$ClearBit(v,b) }';
+       Dependency : 'BigInteger$SetBit$_BigInteger_Integer_,BigInteger$ClearBit'),
+      (Name : 'BigInteger$TestBit';
+       Code : 'function BigInteger$TestBit(v,b) { return b >= 0 ? (((v >> BigInt(b)) & 1n) == 1n) : false }'),
+      (Name : 'BigIntegerToBlobParameter';
+       Code : 'function BigIntegerToBlobParameter(v) {'#10
+               +#9'if (v == 0) return "00";'#10
+               +#9'var p, r;'#10
+               +#9'if (v < 0) { p = "ff"; r = (-v).toString(16) } else { r = v.toString(16) };'#10
+               +#9'if (r.length % 1) r = "0" + r;'#10
+               +#9'return p + r'#10
+               +'}'),
+      (Name : 'BigIntegerToString';
+       Code : 'function BigIntegerToString(v,b) { return v.toString(b) }'),
+      (Name : 'BigIntegerToHex';
+       Code : 'function BigIntegerToHex(v) { return v.toString(16) }'),
+      (Name : 'BlobFieldToBigInteger';
+       Code : 'function BlobFieldToBigInteger(v) { return v.substring(0,1) == "ff" ? -BigInt("0x" + v.substring(2)) : BigInt("0x" + v)  }'),
+      (Name : 'StringToBigInteger';
+       Code : 'function StringToBigInteger(v) { return BigInt(v) }')
+   {$endif}
 
    );
 
@@ -1410,6 +1463,9 @@ begin
    FMagicCodeGens.Duplicates:=dupError;
 
    FMagicCodeGens.AddObject('_', TJSGetTextFuncExpr.Create(codeGen));
+   FMagicCodeGens.AddObject('Abs$_Float_', TdwsExprGenericCodeGen.Create(['Math.abs', '(', 0, ')']));
+   FMagicCodeGens.AddObject('Abs$_Integer_', TdwsExprGenericCodeGen.Create(['Math.abs', '(', 0, ')']));
+   FMagicCodeGens.AddObject('Abs$_Variant_', TdwsExprGenericCodeGen.Create(['Math.abs', '(', 0, ')']));
    FMagicCodeGens.AddObject('AnsiLowerCase', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.toLocaleLowerCase()']));
    FMagicCodeGens.AddObject('AnsiUpperCase', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.toLocaleUpperCase()']));
    FMagicCodeGens.AddObject('ArcCos', TdwsExprGenericCodeGen.Create(['Math.acos', '(', 0, ')']));
@@ -1540,20 +1596,20 @@ procedure TJSMagicFuncExpr.CodeGenFunctionName(codeGen : TdwsCodeGen; expr : TFu
    var
       i : Integer;
    begin
-      Result:=funcSym.QualifiedName+'$_';
-      for i:=0 to funcSym.Params.Count-1 do
-         Result:=Result+funcSym.GetParamType(i).Name+'_';
+      Result := funcSym.QualifiedName+'$_';
+      for i := 0 to funcSym.Params.Count-1 do
+         Result := Result + funcSym.GetParamType(i).Name + '_';
    end;
 
 var
    e : TMagicFuncExpr;
    name : String;
 begin
-   e:=TMagicFuncExpr(expr);
+   e := TMagicFuncExpr(expr);
    if e.FuncSym.IsOverloaded then
-      name:=GetSignature(e.FuncSym)
-   else name:=e.FuncSym.QualifiedName;
-   name:=CanonicalName(name);
+      name := GetSignature(e.FuncSym)
+   else name := e.FuncSym.QualifiedName;
+   name := CanonicalName(name);
    codeGen.WriteString(name);
    codeGen.Dependencies.Add(name);
 end;

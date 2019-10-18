@@ -143,7 +143,6 @@ type
          FStaticSymbols : Boolean;
          FStaticTable : IStaticSymbolTable; // static symbols
          FStaticSystemTable : TSystemSymbolTable;
-         FAbsHandlers : array of TInternalAbsHandler;
          FCriticalSection : TdwsCriticalSection;
 
       protected
@@ -173,9 +172,6 @@ type
          procedure AddInternalFunction(rif : Pointer);
          procedure AddSymbolsRegistrationProc(proc : TSymbolsRegistrationProc);
          procedure AddOperatorsRegistrationProc(proc : TOperatorsRegistrationProc);
-
-         procedure AddAbsHandler(const handler : TInternalAbsHandler);
-         function HandleAbs(context : TdwsCompilerContext; const aScriptPos : TScriptPos; argExpr : TTypedExpr) : TTypedExpr;
 
          procedure InitStaticSymbols(systemTable : TSystemSymbolTable; unitSyms : TUnitMainSymbols;
                                      operators : TOperators);
@@ -267,9 +263,12 @@ function ConvertFuncParams(const funcParams : array of String) : TParamArray;
 
    procedure ParamSpecifier(c : Char; paramRec : PParamRec);
    begin
-      paramRec.IsVarParam:=(c='@');
-      paramRec.IsConstParam:=(c='&');
-      paramRec.ParamName := Copy(paramRec.ParamName, 2);
+      case c of
+         '@' : paramRec.IsVarParam := True;
+         '&' : paramRec.IsConstParam := True;
+         '!' : paramRec.Options := [ psoForbidImplicitCasts ];
+      end;
+      paramRec.ParamName    := Copy(paramRec.ParamName, 2);
    end;
 
    procedure ParamDefaultValue(p : Integer; paramRec : PParamRec);
@@ -303,7 +302,7 @@ begin
          c:=paramRec.ParamName[1];
 
       case c of
-         '@','&':
+         '@','&','!':
             ParamSpecifier(c, paramRec);
       else
          paramRec.IsVarParam:=False;
@@ -721,31 +720,6 @@ begin
    n:=Length(FOperatorsRegistrationProcs);
    SetLength(FOperatorsRegistrationProcs, n+1);
    FOperatorsRegistrationProcs[n]:=proc;
-end;
-
-// AddAbsHandler
-//
-procedure TInternalUnit.AddAbsHandler(const handler : TInternalAbsHandler);
-var
-   n : Integer;
-begin
-   n:=Length(FAbsHandlers);
-   SetLength(FAbsHandlers, n+1);
-   FAbsHandlers[n]:=handler;
-end;
-
-// HandleAbs
-//
-function TInternalUnit.HandleAbs(context : TdwsCompilerContext; const aScriptPos : TScriptPos; argExpr : TTypedExpr) : TTypedExpr;
-var
-   i : Integer;
-begin
-   Result:=nil;
-   for i:=0 to High(FAbsHandlers) do begin
-      Result:=FAbsHandlers[i](context, aScriptPos, argExpr);
-      if Result<>nil then Exit;
-   end;
-   argExpr.Free;
 end;
 
 // AddInternalFunction
