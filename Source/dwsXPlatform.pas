@@ -329,7 +329,9 @@ function DirectSetMXCSR(newValue : Word) : Word; register;
 function SwapBytes(v : Cardinal) : Cardinal;
 procedure SwapInt64(src, dest : PInt64);
 
+{$IFNDEF PUREPASCAL}
 function RDTSC : UInt64;
+{$ENDIF}
 
 function GetCurrentUserName : String;
 
@@ -1631,10 +1633,12 @@ end;
 
 // RDTSC
 //
+{$IFNDEF PUREPASCAL}
 function RDTSC : UInt64;
 asm
    RDTSC
 end;
+{$ENDIF}
 
 // GetCurrentUserName
 //

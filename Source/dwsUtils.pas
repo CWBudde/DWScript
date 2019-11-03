@@ -7331,10 +7331,14 @@ begin
    v      := (v and $00ff00ff) + ((v shr  8) and $00ff00ff);
    Result := (v and $0000ffff) + ((v shr 16) and $0000ffff);
 end;
+
+{$IFNDEF PUREPASCAL}
 function PopCount32_asm(v : Int32) : Integer;
 asm
    POPCNT    eax, v
 end;
+{$ENDIF}
+
 var vPopCount32 : function(v : Int32) : Integer;
 function PopCount32(v : Int32) : Integer;
 begin
