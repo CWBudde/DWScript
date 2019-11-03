@@ -29,8 +29,6 @@ unit dwsXPlatform;
 
 {$WARN SYMBOL_PLATFORM OFF}
 
-{-$DEFINE WindowsCaseConvert}
-
 {$IFDEF FPC}
    {$DEFINE VER200}  // FPC compatibility = D2009
 {$ENDIF}
@@ -38,7 +36,7 @@ unit dwsXPlatform;
 interface
 
 uses
-   Classes, SysUtils, Types, Masks, SyncObjs, Variants, StrUtils,
+   Classes, SysUtils, Types, Masks, Registry, SyncObjs, Variants, StrUtils,
    {$IFDEF FPC}
       {$IFDEF Windows}
          Windows
@@ -46,21 +44,13 @@ uses
          LCLIntf
       {$ENDIF}
    {$ELSE}
-      {$IFDEF POSIX}
-      Posix.Time, Posix.SysTime, Posix.SysTypes, Posix.Dirent, Posix.Fcntl,
-      Posix.Stdio, Posix.Pthread, DateUtils
-      {$IFDEF MACOS}
-      , Macapi.CoreFoundation, Macapi.Foundation, Macapi.Helpers
-      {$ENDIF}
-      {$ELSE}
       Windows
-      {$ENDIF}
       {$IFNDEF VER200}, IOUtils{$ENDIF}
    {$ENDIF}
    ;
 
 const
-{$IFDEF POSIX}
+{$IFDEF UNIX}
    cLineTerminator  = #10;
 {$ELSE}
    cLineTerminator  = #13#10;
@@ -79,7 +69,7 @@ type
 
    // see http://delphitools.info/2011/11/30/fixing-tcriticalsection/
    {$HINTS OFF}
-   {$ifdef POSIX}
+   {$ifdef UNIX}
    TdwsCriticalSection = class (TCriticalSection);
    {$else}
    TdwsCriticalSection = class
@@ -110,7 +100,7 @@ type
 
    TMultiReadSingleWriteState = (mrswUnlocked, mrswReadLock, mrswWriteLock);
 
-   {$ifdef POSIX}{$define SRW_FALLBACK}{$endif}
+   {$ifdef UNIX}{$define SRW_FALLBACK}{$endif}
 
    TMultiReadSingleWrite = class (TInterfacedObject, IMultiReadSingleWrite)
       private
@@ -190,6 +180,51 @@ type
       {$ENDIF}
    end;
 
+   // Wrap in a record so it is not assignment compatible without explicit casts
+   // Internal representation is UnixTime in milliseconds (same as JavaScript)
+   TdwsDateTime = record
+      private
+         FValue : Int64;
+
+         function GetAsUnixTime : Int64;
+         procedure SetAsUnixTime(const val : Int64);
+
+         function GetAsFileTime : TFileTime;
+         procedure SetAsFileTime(const val : TFileTime);
+         function GetAsDosDateTime : Integer;
+
+         function GetAsLocalDateTime : TDateTime;
+         procedure SetAsLocalDateTime(const val : TDateTime);
+         function GetAsUTCDateTime : TDateTime;
+         procedure SetAsUTCDateTime(const val : TDateTime);
+
+      public
+         class function Now : TdwsDateTime; static;
+         class function FromLocalDateTime(const dt : TDateTime) : TdwsDateTime; static;
+
+         procedure Clear; inline;
+         function IsZero : Boolean; inline;
+
+         class operator Equal(const a, b : TdwsDateTime) : Boolean; static; inline;
+         class operator NotEqual(const a, b : TdwsDateTime) : Boolean; static; inline;
+         class operator GreaterThan(const a, b : TdwsDateTime) : Boolean; static; inline;
+         class operator GreaterThanOrEqual(const a, b : TdwsDateTime) : Boolean; static; inline;
+         class operator LessThan(const a, b : TdwsDateTime) : Boolean; static; inline;
+         class operator LessThanOrEqual(const a, b : TdwsDateTime) : Boolean; static; inline;
+
+         function MillisecondsAheadOf(const d : TdwsDateTime) : Int64; inline;
+         procedure IncMilliseconds(const msec : Int64); inline;
+
+         property Value : Int64 read FValue write FValue;
+
+         property AsUnixTime : Int64 read GetAsUnixTime write SetAsUnixTime;
+         property AsFileTime : TFileTime read GetAsFileTime write SetAsFileTime;
+         property AsDosDateTime : Integer read GetAsDosDateTime;
+
+         property AsLocalDateTime : TDateTime read GetAsLocalDateTime write SetAsLocalDateTime;
+         property AsUTCDateTime : TDateTime read GetAsUTCDateTime write SetAsUTCDateTime;
+   end;
+
 // 64bit system clock reference in milliseconds since boot
 function GetSystemMilliseconds : Int64;
 function UTCDateTime : TDateTime;
@@ -260,7 +295,6 @@ function RawByteStringToBytes(const buf : RawByteString) : TBytes;
 function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString; overload;
 function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString; overload;
 
-{$ifdef MSWindows}
 function LoadDataFromFile(const fileName : TFileName) : TBytes;
 procedure SaveDataToFile(const fileName : TFileName; const data : TBytes);
 
@@ -271,7 +305,6 @@ procedure LoadRawBytesAsScriptStringFromFile(const fileName : TFileName; var res
 
 function LoadTextFromBuffer(const buf : TBytes) : UnicodeString;
 function LoadTextFromRawBytes(const buf : RawByteString) : UnicodeString;
-{$endif}
 function LoadTextFromStream(aStream : TStream) : UnicodeString;
 function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
@@ -279,7 +312,6 @@ procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8Stri
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 procedure CloseFileHandle(hFile : THandle);
-{$ifdef MSWindows}
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
 function FileFlushBuffers(hFile : THandle) : Boolean;
 function FileCopy(const existing, new : TFileName; failIfExists : Boolean) : Boolean;
@@ -287,9 +319,8 @@ function FileMove(const existing, new : TFileName) : Boolean;
 function FileDelete(const fileName : TFileName) : Boolean;
 function FileRename(const oldName, newName : TFileName) : Boolean;
 function FileSize(const name : TFileName) : Int64;
-function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TDateTime;
-procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
-{$endif}
+function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TdwsDateTime;
+procedure FileSetDateTime(hFile : THandle; const aDateTime : TdwsDateTime);
 function DeleteDirectory(const path : String) : Boolean;
 
 function DirectSet8087CW(newValue : Word) : Word; register;
@@ -311,7 +342,6 @@ procedure GetMemForT(var T; Size: integer); inline;
 
 procedure InitializeWithDefaultFormatSettings(var fmt : TFormatSettings);
 
-{$ifdef MSWindows}
 type
    TTimerEvent = procedure of object;
 
@@ -330,7 +360,6 @@ type
 
          procedure Cancel;
    end;
-{$endif}
 
 {$ifndef SRW_FALLBACK}
 procedure AcquireSRWLockExclusive(var SRWLock : Pointer); stdcall; external 'kernel32.dll';
@@ -349,10 +378,8 @@ type
       function AsString : String;
    end;
 
-{$IFDEF MSWINDOWS}
 function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
 function GetApplicationVersion(var version : TModuleVersion) : Boolean;
-{$ENDIF}
 function ApplicationVersion : String;
 
 // ------------------------------------------------------------------
@@ -371,18 +398,11 @@ type
 // GetSystemTimeMilliseconds
 //
 function GetSystemTimeMilliseconds : Int64; stdcall;
+begin
 {$IFDEF WINDOWS}
-var
-   fileTime : TFileTime;
-begin
-   GetSystemTimeAsFileTime(fileTime);
-   Result:=Round(PInt64(@fileTime)^*1e-4); // 181
+   Result := TdwsDateTime.Now.Value;
 {$ELSE}
-var
-   fileTime : timeval;
-begin
-   gettimeofday(fileTime, nil);
-   Result := 1000 * fileTime.tv_sec + fileTime.tv_usec;
+   Not yet implemented!
 {$ENDIF}
 end;
 
@@ -417,39 +437,17 @@ end;
 // UTCDateTime
 //
 function UTCDateTime : TDateTime;
-{$IFDEF Windows}
 var
    systemTime : TSystemTime;
 begin
+{$IFDEF Windows}
    FillChar(systemTime, SizeOf(systemTime), 0);
    GetSystemTime(systemTime);
    with systemTime do
       Result:= EncodeDate(wYear, wMonth, wDay)
               +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
-{$ENDIF}
-{$IFDEF POSIX}
-{$IFDEF MACOS}
-var
-   systemTime : CFGregorianDate;
-begin
-   systemTime := CFAbsoluteTimeGetGregorianDate(CFAbsoluteTimeGetCurrent, nil);
-   with systemTime do
-      Result := EncodeDate(year, month, day)
-               +EncodeTime(hour, minute, Trunc(second), Round((second - Trunc(second)) * MSecsPerSec));
 {$ELSE}
-var
-   systemTime : ptm;
-   t : time_t;
-begin
-   t := time(nil);
-   systemTime := gmtime(t);
-   if systemTime = nil then
-     raise Exception.Create('Error calling gmtime');
-
-   with systemTime^ do
-      Result := EncodeDate(1900 + tm_year, 1 + tm_mon, tm_mday)
-               +EncodeTime(tm_hour, tm_min, tm_sec, 0);
-{$ENDIF}
+   Not yet implemented!
 {$ENDIF}
 end;
 
@@ -457,14 +455,9 @@ end;
 //
 function UnixTime : Int64;
 begin
-{$IFDEF POSIX}
-   Result:=time(nil);
-{$ELSE}
    Result:=Trunc(UTCDateTime*86400)-Int64(25569)*86400;
-{$ENDIF}
 end;
 
-{$IFDEF MSWINDOWS}
 type
    TDynamicTimeZoneInformation = record
       Bias : Longint;
@@ -485,12 +478,10 @@ function GetTimeZoneInformationForYear(wYear: USHORT; lpDynamicTimeZoneInformati
       var lpTimeZoneInformation: TTimeZoneInformation): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
 function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInformation;
       var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall; external 'kernel32' {$ifndef FPC}delayed{$endif};
-{$ENDIF}
 
 // LocalDateTimeToUTCDateTime
 //
 function LocalDateTimeToUTCDateTime(t : TDateTime) : TDateTime;
-{$IFDEF MSWINDOWS}
 var
    localSystemTime, universalSystemTime : TSystemTime;
    tzDynInfo : TDynamicTimeZoneInformation;
@@ -506,35 +497,24 @@ begin
    if not TzSpecificLocalTimeToSystemTime(@tzInfo, localSystemTime, universalSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(universalSystemTime);
-{$ELSE}
-begin
-   Result := TTimeZone.Local.ToUniversalTime(t);
-{$ENDIF}
 end;
 
 // UTCDateTimeToLocalDateTime
 //
 function UTCDateTimeToLocalDateTime(t : TDateTime) : TDateTime;
-{$IFDEF MSWINDOWS}
 var
    tzDynInfo : TDynamicTimeZoneInformation;
    tzInfo : TTimeZoneInformation;
    localSystemTime, universalSystemTime : TSystemTime;
-   y, m, d : Word;
 begin
    DateTimeToSystemTime(t, universalSystemTime);
    if GetDynamicTimeZoneInformation(tzDynInfo) = TIME_ZONE_ID_INVALID then
       RaiseLastOSError;
-   DecodeDate(t, y, m, d);
-   if not GetTimeZoneInformationForYear(y, @tzDynInfo, tzInfo) then
+   if not GetTimeZoneInformationForYear(universalSystemTime.wYear, @tzDynInfo, tzInfo) then
       RaiseLastOSError;
    if not SystemTimeToTzSpecificLocalTime(@tzInfo, universalSystemTime, localSystemTime) then
       RaiseLastOSError;
    Result := SystemTimeToDateTime(localSystemTime);
-{$ELSE}
-begin
-   Result := TTimeZone.Local.ToLocalTime(t);
-{$ENDIF}
 end;
 
 // SystemMillisecondsToUnixTime
@@ -554,22 +534,9 @@ end;
 // SystemSleep
 //
 procedure SystemSleep(msec : Integer);
-{$IFDEF MSWINDOWS}
 begin
    if msec>=0 then
       Windows.Sleep(msec);
-{$ENDIF}
-{$IFDEF POSIX}
-var
-  tim: timespec;
-begin
-   if msec<0 then
-      Exit;
-
-   tim.tv_sec := Trunc(msec * 0.001);
-   tim.tv_nsec := (msec - tim.tv_sec * 1000) * 1000000;
-   nanosleep(tim, nil);
-{$ENDIF}
 end;
 
 // FirstWideCharOfString
@@ -634,682 +601,30 @@ begin
    Result := SysUtils.StringReplace(s, oldPattern, newPattern, flags);
 end;
 
-{$IFNDEF MACOS}
 function CompareStringEx(
    lpLocaleName: LPCWSTR; dwCmpFlags: DWORD;
    lpString1: LPCWSTR; cchCount1: Integer;
    lpString2: LPCWSTR; cchCount2: Integer;
    lpVersionInformation: Pointer; lpReserved: LPVOID;
    lParam: LPARAM): Integer; stdcall; external 'kernel32.dll';
-{$ENDIF}
 
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer;
-{$IFDEF MACOS}
-begin
-   Result := StrToNSSTR(p1).localizedCaseInsensitiveCompare(StrToNSSTR(p2));
-{$ELSE}
 const
    CSTR_EQUAL = 2;
 begin
-{$IFDEF WINDOWS_XP}
-   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n1, p2, n2)-CSTR_EQUAL;
-{$ELSE}
    Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n1, p2, n2, nil, nil, 0)-CSTR_EQUAL;
-{$ENDIF}
-{$ENDIF}
 end;
 
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
-{$IFDEF MACOS}
-begin
-   Result := StrToNSSTR(p1).localizedCaseInsensitiveCompare(StrToNSSTR(p2));
-{$ELSE}
 const
    CSTR_EQUAL = 2;
 begin
-{$IFDEF WINDOWS_XP}
-   Result := CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p1, n, p2, n)-CSTR_EQUAL;
-{$ELSE}
-   Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n, p2, n, nil, nil, 0)-CSTR_EQUAL;
-{$ENDIF}
-{$ENDIF}
+   Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n, p2, n, nil, nil, 0) - CSTR_EQUAL;
 end;
-
-{$ifndef WindowsCaseConvert}
-const
-   CCaseMapLower: array [0 .. 4012] of Word = (
-      (* index *)
-      $1bf, $2bf, $3bf, $44f, $54f, $64f, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $6af, $100, $100, $77d, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $87d, $97c, $100, $a79, $100, $100,
-      $afd, $100, $100, $100, $100, $100, $100, $100, $bfd, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $cf0, $dce,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $ead,
-      (* defaults *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $41 .. $ff *)
-      32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-      32, 32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 32, 32, 32, 32, 32,
-      32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 0,
-      32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $100 .. $1ff *)
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      $ff39, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, $ff87, 1, 0, 1, 0, 1, 0, 0, 0, $d2, 1, 0, 1, 0, $ce, 1, 0, $cd, $cd,
-      1, 0, 0, $4f, $ca, $cb, 1, 0, $cd, $cf, 0, $d3, $d1, 1, 0, 0, 0, $d3,
-      $d5, 0, $d6, 1, 0, 1, 0, 1, 0, $da, 1, 0, $da, 0, 0, 1, 0, $da, 1, 0,
-      $d9, $d9, 1, 0, 1, 0, $db, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0,
-      2, 1, 0, 2, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, $2, 1, 0, 1, 0,
-      $ff9f, $ffc8, 1, 0, 1, 0, 1, 0, 1, 0,
-      (* $200 .. $2ff *)
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, $ff7e, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, $2a2b, 1, 0, $ff5d, $2a28, 0, 0, 1, 0,
-      $ff3d, $45, $47, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $370 .. $3ff *)
-      1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, $74, 0, 0, 0, 0, 0, 0, $26,
-      0, $25, $25, $25, 0, $40, 0, $3f, $3f, 0, $20, $20, $20, $20, $20, $20,
-      $20, $20, $20, $20, $20, $20, $20, $20, $20, $20, $20, 0, $20, $20, $20,
-      $20, $20, $20, $20, $20, $20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0,
-      0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 0, 0, 0, 0, $ffc4, 0, 0, 1, 0, $fff9, 1, 0, 0, $ff7e,
-      $ff7e, $ff7e,
-      (* $400 .. $4ff *)
-      80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 32, 32,
-      32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-      32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, $f, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0,
-      (* $500 .. $5ff *)
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      0, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-      48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-      48, 48, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0,
-      (* $10a0 .. $10ff *)
-      $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60,
-      $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60,
-      $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60,
-      $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, $1c60, 0, $1c60, 0, 0,
-      0, 0, 0, $1c60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0,
-      (* $1332 .. $13ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, $97d0,
-      $97d0, $97d0, $97d0, $97d0, $97d0, $97d0, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0,
-      (* $1e00 .. $1eff *)
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, $e241, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      (* $1f01 .. $1fff *)
-      0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, 0, $fff8, 0, $fff8,
-      0, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8,
-      $fff8, $fff8, $fff8, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $ffb6, $ffb6,
-      $fff7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffaa, $ffaa, $ffaa, $ffaa, $fff7,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $ff9c, $ff9c, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $ff90, $ff90, $fff9, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, $ff80, $ff80, $ff82, $ff82, $fff7, 0, 0, 0,
-      (* $2103 .. $21ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $e2a3, 0, 0, 0, $df41, $dfba, 0, 0, 0,
-      0, 0, 0, $1c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $247c .. $24ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
-      26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $2c00 .. $2cff *)
-      48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-      48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-      48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, $d609, $f11a,
-      $d619, 0, 0, 1, 0, 1, 0, 1, 0, $d5e4, $d603, $d5e1, $d5e2, 0, 1, 0, 0,
-      1, 0, 0, 0, 0, 0, 0, 0, 0, $d5c1, $d5c1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-      0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $a60d .. $a6ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0,
-      (* $a722 .. $a7ff *)
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, $75fc, 1, 0, 1,
-      0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, $5ad8, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0,
-      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, $5abc, $5ab1, $5ab5,
-      $5abf, 0, 0, $5aee, $5ad6, $5aeb, $3a0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $ff21 .. $ffff *)
-      32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-      32, 32, 32, 32, 32, 32, 32, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
- );
-
-
-const
-   CCaseMapUpper: array [0 .. 4569] of Word = (
-      (* index *)
-      $19f, $29f, $39f, $45a, $556, $656, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $6dd, $100, $100, $100, $100,
-      $100, $100, $100, $100, $7db, $864, $963, $a63, $100, $b57, $100, $100,
-      $bdc, $100, $100, $100, $100, $100, $100, $100, $cc6, $dc6, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $e85, $f62,
-      $100, $100, $100, $101a, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100, $100,
-      $100, $100, $100, $10da,
-      (* defaults *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $61 .. $ff *)
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      $2e7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, 0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $79,
-      (* $100 .. $1ff *)
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ff18, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, $ffff, 0, $ffff, 0,
-      $ffff, $fed4, $c3, 0, 0, $ffff, 0, $ffff, 0, 0, $ffff, 0, 0, 0, $ffff,
-      0, 0, 0, 0, 0, $ffff, 0, 0, $61, 0, 0, 0, $ffff, $a3, 0, 0, 0, $82, 0,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, 0, $ffff, 0, 0, 0, 0, $ffff, 0, 0,
-      $ffff, 0, 0, 0, $ffff, 0, $ffff, 0, 0, $ffff, 0, 0, 0, $ffff, 0, $38,
-      0, 0, 0, 0, 0, $ffff, $fffe, 0, $ffff, $fffe, 0, $ffff, $fffe, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      $ffb1, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, 0, $ffff, $fffe, 0, $ffff, 0, 0, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff,
-      (* $200 .. $2ff *)
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0,
-      $ffff, 0, 0, $2a3f, $2a3f, 0, $ffff, 0, 0, 0, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, $2a1f, $2a1c, $2a1e, $ff2e, $ff32, 0,
-      $ff33, $ff33, 0, $ff36, 0, $ff35, $a54f, 0, 0, 0, $ff33, $a54b, 0,
-      $ff31, 0, $a528, $a544, 0, $ff2f, $ff2d, $a544, $29f7, $a541, 0, 0,
-      $ff2d, 0, $29fd, $ff2b, 0, 0, $ff2a, 0, 0, 0, 0, 0, 0, 0, $29e7, 0, 0,
-      $ff26, 0, 0, $ff26, 0, 0, 0, $a52a, $ff26, $ffbb, $ff27, $ff27, $ffb9,
-      0, 0, 0, 0, 0, $ff25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $a515, $a512, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $345 .. $3ff *)
-      84, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffff, 0,
-      $ffff, 0, 0, 0, $ffff, 0, 0, 0, $82, $82, $82, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffda, $ffdb, $ffdb, $ffdb, 0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe1, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffc0, $ffc1, $ffc1,
-      0, $ffc2, $ffc7, 0, 0, 0, $ffd1, $ffca, $fff8, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, $ffaa, $ffb0, $7, $ff8c, 0, $ffa0, 0, 0,
-      $ffff, 0, 0, $ffff, 0, 0, 0, 0,
-      (* $404 .. $4ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0,
-      $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, $ffb0, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, $fff1, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      (* $500 .. $5ff *)
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $1379 .. $13ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, $fff8, $fff8, $fff8, $fff8, $fff8, $fff8, 0, 0,
-      (* $1c02 .. $1cff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, $e792, $e793, $e79c, $e79e, $e79e, $e79d, $e7a4, $e7db,
-      $89c2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $1d77 .. $1dff *)
-      0, 0, $8a04, 0, 0, 0, $ee6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $1e01 .. $1eff *)
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0, $ffc5,
-      0, 0, 0, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      (* $1f00 .. $1fff *)
-      8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0,
-      8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 8, 0, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0,
-      8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 74, 74, 86, 86, 86, 86,
-      $64, $64, $80, $80, $70, $70, $7e, $7e, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 0,
-      0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 8,
-      8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 0, 9, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, $e3db, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 0, 0, 0, 7, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $210c .. $21ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffe4, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, $fff0, $fff0, $fff0, $fff0, $fff0, $fff0, $fff0, $fff0,
-      $fff0, $fff0, $fff0, $fff0, $fff0, $fff0, $fff0, $fff0, 0, 0, 0, 0, $ffff,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0,
-      (* $247b .. $24ff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6,
-      $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6,
-      $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6, $ffe6,
-      $ffe6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $2c16 .. $2cff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0,
-      $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, $ffd0, 0, 0, $ffff,
-      0, 0, 0, $d5d5, $d5d8, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0,
-      0, $ffff, 0, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0,
-      0, 0, 0, 0, $ffff, 0, $ffff, 0, 0, 0, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0,
-      (* $2d00 .. $2dff *)
-      $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0,
-      $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0,
-      $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0,
-      $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, $e3a0, 0, $e3a0, 0, 0,
-      0, 0, 0, $e3a0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $a641 .. $a6ff *)
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0,
-      (* $a723 .. $a7ff *)
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0,
-      $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $ffff, 0, $ffff,
-      0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0, $ffff,
-      0, 0, 0, 0, $ffff, 0, $ffff, 0, 0, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff,
-      0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, $ffff, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, $ffff, 0, $ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $ab48 .. $abff *)
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $fc60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830,
-      $6830, $6830, $6830, $6830, $6830, $6830, $6830, $6830, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      (* $ff40 .. $ffff *)
-      0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0,
-      $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, $ffe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-   );
-
-{$ifndef WIN32_ASM}
-function ToLowerW(Ch: Word): Word; inline;
-begin
-   Result := ch + CCaseMapLower[CCaseMapLower[ch shr 8] + (ch and $ff)];
-end;
-
-function ToUpperW(Ch: Word): Word; inline;
-begin
-   Result := ch + CCaseMapUpper[CCaseMapUpper[ch shr 8] + (ch and $ff)];
-end;
-{$endif}
-
-procedure CharLowerBuffW(Data: PWord; Count: Cardinal);
-{$ifndef WIN32_ASM}
-var
-   Index: Integer;
-begin
-   Index := Count;
-   while Index > 0 do
-   begin
-      Data^ := ToLowerW(Data^);
-      Inc(Data);
-      Dec(Index);
-   end;
-{$else}
-asm
-        TEST    EDX,EDX
-        JS      @2
-
-        PUSH    EBX
-        PUSH    EDI
-
-        MOV     ECX,EDX             // ECX <- Count
-        MOV     EDI,EAX             // EDI <- Data
-
-@1:     MOV     AX,WORD PTR [EDI]
-        MOV     DX,AX
-        SHR     DX,8
-        MOVZX   EDX, DX
-        MOVZX   EDX, WORD PTR [CCaseMapLower + 2 * EDX]
-
-        MOV     BX,AX
-        AND     BX,$FF
-        ADD     DX,BX
-        MOVZX   EDX, DX
-        MOVZX   EDX, WORD PTR [CCaseMapLower + 2 * EDX]
-        ADD     AX, DX
-        MOV     [EDI],AX
-
-        ADD     EDI,2
-        DEC     ECX
-        JNZ     @1
-
-        POP     EDI
-        POP     EBX
-
-@2:
-{$endif}
-end;
-
-procedure CharUpperBuffW(Data: PWord; Count: Cardinal);
-{$ifndef WIN32_ASM}
-var
-   Index: Integer;
-begin
-   Index := Count;
-   while Index > 0 do
-   begin
-      Data^ := ToUpperW(Data^);
-      Inc(Data);
-      Dec(Index);
-   end;
-{$else}
-asm
-        TEST    EDX,EDX
-        JS      @2
-
-        PUSH    EBX
-        PUSH    EDI
-
-        MOV     ECX,EDX
-        MOV     EDI,EAX
-
-@1:     MOV     AX,WORD PTR [EDI]
-        MOV     DX,AX
-        SHR     DX,8
-        MOVZX   EDX, DX
-        MOVZX   EDX, WORD PTR [CCaseMapUpper + 2 * EDX]
-
-        MOV     BX,AX
-        AND     BX,$FF
-        ADD     DX,BX
-        MOVZX   EDX, DX
-        MOVZX   EDX, WORD PTR [CCaseMapUpper + 2 * EDX]
-        ADD     AX, DX
-        MOV     [EDI],AX
-
-        ADD     EDI,2
-        DEC     ECX
-        JNZ     @1
-
-        POP     EDI
-        POP     EBX
-
-@2:
-{$endif}
-end;
-{$endif}
 
 // UnicodeLowerCase
 //
@@ -1318,11 +633,7 @@ begin
    if s<>'' then begin
       Result:=s;
       UniqueString(Result);
-      {$IFDEF WindowsCaseConvert}
       Windows.CharLowerBuffW(PWideChar(Pointer(Result)), Length(Result));
-      {$ELSE}
-      CharLowerBuffW(@Result[1], Length(Result));
-      {$ENDIF}
    end else Result:=s;
 end;
 
@@ -1333,11 +644,7 @@ begin
    if s<>'' then begin
       Result:=s;
       UniqueString(Result);
-      {$IFDEF WindowsCaseConvert}
       Windows.CharUpperBuffW(PWideChar(Pointer(Result)), Length(Result));
-      {$ELSE}
-      CharUpperBuffW(@Result[1], Length(Result));
-      {$ENDIF}
    end else Result:=s;
 end;
 
@@ -1381,14 +688,10 @@ end;
 
 // NormalizeString
 //
-{$IFDEF MSWINDOWS}
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
-{$endif}
-
 function NormalizeString(const s, form : String) : String;
-{$ifdef MSWindows}
 var
    nf, len, n : Integer;
 begin
@@ -1419,26 +722,6 @@ begin
       end;
    until True;
    SetLength(Result, len);
-{$else}
-var
-   str : CFStringRef;
-   mstr : CFMutableStringRef;
-   nf : Integer;
-begin
-   str := CFStringCreateWithCharacters(nil, PWideChar(s), length(S));
-   if (form = '') or (form = 'NFC') then
-      nf := kCFStringNormalizationFormC
-   else if form = 'NFD' then
-      nf := kCFStringNormalizationFormD
-   else if form = 'NFKC' then
-      nf := kCFStringNormalizationFormKC
-   else if form = 'NFKD' then
-      nf := kCFStringNormalizationFormKD
-   else raise Exception.CreateFmt('Unsupported normalization form "%s"', [form]);
-   mstr := CFStringCreateMutableCopy(nil, 0, str);
-   CFStringNormalize(mstr, nf);
-   Result := CFStringRefToStr(CFStringRef(mstr));
-{$endif}
 end;
 
 // StripAccents
@@ -1466,10 +749,6 @@ end;
 // InterlockedIncrement
 //
 function InterlockedIncrement(var val : Integer) : Integer;
-{$ifdef MACOS}
-begin
-   Result:=System.AtomicIncrement(val);
-{$else}
 {$ifndef WIN32_ASM}
 begin
    Result:=Windows.InterlockedIncrement(val);
@@ -1480,16 +759,11 @@ asm
    lock  xadd [ecx], eax
    inc   eax
 {$endif}
-{$endif}
 end;
 
 // InterlockedDecrement
 //
 function InterlockedDecrement(var val : Integer) : Integer;
-{$ifdef MACOS}
-begin
-   Result:=System.AtomicDecrement(val);
-{$else}
 {$ifndef WIN32_ASM}
 begin
    Result:=Windows.InterlockedDecrement(val);
@@ -1499,7 +773,6 @@ asm
    mov   eax,  -1
    lock  xadd [ecx], eax
    dec   eax
-{$endif}
 {$endif}
 end;
 
@@ -1530,10 +803,6 @@ end;
 // InterlockedExchangePointer
 //
 function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Pointer;
-{$ifdef MACOS}
-begin
-   Result:=System.AtomicExchange(target, val);
-{$else}
 {$ifndef WIN32_ASM}
 begin
    {$ifdef FPC}
@@ -1545,7 +814,6 @@ begin
 asm
    lock  xchg dword ptr [eax], edx
    mov   eax, edx
-{$endif}
 {$endif}
 end;
 
@@ -1560,29 +828,15 @@ begin
       Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
       {$endif}
    {$else}
-   {$ifdef MSWINDOWS}
    Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
-   {$else}
-   Result:=System.AtomicCmpExchange(destination, exchange, comparand);
-   {$endif}
    {$endif}
 end;
 
 // SetThreadName
 //
-{$IFDEF MSWINDOWS}
 function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPresent';
-{$ENDIF}
-{$IFDEF MACOS}
-// eventually add an implementation of IsDebuggerPresent here, see:
-// https://developer.apple.com/library/content/qa/qa1361/_index.html
-// or https://gist.github.com/rais38/4758465
-// yet missing the definition of kinfo_proc though... (could be found in FPC code)
-{$ENDIF}
-
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
-{$IFDEF MSWINDOWS}
 type
    TThreadNameInfo = record
       dwType : Cardinal;      // must be 0x1000
@@ -1605,32 +859,19 @@ begin
    except
    end;
    {$endif}
-{$ELSE}
-begin
-  pthread_setname_np(threadName);
-{$ENDIF}
 end;
 
 // OutputDebugString
 //
 procedure OutputDebugString(const msg : String);
 begin
-{$IFDEF MACOS}
-   WriteLn(msg);
-{$ELSE}
    Windows.OutputDebugStringW(PWideChar(msg));
-{$ENDIF}
 end;
 
 // WriteToOSEventLog
 //
 procedure WriteToOSEventLog(const logName, logCaption, logDetails : String;
                             const logRawData : RawByteString = '');
-{$IFDEF MACOS}
-begin
-   // yet todo, eventually append text to a file in /Library/Logs
-   WriteLn(logName, logCaption, logDetails);
-{$ELSE}
 var
   eventSource : THandle;
   detailsPtr : array [0..1] of PWideChar;
@@ -1649,7 +890,6 @@ begin
          DeregisterEventSource(eventSource);
       end;
    end;
-{$ENDIF}
 end;
 
 // SetDecimalSeparator
@@ -1685,14 +925,12 @@ end;
 // CollectFiles
 //
 type
-   TMasks = array of TMask;
-
-{$IFDEF MSWINDOWS}
    TFindDataRec = record
       Handle : THandle;
       Data : TWin32FindDataW;
    end;
-{$ENDIF}
+
+   TMasks = array of TMask;
 
 // CollectFilesMasked
 //
@@ -1700,7 +938,6 @@ procedure CollectFilesMasked(const directory : TFileName;
                              const masks : TMasks; list : TStrings;
                              recurseSubdirectories: Boolean = False;
                              onProgress : TCollectFileProgressEvent = nil);
-{$IFDEF MSWINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -1755,53 +992,6 @@ begin
       until not FindNextFileW(searchRec.Handle, searchRec.Data);
       Windows.FindClose(searchRec.Handle);
    end;
-{$ELSE}
-var
-   searchRec : TSearchRec;
-   fileName : TFileName;
-   skipScan, addToList : Boolean;
-   Attr, Done, i : Integer;
-begin
-   if Assigned(onProgress) then begin
-      skipScan:=False;
-      onProgress(directory, skipScan);
-      if skipScan then exit;
-   end;
-
-   Attr := faAnyFile;
-   Done := FindFirst(directory + '*.*', Attr, SearchRec);
-   while Done = 0 do
-   begin
-      if SearchRec.Attr <> faDirectory then
-      begin
-         // check file against mask
-         fileName:=searchRec.Name;
-         addToList := True;
-         for i := 0 to High(masks) do begin
-            addToList := masks[i].Matches(fileName);
-            if addToList then Break;
-         end;
-         if addToList then begin
-            fileName:=directory+fileName;
-            list.Add(fileName);
-         end;
-      end else if recurseSubdirectories then begin
-          // dive in subdirectory
-          if searchRec.Name[1]='.' then begin
-             if searchRec.Name[2]='.' then begin
-                if searchRec.Name[3]=#0 then continue;
-             end else if searchRec.Name[2]=#0 then continue;
-          end;
-
-          // decomposed cast and concatenation to avoid implicit string variable
-          fileName:=directory+searchRec.Name+PathDelim;
-          CollectFilesMasked(fileName, masks, list, True, onProgress);
-       end;
-
-      Done := FindNext(SearchRec);
-   end;
-   FindClose(SearchRec);
-{$ENDIF}
 end;
 
 // CollectFiles
@@ -1843,7 +1033,6 @@ end;
 // CollectSubDirs
 //
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
-{$IFDEF MSWINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -1876,22 +1065,6 @@ begin
       until not FindNextFileW(searchRec.Handle, searchRec.Data);
       Windows.FindClose(searchRec.Handle);
    end;
-{$ELSE}
-var
-   searchRec : TSearchRec;
-   Done : Integer;
-begin
-   Done := SysUtils.FindFirst(directory + '*', faAnyFile, SearchRec);
-   while Done = 0 do
-   begin
-      if (faDirectory and searchRec.Attr) <> 0 then
-         if searchRec.Name[1]<>'.' then
-            list.Add(searchRec.Name);
-
-      Done := SysUtils.FindNext(SearchRec);
-   end;
-   SysUtils.FindClose(SearchRec);
-{$ENDIF}
 end;
 
 {$ifdef FPC}
@@ -1995,8 +1168,6 @@ begin
 {$endif}
 end;
 
-{$IFDEF MSWINDOWS}
-
 // LoadTextFromBuffer
 //
 function LoadTextFromBuffer(const buf : TBytes) : UnicodeString;
@@ -2038,6 +1209,29 @@ begin
    SetLength(b, Length(buf));
    System.Move(buf[1], b[0], Length(buf));
    Result:=LoadTextFromBuffer(b);
+end;
+
+// LoadTextFromStream
+//
+function LoadTextFromStream(aStream : TStream) : UnicodeString;
+var
+   n : Integer;
+   buf : TBytes;
+begin
+   n := aStream.Size-aStream.Position;
+   SetLength(buf, n);
+   aStream.Read(buf[0], n);
+   Result:=LoadTextFromBuffer(buf);
+end;
+
+// LoadTextFromFile
+//
+function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
+var
+   buf : TBytes;
+begin
+   buf:=LoadDataFromFile(fileName);
+   Result:=LoadTextFromBuffer(buf);
 end;
 
 // ReadFileChunked
@@ -2203,67 +1397,12 @@ begin
       CloseHandle(hFile);
    end;
 end;
-{$endif}
-
-// LoadTextFromStream
-//
-function LoadTextFromStream(aStream : TStream) : UnicodeString;
-{$ifdef MSWINDOWS}
-var
-   n : Integer;
-   buf : TBytes;
-begin
-   n := aStream.Size-aStream.Position;
-   SetLength(buf, n);
-   aStream.Read(buf[0], n);
-   Result:=LoadTextFromBuffer(buf);
-{$else}
-var
-   StringList: TStringList;
-begin
-   StringList := TStringList.Create;
-   try
-     StringList.LoadFromStream(aStream);
-     Result := StringList.Text;
-   finally
-     StringList.Free;
-   end;
-{$endif}
-end;
-
-// LoadTextFromFile
-//
-function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
-{$ifdef MSWINDOWS}
-var
-   buf : TBytes;
-begin
-   buf:=LoadDataFromFile(fileName);
-   Result:=LoadTextFromBuffer(buf);
-{$else}
-var
-   StringList: TStringList;
-begin
-   StringList := TStringList.Create;
-   try
-     StringList.LoadFromFile(fileName);
-     Result := StringList.Text;
-   finally
-     StringList.Free;
-   end;
-{$endif}
-end;
 
 // SaveTextToUTF8File
 //
 procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 begin
-{$IFDEF MACOS}
-   StrToNSStr(string(text)).writeToFile(StrToNSStr(fileName), False);
-{$ENDIF}
-{$IFDEF MSWINDOWS}
    SaveRawBytesToFile(fileName, UTF8Encode(text));
-{$ENDIF}
 end;
 
 // AppendTextToUTF8File
@@ -2288,47 +1427,31 @@ end;
 //
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 begin
-{$IFDEF POSIX}
-   Result := open(PAnsiChar(AnsiString(fileName)), 0, O_RDONLY);
-{$ENDIF}
-{$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_READ, FILE_SHARE_READ+FILE_SHARE_WRITE,
                       nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
    if Result=INVALID_HANDLE_VALUE then begin
       if GetLastError<>ERROR_FILE_NOT_FOUND then
          RaiseLastOSError;
    end;
-{$ENDIF}
 end;
 
 // OpenFileForSequentialWriteOnly
 //
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 begin
-{$IFDEF POSIX}
-   Result := open(PAnsiChar(AnsiString(fileName)), 0, O_WRONLY);
-{$ENDIF}
-{$IFDEF MSWINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_WRITE, 0, nil, CREATE_ALWAYS,
                       FILE_ATTRIBUTE_NORMAL+FILE_FLAG_SEQUENTIAL_SCAN, 0);
    if Result=INVALID_HANDLE_VALUE then
       RaiseLastOSError;
-{$ENDIF}
 end;
 
 // CloseFileHandle
 //
 procedure CloseFileHandle(hFile : THandle);
 begin
-{$IFDEF POSIX}
-  fcntl(hFile, FD_CLOEXEC)
-{$ENDIF}
-{$IFDEF MSWINDOWS}
    CloseHandle(hFile);
-{$ENDIF}
 end;
 
-{$ifdef MSWINDOWS}
 // FileWrite
 //
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
@@ -2386,28 +1509,32 @@ end;
 
 // FileDateTime
 //
-function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TDateTime;
+function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TdwsDateTime;
 var
    info : TWin32FileAttributeData;
-   localTime : TFileTime;
-   systemTime : TSystemTime;
+   fileTime : TFileTime;
+   buf : TdwsDateTime;
 begin
    if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then begin
       if lastAccess then
-         FileTimeToLocalFileTime(info.ftLastAccessTime, localTime)
-      else FileTimeToLocalFileTime(info.ftLastWriteTime, localTime);
-      FileTimeToSystemTime(localTime, systemTime);
-      Result:=SystemTimeToDateTime(systemTime);
-   end else Result:=0;
+         FileTimeToLocalFileTime(info.ftLastAccessTime, fileTime)
+      else FileTimeToLocalFileTime(info.ftLastWriteTime, fileTime);
+      buf.AsFileTime := fileTime;
+   end else buf.Clear;
+   Result := buf;
 end;
 
 // FileSetDateTime
 //
-procedure FileSetDateTime(hFile : THandle; aDateTime : TDateTime);
+procedure FileSetDateTime(hFile : THandle; const aDateTime : TdwsDateTime);
+var
+   doNotChange, newTimeStamp : TFileTime;
 begin
-   FileSetDate(hFile, DateTimeToFileDate(aDateTime));
+   newTimeStamp := aDateTime.AsFileTime;
+   doNotChange.dwLowDateTime  := Cardinal(-1);
+   doNotChange.dwHighDateTime := Cardinal(-1);
+   SetFileTime(hFile, @doNotChange, @newTimeStamp, @newTimeStamp);
 end;
-{$ENDIF}
 
 // DeleteDirectory
 //
@@ -2512,19 +1639,13 @@ end;
 // GetCurrentUserName
 //
 function GetCurrentUserName : String;
-{$IFDEF MSWINDOWS}
 var
    len : Cardinal;
 begin
    len:=255;
    SetLength(Result, len);
-   Windows.GetUserName(PChar(Result), len);
+   Windows.GetUserNameW(PWideChar(Result), len);
    SetLength(Result, len-1);
-{$ENDIF}
-{$IFDEF MACOS}
-begin
-   Result := UnicodeString(TNSString.Wrap(NSUserName).UTF8String);
-{$ENDIF}
 end;
 
 {$ifndef FPC}
@@ -2573,7 +1694,6 @@ begin
    Result := Format('%d.%d.%d.%d', [Major, Minor, Release, Build]);
 end;
 
-{$IFDEF MSWindows}
 // Adapted from Ian Boyd code published in
 // http://stackoverflow.com/questions/10854958/how-to-get-version-of-running-executable
 function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
@@ -2645,28 +1765,7 @@ begin
    else Result := '?.?.?.? 32bit';
    {$endif}
 end;
-{$ENDIF}
 
-{$IFDEF MACOS}
-function ApplicationVersion : String;
-var
-   CFStr: CFStringRef;
-   Range: CFRange;
-begin
-   CFStr := CFBundleGetValueForInfoDictionaryKey(CFBundleGetMainBundle,
-      kCFBundleVersionKey);
-
-   if CFStr = nil then
-     Exit('unknown');
-
-   Range.location := 0;
-   Range.length := CFStringGetLength(CFStr);
-   SetLength(Result, Range.length);
-   CFStringGetCharacters(CFStr, Range, PChar(Result));
-end;
-{$ENDIF}
-
-{$ifndef POSIX}
 // ------------------
 // ------------------ TdwsCriticalSection ------------------
 // ------------------
@@ -2705,7 +1804,6 @@ function TdwsCriticalSection.TryEnter : Boolean;
 begin
    Result:=TryEnterCriticalSection(FCS);
 end;
-{$endif}
 
 // ------------------
 // ------------------ TPath ------------------
@@ -2911,7 +2009,6 @@ const
    WT_EXECUTELONGFUNCTION  = ULONG($00000010);
 {$endif}
 
-{$ifdef MSWINDOWS}
 procedure TTimerTimeoutCallBack(Context: Pointer; {%H-}Success: Boolean); stdcall;
 var
    tt : TTimerTimeout;
@@ -2961,7 +2058,177 @@ begin
    DeleteTimerQueueTimer(0, FTimer, INVALID_HANDLE_VALUE);
    FTimer:=0;
 end;
-{$endif}
+
+// ------------------
+// ------------------ TdwsDateTime ------------------
+// ------------------
+
+// Now
+//
+class function TdwsDateTime.Now : TdwsDateTime;
+var
+   fileTime : TFileTime;
+begin
+   GetSystemTimeAsFileTime(fileTime);
+   Result.AsFileTime := fileTime;
+end;
+
+// FromLocalDateTime
+//
+class function TdwsDateTime.FromLocalDateTime(const dt : TDateTime) : TdwsDateTime;
+begin
+   Result.AsLocalDateTime := dt;
+end;
+
+// Clear
+//
+procedure TdwsDateTime.Clear;
+begin
+   FValue := 0;
+end;
+
+// IsZero
+//
+function TdwsDateTime.IsZero : Boolean;
+begin
+   Result := FValue = 0;
+end;
+
+// Equal
+//
+class operator TdwsDateTime.Equal(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue = b.FValue;
+end;
+
+// NotEqual
+//
+class operator TdwsDateTime.NotEqual(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue <> b.FValue;
+end;
+
+// GreaterThan
+//
+class operator TdwsDateTime.GreaterThan(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue > b.FValue;
+end;
+
+// GreaterThanOrEqual
+//
+class operator TdwsDateTime.GreaterThanOrEqual(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue >= b.FValue;
+end;
+
+// LessThan
+//
+class operator TdwsDateTime.LessThan(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue < b.FValue;
+end;
+
+// LessThanOrEqual
+//
+class operator TdwsDateTime.LessThanOrEqual(const a, b : TdwsDateTime) : Boolean;
+begin
+   Result := a.FValue <= b.FValue;
+end;
+
+// MillisecondsAheadOf
+//
+function TdwsDateTime.MillisecondsAheadOf(const d : TdwsDateTime) : Int64;
+begin
+   Result := FValue - d.FValue;
+end;
+
+// IncMilliseconds
+//
+procedure TdwsDateTime.IncMilliseconds(const msec : Int64);
+begin
+   Inc(FValue, msec);
+end;
+
+const
+   cFileTime_UnixTimeStart : Int64 = $019DB1DED53E8000; // January 1, 1970 (start of Unix epoch) in "ticks"
+   cFileTime_TicksPerMillisecond : Int64 = 10000;       // a tick is 100ns
+
+// SetAsFileTime
+//
+procedure TdwsDateTime.SetAsFileTime(const val : TFileTime);
+var
+   temp : LARGE_INTEGER;
+begin
+   temp.LowPart := val.dwLowDateTime;
+   temp.HighPart := val.dwHighDateTime;
+   FValue := (temp.QuadPart - cFileTime_UnixTimeStart) div cFileTime_TicksPerMillisecond;
+end;
+
+// GetAsDosDateTime
+//
+function TdwsDateTime.GetAsDosDateTime : Integer;
+var
+   fileTime : TFileTime;
+   dosTime : LongRec;
+begin
+   fileTime := AsFileTime;
+   FileTimeToDosDateTime(fileTime, dosTime.Hi, dosTime.Lo);
+   Result := Integer(dosTime);
+end;
+
+// GetAsFileTime
+//
+function TdwsDateTime.GetAsFileTime : TFileTime;
+var
+   temp : LARGE_INTEGER;
+begin
+   temp.QuadPart := (FValue * cFileTime_TicksPerMillisecond) + cFileTime_UnixTimeStart;
+   Result.dwLowDateTime := temp.LowPart;
+   Result.dwHighDateTime := temp.HighPart;
+end;
+
+// GetAsUnixTime
+//
+function TdwsDateTime.GetAsUnixTime : Int64;
+begin
+   Result := FValue div 1000;
+end;
+
+// SetAsUnixTime
+//
+procedure TdwsDateTime.SetAsUnixTime(const val : Int64);
+begin
+   FValue := val * 1000;
+end;
+
+// GetAsLocalDateTime
+//
+function TdwsDateTime.GetAsLocalDateTime : TDateTime;
+begin
+   Result := UTCDateTimeToLocalDateTime(AsUTCDateTime);
+end;
+
+// SetAsLocalDateTime
+//
+procedure TdwsDateTime.SetAsLocalDateTime(const val : TDateTime);
+begin
+   AsUTCDateTime := LocalDateTimeToUTCDateTime(val);
+end;
+
+// GetAsUTCDateTime
+//
+function TdwsDateTime.GetAsUTCDateTime : TDateTime;
+begin
+   Result := FValue / 864e5 + 25569;
+end;
+
+// SetAsUTCDateTime
+//
+procedure TdwsDateTime.SetAsUTCDateTime(const val : TDateTime);
+begin
+   FValue := Round((val - 25569) * 864e5);
+end;
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------

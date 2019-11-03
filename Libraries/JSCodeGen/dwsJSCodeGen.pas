@@ -1452,7 +1452,7 @@ begin
 
    RegisterCodeGen(TConvIntegerToBigIntegerExpr, TdwsExprGenericCodeGen.Create(['BigInt', '(', 0, ')']));
    RegisterCodeGen(TConvStringToBigIntegerExpr,  TdwsExprGenericCodeGen.Create(['BigInt', '(', 0, ')']));
-   RegisterCodeGen(TConvFloatToBigIntegerExpr,   TdwsExprGenericCodeGen.Create(['BigInt(Math.trunc', '(', 0, ')', ')']));
+   RegisterCodeGen(TConvFloatToBigIntegerExpr,   TJSConvFloatToBigInteger.Create);
    RegisterCodeGen(TConvBigIntegerToFloatExpr,   TdwsExprGenericCodeGen.Create(['Number', '(', 0, ')']));
    RegisterCodeGen(TConvBigIntegerToIntegerExpr,   TdwsExprGenericCodeGen.Create(['Number', '(', 0, ')']));
 
@@ -2686,20 +2686,10 @@ var
    processedDependencies : TStringList;
 
    procedure InsertResourceDependency(const depName : String);
-   var
-      rs : TResourceStream;
-      buf : UTF8String;
    begin
       if FlushedDependencies.IndexOf(depName)>=0 then Exit;
 
-      rs:=TResourceStream.Create(HInstance, depName, 'dwsjsrtl');
-      try
-         SetLength(buf, rs.Size);
-         rs.Read(buf[1], rs.Size);
-         destStream.WriteString(UTF8ToString(buf));
-      finally
-         rs.Free;
-      end;
+      destStream.WriteString(JSRTL_Resource(depName));
 
       FlushedDependencies.Add(depName);
    end;

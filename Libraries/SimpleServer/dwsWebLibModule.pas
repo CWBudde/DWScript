@@ -724,7 +724,7 @@ end;
 function TdwsWebLib.dwsWebClassesWebRequestMethodsIfModifiedSinceFastEvalFloat(
   baseExpr: TTypedExpr; const args: TExprBaseListExec): Double;
 begin
-   Result := args.WebRequest.IfModifiedSince;
+   Result := args.WebRequest.IfModifiedSince.AsLocalDateTime;
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebRequestMethodsIfNoneMatchFastEvalString(
@@ -981,7 +981,7 @@ var
 begin
    wr := args.WebResponse;
    if wr <> nil then
-      wr.LastModified := args.AsFloat[0];
+      wr.LastModified := TdwsDateTime.FromLocalDateTime(args.AsFloat[0]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetETagFastEvalNoResult(

@@ -73,7 +73,9 @@ type
 
    TJSStrBeginsWithExpr = class (TJSFuncBaseExpr)
       public
+         procedure DoCodeGen(codeGen : TdwsCodeGen; expr : TExprBase; wrap : Boolean);
          procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
+         procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
    end;
 
    TJSStrEndsWithExpr = class (TJSFuncBaseExpr)
@@ -155,6 +157,7 @@ type
 function FindJSRTLDependency(const name : String) : PJSRTLDependency;
 function All_RTL_JS : String;
 procedure IgnoreJSRTLDependencies(dependencies : TStrings);
+function JSRTL_Resource(const name : String) : String;
 
 procedure SetJSRTL_TZ_FromSettings(const settings : TFormatSettings);
 
@@ -166,12 +169,12 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsJSON;
+uses dwsJSON, dwsXPlatform, SynZip;
 
 {$R dwsJSRTL.res}
 
 const
-   cJSRTLDependencies : array [1..296{$ifdef JS_BIGINTEGER} + 11{$endif}] of TJSRTLDependency = (
+   cJSRTLDependencies : array [1..296{$ifdef JS_BIGINTEGER} + 16{$endif}] of TJSRTLDependency = (
       // codegen utility functions
       (Name : '$CheckStep';
        Code : 'function $CheckStep(s,z) { if (s>0) return s; throw Exception.Create($New(Exception),"FOR loop STEP should be strictly positive: "+s.toString()+z); }';
@@ -492,10 +495,10 @@ const
                +'}'),
       (Name : '$uniCharAt';
        Code : '';
-       Dependency : '!unicharat_js' ),
+       Dependency : '!uniCharAt.js' ),
       (Name : '$uniCharCodeAt';
        Code : '';
-       Dependency : '!unicharcodeat_js' ),
+       Dependency : '!uniCharCodeAt.js' ),
       (Name : '$Xor';
        Code : 'function $Xor(a,b) { return typeof a === "number" ? a^b : a != b  && a || b }'),
       (Name : '$Div';
@@ -655,7 +658,7 @@ const
        Code : 'function BoolToStr(b) { return b?"True":"False" }'),
       (Name : 'ByteSizeToStr';
        Code : '';
-       Dependency : '!byteSizeToStr_js' ),
+       Dependency : '!byteSizeToStr.js' ),
       (Name : 'Ceil';
        Code : 'var Ceil = Math.ceil'),
       (Name : 'CharAt';
@@ -858,10 +861,10 @@ const
        Code : 'var Floor = Math.floor'),
       (Name : 'Format';
        Code : 'function Format(f,a) { a.unshift(f); return sprintf.apply(null,a) }';
-       Dependency : '!sprintf_js'),
+       Dependency : '!sprintf.js'),
       (Name : 'FormatDateTime';
        Code : '';
-       Dependency : '!formatDateTime_js'; Dependency2 : '$TZ' ),
+       Dependency : '!formatDateTime.js'; Dependency2 : '$TZ' ),
       (Name : 'Frac';
        Code : 'function Frac(v) { return v-((v>0)?Math.floor(v):Math.ceil(v)) }'),
       (Name : 'FindDelimiter';
@@ -998,7 +1001,7 @@ const
        Dependency : 'StringOfString' ),
       (Name : 'ParseDateTime';
        Code : 'function ParseDateTime(f, s, u) { return strToDateTimeDef(f, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : 'FormatDateTime'),
       (Name : 'PopCount';
        Code : 'function PopCount(i) {'#10
                + #9'if (i > 0xffffffff) return i.toString(2).replace(/0/g,"").length;'#10
@@ -1021,7 +1024,7 @@ const
        Code : 'function RadToDeg(v) { return v*(180/Math.PI) }'),
       (Name : 'Random';
        Code : 'var Random = $alea()';
-       Dependency : '!alea_js' ),
+       Dependency : '!alea.js' ),
       (Name : 'RandG';
        Code : 'function RandG(m, s) {'#10
               +#9'var u, r, n;'#10
@@ -1122,16 +1125,16 @@ const
        Code : 'function StrToCSSText(s) { return CSS.escape(s) }'),
       (Name : 'StrToDate';
        Code : 'function StrToDate(s,u) { return strToDateTimeDef($fmt.ShortDateFormat, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateDef';
        Code : 'function StrToDateDef(s,d,u) { return strToDateTimeDef($fmt.ShortDateFormat, s, d, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateTime';
        Code : 'function StrToDateTime(s,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, 0, u) || strToDateTimeDef($fmt.ShortDateFormat, s, 0, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToDateTimeDef';
        Code : 'function StrToDateTimeDef(s,d,u) { return strToDateTimeDef($fmt.ShortDateFormat+" "+$fmt.LongTimeFormat, s, 0, u) || strToDateTimeDef($fmt.ShortDateFormat, s, d, u) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : 'FormatDateTime'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : 'FormatDateTime'),
       (Name : 'StrToFloat';
        Code : 'function StrToFloat(v) { return parseFloat(v) }'),
       (Name : 'StrToFloatDef';
@@ -1175,10 +1178,10 @@ const
                +'}'#10),
       (Name : 'StrToTime';
        Code : 'function StrToTime(s) { return strToDateTimeDef($fmt.LongTimeFormat, s, 0)||strToDateTimeDef($fmt.ShortTimeFormat, s, 0) }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : '$TZ'),
       (Name : 'StrToTimeDef';
        Code : 'function StrToTimeDef(s,d) { return strToDateTimeDef($fmt.LongTimeFormat, s, 0)||strToDateTimeDef($fmt.ShortTimeFormat, s, 0)||d }';
-       Dependency : '!strToDateTimeDef_js'; Dependency2 : '$TZ'),
+       Dependency : '!strToDateTimeDef.js'; Dependency2 : '$TZ'),
       (Name : 'StrToXML';
        Code : 'function StrToXML(v) { return v.replace(/[&<>"'']/g, StrToXML.e) }'#10
               +'StrToXML.e = function(c) { return { "&":"&amp;", "<":"&lt;", ">":"&gt;", ''"'':"&quot;", "''":"&apos;" }[c] }' ),
@@ -1328,10 +1331,12 @@ const
        Code : 'function BigInteger$TestBit(v,b) { return b >= 0 ? (((v >> BigInt(b)) & 1n) == 1n) : false }'),
       (Name : 'BigIntegerToBlobParameter';
        Code : 'function BigIntegerToBlobParameter(v) {'#10
-               +#9'if (v == 0) return "00";'#10
-               +#9'var p, r;'#10
-               +#9'if (v < 0) { p = "ff"; r = (-v).toString(16) } else { r = v.toString(16) };'#10
-               +#9'if (r.length % 1) r = "0" + r;'#10
+               +#9'if (v == 0) return "";'#10
+               +#9'var p = "";'#10
+               +#9'if (v < 0) { p = "ff"; v = -v };'#10
+               +#9'var r = v.toString(16);'#10
+               +#9'if (r.length & 1) r = "0" + r;'#10
+               +#9'if (p == "" && r.substring(0,2) == "ff") p = "00";'#10
                +#9'return p + r'#10
                +'}'),
       (Name : 'BigIntegerToString';
@@ -1339,9 +1344,39 @@ const
       (Name : 'BigIntegerToHex';
        Code : 'function BigIntegerToHex(v) { return v.toString(16) }'),
       (Name : 'BlobFieldToBigInteger';
-       Code : 'function BlobFieldToBigInteger(v) { return v.substring(0,1) == "ff" ? -BigInt("0x" + v.substring(2)) : BigInt("0x" + v)  }'),
+       Code : 'function BlobFieldToBigInteger(v) { return v.substring(0,2) == "ff" ? -BigInt("0x" + (v.substring(2) || "0")) : BigInt("0x" + (v || "0"))  }'),
+      (Name : 'ModInv';
+       Dependency : '!ModInv.js'),
+      (Name : 'ModPow$_BigInteger_Integer_BigInteger_';
+       Code : 'function ModPow$_BigInteger_Integer_BigInteger_(v, e, m) { return ModPow$(v, BigInt(e), m) }';
+       Dependency : 'ModPow$_BigInteger_BigInteger_BigInteger_'),
+      (Name : 'ModPow$_BigInteger_BigInteger_BigInteger_';
+       Code : 'var ModPow$_BigInteger_BigInteger_BigInteger_ = ModPow$;';
+       Dependency : '!ModInv.js'; Dependency2 : '!ModPow.js'),
+      (Name : 'Odd$_BigInteger_';
+       Code : 'function Odd$_BigInteger_(v) { return (v&1n)==1n }'),
+      (Name : 'RandomBigInteger';
+       Code : 'function RandomBigInteger(m) {'#10
+              +#9'if (m <= 0) return 0;'#10
+              +#9'let b = m.toString(2).length, r, i;'#10
+              +#9'const h = "0123456789abcdef";'#10
+              +#9'do {'#10
+              +#9#9'let a = new Uint8Array((b >> 3) + (b & 7 ? 1 : 0)), rh = "0x";'#10
+              +#9#9'crypto.getRandomValues(a);'#10
+              +#9#9'if (b & 7) a[0] &= (1 << (b & 7) + 1) - 1;'#10
+              +#9#9'for (i = 0; i < a.length; i++) rh += h[a[i] >> 4] + h[a[i] & 15];'#10
+              +#9#9'r = BigInt(rh);'#10
+              +#9'} while (r >= m)'#10
+              +#9'return r'#10
+              +'}'),
       (Name : 'StringToBigInteger';
-       Code : 'function StringToBigInteger(v) { return BigInt(v) }')
+       Code : 'function StringToBigInteger(v, b) {'#10
+              +#9'if (!v) return 0n;'#10
+              +#9'if (b==16) {'#10
+              +#9#9'return v.charCodeAt(0)==45 ? -BigInt("0x" + v.substring(1)) : BigInt("0x" + v);'#10
+              +#9'}'#10
+              +#9'return BigInt(v)'#10
+              +'}')
    {$endif}
 
    );
@@ -1448,6 +1483,30 @@ begin
    end;
 end;
 
+// JSRTL_Resource
+//
+var
+   vJSLRTL_Resources : TFastCompareTextList;
+procedure Prepare_JSRTL_Resources;
+var
+   zip : TZipRead;
+   i : Integer;
+begin
+   vJSLRTL_Resources := TFastCompareTextList.Create;
+   zip := TZipRead.Create(0, 'dwsjsrtl', 'dwsjsrtl');
+   try
+      for i := 0 to zip.Count-1 do begin
+         vJSLRTL_Resources.Values[zip.Entry[i].zipName] := LoadTextFromRawBytes(zip.UnZip(i));
+      end;
+   finally
+      zip.Free;
+   end;
+end;
+function JSRTL_Resource(const name : String) : String;
+begin
+   Result := vJSLRTL_Resources.Values[name];
+end;
+
 // ------------------
 // ------------------ TJSMagicFuncExpr ------------------
 // ------------------
@@ -1499,6 +1558,7 @@ begin
    FMagicCodeGens.AddObject('MinInt', TdwsExprGenericCodeGen.Create(['Math.min', '(', 0, ',', 1, ')']));
    FMagicCodeGens.AddObject('NaN', TdwsExprGenericCodeGen.Create(['NaN']));
    FMagicCodeGens.AddObject('NormalizeString', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.normalize', '(', 1, ')']));
+   FMagicCodeGens.AddObject('Odd$_Integer_', TdwsExprGenericCodeGen.Create(['(', '(', 0, '&1)==1', ')']));
    FMagicCodeGens.AddObject('Pi', TdwsExprGenericCodeGen.Create(['Math.PI']));
    FMagicCodeGens.AddObject('Pos', TdwsExprGenericCodeGen.Create(['(', 1, '.indexOf', '(', 0, ')', '+1)']));
    FMagicCodeGens.AddObject('PosEx', TdwsExprGenericCodeGen.Create(['(', 1, '.indexOf', '(', 0, ',', '(', 2, ')', '-1)+1)']));
@@ -1535,6 +1595,12 @@ begin
    FMagicCodeGens.AddObject('VarIsClear', TdwsExprGenericCodeGen.Create(['(', 0 , '===undefined', ')']));
    FMagicCodeGens.AddObject('VarIsNull', TdwsExprGenericCodeGen.Create(['(', 0 , '===null', ')']));
    FMagicCodeGens.AddObject('VarIsStr', TdwsExprGenericCodeGen.Create(['(', 'typeof ', '(', 0 , ')', '==="string"', ')']));
+
+   {$ifdef JS_BIGINTEGER}
+   FMagicCodeGens.AddObject('BigIntegerToHex', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.toString(16)']));
+   FMagicCodeGens.AddObject('BigIntegerToString', TdwsExprGenericCodeGen.Create(['(', 0, ')', '.toString', '(', 1, ')']));
+   FMagicCodeGens.AddObject('Odd$_BigInteger_', TdwsExprGenericCodeGen.Create(['(', '(', 0, '&1n)==1n', ')']));
+   {$endif}
 end;
 
 // Destroy
@@ -1768,9 +1834,9 @@ end;
 // ------------------ TJSStrBeginsWithExpr ------------------
 // ------------------
 
-// CodeGen
+// DoCodeGen
 //
-procedure TJSStrBeginsWithExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+procedure TJSStrBeginsWithExpr.DoCodeGen(codeGen : TdwsCodeGen; expr : TExprBase; wrap : Boolean);
 var
    e : TMagicFuncExpr;
    a : TExprBase;
@@ -1785,7 +1851,8 @@ begin
       case Length(c.Value) of
          0 : codeGen.WriteString('false');
          1 : begin
-            codeGen.WriteString('(');
+            if wrap then
+               codeGen.WriteString('(');
             codeGen.Compile(e.Args[0]);
             if cgoObfuscate in codeGen.Options then begin
                // slightly faster but less readable, so activate only under obfuscation
@@ -1795,16 +1862,19 @@ begin
                codeGen.WriteString('.charAt(0)==');
                codeGen.WriteLiteralString(c.Value);
             end;
-            codeGen.WriteString(')');
+            if wrap then
+               codeGen.WriteString(')');
          end;
       else
-         codeGen.WriteString('(');
+         if wrap then
+            codeGen.WriteString('(');
          codeGen.Compile(e.Args[0]);
          codeGen.WriteString('.substr(0,');
          codeGen.WriteString(IntToStr(Length(c.Value)));
          codeGen.WriteString(')==');
          codeGen.WriteLiteralString(c.Value);
-         codeGen.WriteString(')');
+         if wrap then
+            codeGen.WriteString(')');
       end;
 
    end else begin
@@ -1818,6 +1888,20 @@ begin
       codeGen.WriteString(')');
 
    end;
+end;
+
+// CodeGen
+//
+procedure TJSStrBeginsWithExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+begin
+   DoCodeGen(codeGen, expr, True);
+end;
+
+// CodeGenNoWrap
+//
+procedure TJSStrBeginsWithExpr.CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr);
+begin
+   DoCodeGen(codeGen, expr, False);
 end;
 
 // ------------------
@@ -2455,8 +2539,11 @@ initialization
    TJSMagicFuncExpr.vAliases.CaseSensitive := False;
    TJSMagicFuncExpr.vAliases.Sorted := True;
 
+   Prepare_JSRTL_Resources;
+
 finalization
 
    FreeAndNil(TJSMagicFuncExpr.vAliases);
+   FreeAndNil(vJSLRTL_Resources);
 
 end.
