@@ -72,12 +72,18 @@ type
 
    TTokenTypes = set of TTokenType;
 
+   TTokenizerCaseSensitivity = (
+      tcsCaseInsensitive,        // tokenizer alpha token are case insensitive
+      tcsCaseSensitiveStrict,    // tokenizer alpha token are case sensitive (strict)
+      tcsHintCaseMismatch        // tokenizer alpha token are case insensitive but will hint when case is mismatched
+   );
+
    // TTokenBuffer
    //
    TTokenBuffer = record
       Len : Integer;
       Capacity : Integer;
-      CaseSensitive : Boolean;
+      CaseSensitive : TTokenizerCaseSensitivity;
       Buffer : array of Char;
       Unifier : TStringUnifier;
 
@@ -190,7 +196,7 @@ type
          FReservedNames : TTokenTypes;
          FSymbolTokens : TTokenTypes;
          FReservedTokens : TTokenTypes;
-         FCaseSensitive : Boolean;
+         FCaseSensitive : TTokenizerCaseSensitivity;
 
       protected
          function CreateState : TState;
@@ -207,7 +213,7 @@ type
          property ReservedNames : TTokenTypes read FReservedNames write FReservedNames;
          property SymbolTokens : TTokenTypes read FSymbolTokens write FSymbolTokens;
          property ReservedTokens : TTokenTypes read FReservedTokens;
-         property CaseSensitive : Boolean read FCaseSensitive write FCaseSensitive;
+         property CaseSensitive : TTokenizerCaseSensitivity read FCaseSensitive write FCaseSensitive;
    end;
 
    TTokenizerSourceInfo = record
@@ -775,9 +781,12 @@ begin
             if Buffer[1]='|' then
                Result := ttPIPEPIPE;
    else
-      if CaseSensitive then
-         Result:=ToAlphaTypeCaseSensitive
-      else Result:=ToAlphaType;
+      case CaseSensitive of
+         tcsCaseInsensitive : Result := ToAlphaType;
+         tcsCaseSensitiveStrict : Result := ToAlphaTypeCaseSensitive;
+      else
+         Assert(False);
+      end;
    end;
 end;
 
@@ -936,8 +945,9 @@ var
 begin
    if str='' then Exit(ttNone);
 
-   buffer.Capacity:=0;
-   buffer.Len:=0;
+   buffer.Capacity := 0;
+   buffer.Len := 0;
+   buffer.CaseSensitive := tcsCaseInsensitive;
    for c in str do
       buffer.AppendChar(c);
 
@@ -1698,7 +1708,8 @@ end;
 //
 constructor TTokenizerRules.Create;
 begin
-   FStates:=TObjectList<TState>.Create;
+   FStates := TObjectList<TState>.Create;
+   FCaseSensitive := tcsCaseInsensitive;
 end;
 
 // Destroy
@@ -1738,7 +1749,7 @@ end;
 //
 function TTokenizerRules.CreateTokenizer(msgs : TdwsCompileMessageList; unifier : TStringUnifier) : TTokenizer;
 begin
-   Result:=TTokenizer.Create(Self, msgs, unifier);
+   Result := TTokenizer.Create(Self, msgs, unifier);
 end;
 
 // ------------------------------------------------------------------
