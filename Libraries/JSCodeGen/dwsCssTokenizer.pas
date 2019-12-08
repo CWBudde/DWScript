@@ -82,7 +82,7 @@ constructor TCssTokenizerStateRules.Create;
 begin
    inherited;
 
-   CaseSensitive:=False;
+   CaseSensitive:=tcsHintCaseMismatch;
 
    SymbolTokens:=cCssSymbolTokens;
    ReservedNames:=cCssReservedNames;
