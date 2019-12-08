@@ -27,7 +27,7 @@ uses
    dwsConnectorExprs, dwsConvExprs, dwsSetOfExprs, dwsCompilerUtils,
    dwsJSLibModule, dwsJSMin, dwsFunctions, dwsGlobalVarsFunctions, dwsErrors,
    dwsRTTIFunctions, dwsConstExprs, dwsInfo, dwsScriptSource, dwsSymbolDictionary,
-   dwsUnicode, dwsExprList, dwsXXHash, dwsCodeGenWriters;
+   dwsUnicode, dwsExprList, dwsXXHash, dwsCodeGenWriters, dwsCompilerContext;
 
 type
 
@@ -1372,6 +1372,7 @@ begin
    RegisterCodeGen(TAssociativeArrayGetExpr,          TJSAssociativeArrayGetExpr.Create);
    RegisterCodeGen(TAssociativeArrayValueKeyGetExpr,  TJSAssociativeArrayGetExpr.Create);
    RegisterCodeGen(TAssociativeArraySetExpr,          TJSAssociativeArraySetExpr.Create);
+   RegisterCodeGen(TAssociativeArrayValueSetExpr,     TJSAssociativeArraySetExpr.Create);
    RegisterCodeGen(TAssociativeArrayLengthExpr, TdwsExprGenericCodeGen.Create(['Object.keys', '(', 0, ')', '.length']));
    RegisterCodeGen(TAssociativeArrayClearExpr,  TdwsExprGenericCodeGen.Create(['$Delete', '(', 0, ')'], gcgStatement, '$Delete'));
    RegisterCodeGen(TAssociativeArrayDeleteExpr, TdwsExprGenericCodeGen.Create(['(delete ', 0, '[', 1, ']', ')']));
@@ -2363,6 +2364,7 @@ var
    sym : TSymbol;
    meth : TMethodSymbol;
    staticAndSealed : Boolean;
+   compilerContext : TdwsCompilerContext;
 begin
    inherited;
 
@@ -2390,7 +2392,13 @@ begin
       WriteSymbolName(cls.Parent);
       WriteLineEnd;
 
-      Dependencies.Add('TObject');
+      compilerContext := Context.Root.CompilerContext;
+      if cls.Parent = compilerContext.TypTObject then begin
+        Dependencies.Add('TObject');
+      end else if cls.Parent = compilerContext.TypException then begin
+        Dependencies.Add('Exception');
+      end;
+
       if not cls.IsStatic then
          Dependencies.Add('$New');
 

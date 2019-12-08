@@ -1008,8 +1008,6 @@ function RawByteStringToScriptString(const s : RawByteString) : UnicodeString; o
 procedure RawByteStringToScriptString(const s : RawByteString; var result : UnicodeString); inline; overload;
 procedure RawByteStringToScriptString(const s : RawByteString; var result : Variant); overload;
 
-procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
-
 function ScriptStringToRawByteString(const s : UnicodeString) : RawByteString; overload; inline;
 procedure ScriptStringToRawByteString(const s : UnicodeString; var result : RawByteString); overload;
 
@@ -1092,6 +1090,7 @@ function VarCompareSafe(const left, right : Variant) : TVariantRelationship;
 
 procedure VarSetNull(var v : Variant); inline;
 procedure VarSetDefaultInt64(var dest : Variant); inline;
+procedure VarSetDefaultDouble(var dest : Variant); inline;
 procedure VarSetDefaultString(var dest : Variant); inline;
 procedure VarSetDateTime(var dest : Variant; const dt : Double);
 
@@ -2126,7 +2125,7 @@ begin
       varError :
          s := '[varError]';
    else
-      s:=v;
+      s := v;
    end;
 end;
 
@@ -2548,6 +2547,16 @@ begin
    TVarData(dest).VInt64 := 0;
 end;
 
+// VarSetDefaultDouble
+//
+procedure VarSetDefaultDouble(var dest : Variant); inline;
+begin
+   VarClearSafe(dest);
+
+   TVarData(dest).VType := varDouble;
+   TVarData(dest).VDouble := 0;
+end;
+
 // VarSetDefaultString
 //
 procedure VarSetDefaultString(var dest : Variant);
@@ -2936,32 +2945,6 @@ begin
       TVarData(result).VType := varUString;
       {$endif}
       RawByteStringToScriptString(s, UnicodeString(TVarData(result).VString));
-   end;
-end;
-
-// BytesToScriptString
-//
-procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
-var
-   pSrc : PByteArray;
-   pDest : PWordArray;
-begin
-   SetLength(result, n);
-   pSrc := PByteArray(p);
-   pDest := PWordArray(Pointer(result));
-   while n >= 4 do begin
-      Dec(n, 4);
-      pDest[0] := pSrc[0];
-      pDest[1] := pSrc[1];
-      pDest[2] := pSrc[2];
-      pDest[3] := pSrc[3];
-      pDest := @pDest[4];
-      pSrc := @pSrc[4];
-   end;
-   for n := 1 to n do begin
-      pDest[0] := pSrc[0];
-      pDest := @pDest[1];
-      pSrc := @pSrc[1];
    end;
 end;
 
@@ -6777,8 +6760,11 @@ end;
 // GetItemHashCode
 //
 function TSimpleStringHash.GetItemHashCode(const item1 : String) : Cardinal;
+var
+   lc : String;
 begin
-   Result:=SimpleStringHash(UnicodeLowerCase(item1));
+   UnicodeLowerCase(item1, lc);
+   Result := SimpleStringHash(lc);
 end;
 
 // ------------------
@@ -7329,14 +7315,12 @@ begin
    v      := (v and $00ff00ff) + ((v shr  8) and $00ff00ff);
    Result := (v and $0000ffff) + ((v shr 16) and $0000ffff);
 end;
-
-{$IFNDEF PUREPASCAL}
+{$ifdef WIN32_ASM}
 function PopCount32_asm(v : Int32) : Integer;
 asm
    POPCNT    eax, v
 end;
-{$ENDIF}
-
+{$endif}
 var vPopCount32 : function(v : Int32) : Integer;
 function PopCount32(v : Int32) : Integer;
 begin
@@ -7416,7 +7400,9 @@ initialization
    vPopCount64 := PopCount64_Pascal;
    {$ifdef TEST_POPCNT}
    if (System.TestSSE or sePOPCNT) <> 0 then begin
+      {$ifdef WIN32_ASM}
       vPopCount32 := PopCount32_asm;
+      {$endif}
       {$ifdef WIN64_ASM}
       vPopCount64 := PopCount64_asm;
       {$endif}

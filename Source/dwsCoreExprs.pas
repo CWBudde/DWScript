@@ -433,6 +433,7 @@ type
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function  EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
+         procedure EvalAsString(exec : TdwsExecution; var result : String); override;
 
          property BaseExpr : TDataExpr read FBaseExpr;
          property KeyExpr : TTypedExpr read FKeyExpr;
@@ -441,7 +442,10 @@ type
    // Associative array x[key] when key is a value
    TAssociativeArrayValueKeyGetExpr = class (TAssociativeArrayGetExpr)
       public
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
          function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
+         function  EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
+         procedure EvalAsString(exec : TdwsExecution; var result : String); override;
    end;
 
    TAssociativeArraySetExpr = class (TNoResultExpr)
@@ -463,6 +467,12 @@ type
          property BaseExpr : TDataExpr read FBaseExpr;
          property KeyExpr : TTypedExpr read FKeyExpr;
          property ValueExpr : TTypedExpr read FValueExpr;
+   end;
+
+   /// Associative array x[key] := v when key and v are values
+   TAssociativeArrayValueSetExpr = class (TAssociativeArraySetExpr)
+      public
+         procedure EvalNoResult(exec : TdwsExecution); override;
    end;
 
    TAssociativeArrayContainsKeyExpr = class (TBooleanBinOpExpr)
@@ -4086,9 +4096,31 @@ begin
    Result := TScriptAssociativeArray(base.GetSelf).GetDataAsBoolean(exec, KeyExpr);
 end;
 
+// EvalAsString
+//
+procedure TAssociativeArrayGetExpr.EvalAsString(exec : TdwsExecution; var result : String);
+var
+   base : IScriptAssociativeArray;
+begin
+   FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
+   TScriptAssociativeArray(base.GetSelf).GetDataAsString(exec, KeyExpr, result);
+end;
+
 // ------------------
 // ------------------ TAssociativeArrayValueKeyGetExpr ------------------
 // ------------------
+
+// EvalAsVariant
+//
+procedure TAssociativeArrayValueKeyGetExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+var
+   base : IScriptAssociativeArray;
+   key : Variant;
+begin
+   FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
+   KeyExpr.EvalAsVariant(exec, key);
+   TScriptAssociativeArray(base.GetSelf).GetDataAsVariant(exec, key, result);
+end;
 
 // EvalAsInteger
 //
@@ -4100,6 +4132,30 @@ begin
    FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
    KeyExpr.EvalAsVariant(exec, key);
    Result := TScriptAssociativeArray(base.GetSelf).GetDataAsInteger(exec, key);
+end;
+
+// EvalAsBoolean
+//
+function TAssociativeArrayValueKeyGetExpr.EvalAsBoolean(exec : TdwsExecution) : Boolean;
+var
+   base : IScriptAssociativeArray;
+   key : Variant;
+begin
+   FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
+   KeyExpr.EvalAsVariant(exec, key);
+   Result := TScriptAssociativeArray(base.GetSelf).GetDataAsBoolean(exec, key);
+end;
+
+// EvalAsString
+//
+procedure TAssociativeArrayValueKeyGetExpr.EvalAsString(exec : TdwsExecution; var result : String);
+var
+   base : IScriptAssociativeArray;
+   key : Variant;
+begin
+   FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
+   KeyExpr.EvalAsVariant(exec, key);
+   TScriptAssociativeArray(base.GetSelf).GetDataAsString(exec, key, result);
 end;
 
 // ------------------
@@ -4156,6 +4212,25 @@ begin
    FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
    aa:=TScriptAssociativeArray(base.GetSelf);
    aa.ReplaceValue(exec, KeyExpr, valueExpr);
+end;
+
+// ------------------
+// ------------------ TAssociativeArrayValueSetExpr ------------------
+// ------------------
+
+// EvalNoResult
+//
+procedure TAssociativeArrayValueSetExpr.EvalNoResult(exec : TdwsExecution);
+var
+   aa : TScriptAssociativeArray;
+   base : IScriptAssociativeArray;
+   k, v : Variant;
+begin
+   FBaseExpr.EvalAsScriptAssociativeArray(exec, base);
+   KeyExpr.EvalAsVariant(exec, k);
+   ValueExpr.EvalAsVariant(exec, v);
+   aa := TScriptAssociativeArray(base.GetSelf);
+   aa.ReplaceValue(exec, k, v);
 end;
 
 // ------------------

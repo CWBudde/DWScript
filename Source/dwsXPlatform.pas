@@ -32,11 +32,24 @@ unit dwsXPlatform;
 {$IFDEF FPC}
    {$DEFINE VER200}  // FPC compatibility = D2009
 {$ENDIF}
+{$IFDEF MSWINDOWS}
+   {$DEFINE WINDOWS}  // Define Delphi <==> FPC "WINDOWS" Compiler Switch
+{$ENDIF}
+{$IFDEF LINUX}
+   {$DEFINE UNIX}  // Define Delphi <==> FPC "UNIX" Compiler Switch
+{$ENDIF}
+
+{$ifdef UNIX}
+   {$DEFINE POSIXSYSLOG} // If defined Posix Syslog is used in Unix environments
+{$endif}
 
 interface
 
 uses
    Classes, SysUtils, Types, Masks, Registry, SyncObjs, Variants, StrUtils,
+   {$ifdef DELPHI_XE3_PLUS}
+   DateUtils,
+   {$endif}
    {$IFDEF FPC}
       {$IFDEF Windows}
          Windows
@@ -46,15 +59,20 @@ uses
    {$ELSE}
       Windows
       {$IFNDEF VER200}, IOUtils{$ENDIF}
+      {$IFDEF UNIX}
+         {$IFDEF POSIXSYSLOG}, Posix.Syslog{$ENDIF}
+         Posix.Unistd, Posix.Time, Posix.Pthread,
+         dwsXPlatformTimer,
+      {$ENDIF}
    {$ENDIF}
    ;
 
 const
-{$IFDEF UNIX}
+   {$IFDEF UNIX}
    cLineTerminator  = #10;
-{$ELSE}
+   {$ELSE}
    cLineTerminator  = #13#10;
-{$ENDIF}
+   {$ENDIF}
 
    // following is missing from D2010
    INVALID_HANDLE_VALUE = NativeUInt(-1);
@@ -163,13 +181,24 @@ type
    PUInt64 = ^UInt64;
    {$ENDIF}
 
+   TdwsLargeInteger = record
+      case Integer of
+      0: (
+         LowPart: DWORD;
+         HighPart: Longint
+      );
+      1: (
+         QuadPart: Int64
+      );
+   end;
+
    TPath = class
       class function GetTempPath : String; static;
       class function GetTempFileName : String; static;
    end;
 
    TFile = class
-      class function ReadAllBytes(const filename : String) : TBytes; static;
+      class function ReadAllBytes(const filename : String) : TBytes; static; inline;
    end;
 
    TdwsThread = class (TThread)
@@ -178,6 +207,8 @@ type
       procedure Start;
       {$ENDIF}
       {$ENDIF}
+
+      procedure SetTimeCriticalPriority;
    end;
 
    // Wrap in a record so it is not assignment compatible without explicit casts
@@ -250,8 +281,11 @@ function UnicodeStringReplace(const s, oldPattern, newPattern: String; flags: TR
 function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer; overload;
 function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
 
-function UnicodeLowerCase(const s : UnicodeString) : UnicodeString; overload;
-function UnicodeUpperCase(const s : UnicodeString) : UnicodeString; overload;
+procedure UnicodeLowerCase(const s : UnicodeString; var result : UnicodeString); overload;
+function  UnicodeLowerCase(const s : UnicodeString) : UnicodeString; overload; inline; deprecated 'use procedure form';
+
+procedure UnicodeUpperCase(const s : UnicodeString; var result : UnicodeString); overload;
+function  UnicodeUpperCase(const s : UnicodeString) : UnicodeString; overload; inline; deprecated 'use procedure form';
 
 {$ifdef FPC}
 function UnicodeLowerCase(const s : String) : String; overload;
@@ -294,6 +328,8 @@ function Utf8ToUnicodeString(const buf : RawByteString) : UnicodeString; inline;
 function RawByteStringToBytes(const buf : RawByteString) : TBytes;
 function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString; overload;
 function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString; overload;
+
+procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
 
 function LoadDataFromFile(const fileName : TFileName) : TBytes;
 procedure SaveDataToFile(const fileName : TFileName; const data : TBytes);
@@ -401,11 +437,7 @@ type
 //
 function GetSystemTimeMilliseconds : Int64; stdcall;
 begin
-{$IFDEF WINDOWS}
    Result := TdwsDateTime.Now.Value;
-{$ELSE}
-   Not yet implemented!
-{$ENDIF}
 end;
 
 // GetSystemMilliseconds
@@ -418,23 +450,26 @@ asm
    jmp [vGetSystemMilliseconds]
 {$else}
 begin
-   Result:=vGetSystemMilliseconds;
+   Result := vGetSystemMilliseconds;
 {$endif}
 end;
 
 // InitializeGetSystemMilliseconds
 //
 procedure InitializeGetSystemMilliseconds;
+{$ifdef WINDOWS}
 var
    h : THandle;
 begin
-   {$IFDEF WINDOWS}
-   h:=LoadLibrary('kernel32.dll');
-   vGetSystemMilliseconds:=GetProcAddress(h, 'GetTickCount64');
-   {$ENDIF}
+   h := LoadLibrary('kernel32.dll');
+   vGetSystemMilliseconds := GetProcAddress(h, 'GetTickCount64');
+end;
+{$else}
+begin
    if not Assigned(vGetSystemMilliseconds) then
       vGetSystemMilliseconds:=@GetSystemTimeMilliseconds;
 end;
+{$endif}
 
 // UTCDateTime
 //
@@ -442,15 +477,15 @@ function UTCDateTime : TDateTime;
 var
    systemTime : TSystemTime;
 begin
-{$IFDEF Windows}
+   {$ifdef Windows}
    FillChar(systemTime, SizeOf(systemTime), 0);
    GetSystemTime(systemTime);
    with systemTime do
       Result:= EncodeDate(wYear, wMonth, wDay)
               +EncodeTime(wHour, wMinute, wSecond, wMilliseconds);
-{$ELSE}
-   Not yet implemented!
-{$ENDIF}
+   {$else}
+   Result := Now; // TODO : correct implementation
+   {$endif}
 end;
 
 // UnixTime
@@ -484,6 +519,15 @@ function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInforma
 // LocalDateTimeToUTCDateTime
 //
 function LocalDateTimeToUTCDateTime(t : TDateTime) : TDateTime;
+{$ifdef DELPHI_XE3_PLUS}
+begin
+   Result := TTimeZone.Local.ToUniversalTime(t, False);
+end;
+{$else}{$ifdef FPC}
+begin
+   Result := LocalTimeToUniversal(t);
+end;
+{$else}
 var
    localSystemTime, universalSystemTime : TSystemTime;
    tzDynInfo : TDynamicTimeZoneInformation;
@@ -500,10 +544,20 @@ begin
       RaiseLastOSError;
    Result := SystemTimeToDateTime(universalSystemTime);
 end;
+{$endif}{$endif}
 
 // UTCDateTimeToLocalDateTime
 //
 function UTCDateTimeToLocalDateTime(t : TDateTime) : TDateTime;
+{$ifdef DELPHI_XE3_PLUS}
+begin
+   Result := TTimeZone.Local.ToLocalTime(t);
+end;
+{$else}{$ifdef FPC}
+begin
+   Result := UniversalTimeToLocal(t);
+end;
+{$else}
 var
    tzDynInfo : TDynamicTimeZoneInformation;
    tzInfo : TTimeZoneInformation;
@@ -518,6 +572,7 @@ begin
       RaiseLastOSError;
    Result := SystemTimeToDateTime(localSystemTime);
 end;
+{$endif}{$endif}
 
 // SystemMillisecondsToUnixTime
 //
@@ -603,51 +658,99 @@ begin
    Result := SysUtils.StringReplace(s, oldPattern, newPattern, flags);
 end;
 
+{$ifdef WINDOWS}
 function CompareStringEx(
    lpLocaleName: LPCWSTR; dwCmpFlags: DWORD;
    lpString1: LPCWSTR; cchCount1: Integer;
    lpString2: LPCWSTR; cchCount2: Integer;
    lpVersionInformation: Pointer; lpReserved: LPVOID;
    lParam: LPARAM): Integer; stdcall; external 'kernel32.dll';
+{$endif}
 
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1 : PWideChar; n1 : Integer; p2 : PWideChar; n2 : Integer) : Integer;
+{$ifdef WINDOWS}
 const
    CSTR_EQUAL = 2;
 begin
    Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n1, p2, n2, nil, nil, 0)-CSTR_EQUAL;
 end;
+{$else}
+begin
+   if IsICUAvailable then
+      Result := Integer(ucol_strcoll(GetCollator(UTF8CompareLocale, [coIgnoreCase]), p1, n1, p2, n2))
+   else raise Exception.Create('ICU not available (http://site.icu-project.org/home)');
+end;
+{$endif}
 
 // UnicodeCompareP
 //
 function UnicodeCompareP(p1, p2 : PWideChar; n : Integer) : Integer; overload;
+{$ifdef WINDOWS}
 const
    CSTR_EQUAL = 2;
 begin
    Result := CompareStringEx(nil, NORM_IGNORECASE, p1, n, p2, n, nil, nil, 0) - CSTR_EQUAL;
+end;
+{$else}
+begin
+   if IsICUAvailable then
+      Result := Integer(ucol_strcoll(GetCollator(UTF8CompareLocale, [coIgnoreCase]), p1, n, p2, n))
+   else raise Exception.Create('ICU not available (http://site.icu-project.org/home)');
+end;
+{$endif}
+
+// UnicodeLowerCase
+//
+procedure UnicodeLowerCase(const s : UnicodeString; var result : UnicodeString);
+var
+   n : Integer;
+begin
+   n := Length(s);
+   if n > 0 then begin
+      {$ifdef WINDOWS}
+      SetLength(result, n);
+      Windows.LCMapStringEx(nil, LCMAP_LOWERCASE or LCMAP_LINGUISTIC_CASING,
+                            PWideChar(Pointer(s)), n, PWideChar(Pointer(result)), n,
+                            nil, nil, 0);
+      {$else}
+      result := s.ToLower;
+      {$endif}
+   end else Result := '';
 end;
 
 // UnicodeLowerCase
 //
 function UnicodeLowerCase(const s : UnicodeString) : UnicodeString;
 begin
-   if s<>'' then begin
-      Result:=s;
-      UniqueString(Result);
-      Windows.CharLowerBuffW(PWideChar(Pointer(Result)), Length(Result));
-   end else Result:=s;
+   UnicodeLowerCase(s, Result);
+end;
+
+// UnicodeUpperCase
+//
+procedure UnicodeUpperCase(const s : UnicodeString; var result : UnicodeString);
+var
+   n : Integer;
+begin
+   n := Length(s);
+   if n > 0 then begin
+      {$ifdef WINDOWS}
+      SetLength(result, n);
+      Windows.LCMapStringEx(nil, LCMAP_UPPERCASE or LCMAP_LINGUISTIC_CASING,
+                            PWideChar(Pointer(s)), n, PWideChar(Pointer(result)), n,
+                            nil, nil, 0);
+      {$else}
+      Result := s.ToUpper;
+      {$endif}
+   end else Result := '';
 end;
 
 // UnicodeUpperCase
 //
 function UnicodeUpperCase(const s : UnicodeString) : UnicodeString;
 begin
-   if s<>'' then begin
-      Result:=s;
-      UniqueString(Result);
-      Windows.CharUpperBuffW(PWideChar(Pointer(Result)), Length(Result));
-   end else Result:=s;
+   UnicodeUpperCase(s, Result);
 end;
 
 {$ifdef FPC}
@@ -671,9 +774,9 @@ end;
 function ASCIICompareText(const s1, s2 : String) : Integer; inline;
 begin
    {$ifdef FPC}
-   Result:=CompareText(UTF8Encode(s1), UTF8Encode(s2));
+   Result := CompareText(UTF8Encode(s1), UTF8Encode(s2));
    {$else}
-   Result:=CompareText(s1, s2);
+   Result := CompareText(s1, s2);
    {$endif}
 end;
 
@@ -682,14 +785,15 @@ end;
 function ASCIISameText(const s1, s2 : String) : Boolean; inline;
 begin
    {$ifdef FPC}
-   Result:=(ASCIICompareText(s1, s2)=0);
+   Result := (ASCIICompareText(s1, s2)=0);
    {$else}
-   Result:=SameText(s1, s2);
+   Result := SameText(s1, s2);
    {$endif}
 end;
 
 // NormalizeString
 //
+{$ifdef WINDOWS}
 function APINormalizeString(normForm : Integer; lpSrcString : LPCWSTR; cwSrcLength : Integer;
                             lpDstString : LPWSTR; cwDstLength : Integer) : Integer;
                             stdcall; external 'Normaliz.dll' name 'NormalizeString' {$ifndef FPC}delayed{$endif};
@@ -725,6 +829,19 @@ begin
    until True;
    SetLength(Result, len);
 end;
+{$else}
+function NormalizeString(const s, form : String) : String;
+begin
+   { TODO : Unicode character normalization for non Windows platforms }
+
+   // See http://www.unicode.org/reports/tr15/
+   // Possible solutions:
+   // http://www.delphitop.com/html/danyuan/1472.html
+   // https://github.com/graemeg/freepascal/blob/master/rtl/objpas/unicodedata.pas
+   }
+   Result := s; // TODO
+end;
+{$endif}
 
 // StripAccents
 //
@@ -753,7 +870,11 @@ end;
 function InterlockedIncrement(var val : Integer) : Integer;
 {$ifndef WIN32_ASM}
 begin
-   Result:=Windows.InterlockedIncrement(val);
+   {$ifdef WINDOWS}
+   Result := Windows.InterlockedIncrement(val);
+   {$else}
+   Result := TInterlocked.Increment(val);
+   {$endif}
 {$else}
 asm
    mov   ecx,  eax
@@ -768,7 +889,11 @@ end;
 function InterlockedDecrement(var val : Integer) : Integer;
 {$ifndef WIN32_ASM}
 begin
-   Result:=Windows.InterlockedDecrement(val);
+   {$ifdef WINDOWS}
+   Result := Windows.InterlockedDecrement(val);
+   {$else}
+   Result := TInterlocked.Dencrement(val);
+   {$endif}
 {$else}
 asm
    mov   ecx,  eax
@@ -808,9 +933,13 @@ function InterlockedExchangePointer(var target : Pointer; val : Pointer) : Point
 {$ifndef WIN32_ASM}
 begin
    {$ifdef FPC}
-   Result:=System.InterLockedExchange(target, val);
+   Result := System.InterLockedExchange(target, val);
    {$else}
-   Result:=Windows.InterlockedExchangePointer(target, val);
+      {$ifdef WINDOWS}
+      Result := Windows.InterlockedExchangePointer(target, val);
+      {$else}
+      Result := TInterlocked.Exchange(target, val);
+      {$endif}
    {$endif}
 {$else}
 asm
@@ -830,12 +959,17 @@ begin
       Result:=System.InterLockedCompareExchange(destination, exchange, comparand);
       {$endif}
    {$else}
-   Result:=Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
+      {$ifdef WINDOWS}
+      Result := Windows.InterlockedCompareExchangePointer(destination, exchange, comparand);
+      {$else}
+      Result := TInterlocked.CompareExchange(destination, exchange, comparand);
+      {$endif}
    {$endif}
 end;
 
 // SetThreadName
 //
+{$ifdef WINDOWS}
 function IsDebuggerPresent : BOOL; stdcall; external kernel32 name 'IsDebuggerPresent';
 procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
 // http://www.codeproject.com/Articles/8549/Name-your-threads-in-the-VC-debugger-thread-list
@@ -862,18 +996,30 @@ begin
    end;
    {$endif}
 end;
+{$else}
+procedure SetThreadName(const threadName : PAnsiChar; threadID : Cardinal = Cardinal(-1));
+begin
+   // This one appears limited to Embarcadero debuggers
+   TThread.NameThreadForDebugging(threadName, threadID);
+end;
+{$endif}
 
 // OutputDebugString
 //
 procedure OutputDebugString(const msg : String);
 begin
+   {$ifdef WINDOWS}
    Windows.OutputDebugStringW(PWideChar(msg));
+   {$else}
+   { TODO : Check for Linux debugger functionalities }
+   {$endif}
 end;
 
 // WriteToOSEventLog
 //
 procedure WriteToOSEventLog(const logName, logCaption, logDetails : String;
                             const logRawData : RawByteString = '');
+{$ifdef WINDOWS}
 var
   eventSource : THandle;
   detailsPtr : array [0..1] of PWideChar;
@@ -893,18 +1039,25 @@ begin
       end;
    end;
 end;
+{$else}
+begin
+   {$ifdef POSIXSYSLOG}
+   Posix.Syslog.syslog(LOG_INFO,logCaption + ': ' + logDetails + '(' + logRawData + ')');
+   {$endif}
+end;
+{$endif}
 
 // SetDecimalSeparator
 //
 procedure SetDecimalSeparator(c : Char);
 begin
    {$IFDEF FPC}
-      FormatSettings.DecimalSeparator:=c;
+      FormatSettings.DecimalSeparator := c;
    {$ELSE}
       {$IF CompilerVersion >= 22.0}
-      FormatSettings.DecimalSeparator:=c;
+      FormatSettings.DecimalSeparator := c;
       {$ELSE}
-      DecimalSeparator:=c;
+      DecimalSeparator := c;
       {$IFEND}
    {$ENDIF}
 end;
@@ -914,12 +1067,12 @@ end;
 function GetDecimalSeparator : Char;
 begin
    {$IFDEF FPC}
-      Result:=FormatSettings.DecimalSeparator;
+      Result := FormatSettings.DecimalSeparator;
    {$ELSE}
       {$IF CompilerVersion >= 22.0}
-      Result:=FormatSettings.DecimalSeparator;
+      Result := FormatSettings.DecimalSeparator;
       {$ELSE}
-      Result:=DecimalSeparator;
+      Result := DecimalSeparator;
       {$IFEND}
    {$ENDIF}
 end;
@@ -927,10 +1080,12 @@ end;
 // CollectFiles
 //
 type
+   {$ifdef WINDOWS}
    TFindDataRec = record
       Handle : THandle;
       Data : TWin32FindDataW;
    end;
+   {$endif}
 
    TMasks = array of TMask;
 
@@ -940,6 +1095,7 @@ procedure CollectFilesMasked(const directory : TFileName;
                              const masks : TMasks; list : TStrings;
                              recurseSubdirectories: Boolean = False;
                              onProgress : TCollectFileProgressEvent = nil);
+{$ifdef WINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -956,12 +1112,12 @@ begin
    else infoLevel:=FindExInfoStandard;
 
    if Assigned(onProgress) then begin
-      skipScan:=False;
+      skipScan := False;
       onProgress(directory, skipScan);
-      if skipScan then exit;
+      if skipScan then Exit;
    end;
 
-   fileName:=directory+'*';
+   fileName := directory+'*';
    searchRec.Handle:=FindFirstFileEx(PChar(fileName), infoLevel,
                                      @searchRec.Data, FINDEX_SEARCH_OPS.FindExSearchNameMatch,
                                      nil, 0);
@@ -976,7 +1132,7 @@ begin
                if addToList then Break;
             end;
             if addToList then begin
-               fileName:=directory+fileName;
+               fileName := directory + fileName;
                list.Add(fileName);
             end;
          end else if recurseSubdirectories then begin
@@ -995,6 +1151,50 @@ begin
       Windows.FindClose(searchRec.Handle);
    end;
 end;
+{$else}
+var
+   searchRec : TSearchRec;
+   fileName : TFileName;
+   skipScan : Boolean;
+   addToList : Boolean;
+   i  : Integer;
+begin
+   try
+      if Assigned(onProgress) then begin
+         skipScan := False;
+         onProgress(directory, skipScan);
+         if skipScan then Exit;
+      end;
+
+      fileName := directory + '*';
+      if SysUtils.FindFirst(fileName,faAnyfile,searchRec) = 0 then begin
+         repeat
+            if (searchRec.Attr and faVolumeId) = 0 then begin
+               if (searchRec.Attr and faDirectory) = 0 then begin
+                  fileName  := searchRec.Name;
+                  addToList := True;
+                  for i := 0 to High(masks) do begin
+                     addToList := masks[i].Matches(fileName);
+                     if addToList then Break;
+                  end;
+                  if addToList then begin
+                     fileName := directory+fileName;
+                     list.Add(fileName);
+                  end;
+               end else if     recurseSubdirectories
+                           and (searchRec.Name <> '.')
+                           and (searchRec.Name <> '..') then begin
+                  fileName := directory + searchRec.Name + PathDelim;
+                  CollectFilesMasked(fileName, masks, list, recurseSubdirectories, onProgress);
+               end;
+            end;
+         until SysUtils.FindNext(searchRec) <> 0;
+      end;
+   finally
+      SysUtils.FindClose(searchRec);
+   end;
+end;
+{$endif}
 
 // CollectFiles
 //
@@ -1035,6 +1235,7 @@ end;
 // CollectSubDirs
 //
 procedure CollectSubDirs(const directory : TFileName; list : TStrings);
+{$ifdef WINDOWS}
 const
    // contant defined in Windows.pas is incorrect
    FindExInfoBasic = 1;
@@ -1068,6 +1269,24 @@ begin
       Windows.FindClose(searchRec.Handle);
    end;
 end;
+{$else}
+var
+   searchRec : TSearchRec;
+begin
+   try
+      if SysUtils.FindFirst(directory + '*', faDirectory, searchRec) = 0 then begin
+         repeat
+            if     (searchRec.Attr and faDirectory > 0)
+               and (searchRec.Name <> '.' )
+               and (searchRec.Name <> '..' ) then
+               list.Add(searchRec.Name);
+         until SysUtils.FindNext(searchRec) <> 0;
+      end;
+   finally
+      SysUtils.FindClose(searchRec);
+   end;
+end;
+{$endif}
 
 {$ifdef FPC}
 // VarCopy
@@ -1127,6 +1346,32 @@ function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString;
 begin
    SetLength(Result, size);
    System.Move(p^, Pointer(Result)^, size);
+end;
+
+// BytesToScriptString
+//
+procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
+var
+   pSrc : PByteArray;
+   pDest : PWordArray;
+begin
+   SetLength(result, n);
+   pSrc := PByteArray(p);
+   pDest := PWordArray(Pointer(result));
+   while n >= 4 do begin
+      Dec(n, 4);
+      pDest[0] := pSrc[0];
+      pDest[1] := pSrc[1];
+      pDest[2] := pSrc[2];
+      pDest[3] := pSrc[3];
+      pDest := @pDest[4];
+      pSrc := @pSrc[4];
+   end;
+   for n := 1 to n do begin
+      pDest[0] := pSrc[0];
+      pDest := @pDest[1];
+      pSrc := @pSrc[1];
+   end;
 end;
 
 // TryTextToFloat
@@ -1232,8 +1477,8 @@ function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
 var
    buf : TBytes;
 begin
-   buf:=LoadDataFromFile(fileName);
-   Result:=LoadTextFromBuffer(buf);
+   buf := LoadDataFromFile(fileName);
+   Result := LoadTextFromBuffer(buf);
 end;
 
 // ReadFileChunked
@@ -1267,6 +1512,7 @@ end;
 // LoadDataFromFile
 //
 function LoadDataFromFile(const fileName : TFileName) : TBytes;
+{$ifdef WINDOWS}
 const
    INVALID_FILE_SIZE = DWORD($FFFFFFFF);
 var
@@ -1287,9 +1533,16 @@ begin
             SetLength(Result, nRead);
       end else Result:=nil;
    finally
-      CloseHandle(hFile);
+      CloseFileHandle(hFile);
    end;
 end;
+{$else}
+begin
+   if fileName = '' then
+      Result := nil
+   else Result := IOUTils.TFile.ReadAllBytes(filename);
+end;
+{$endif}
 
 // SaveDataToFile
 //
@@ -1305,20 +1558,21 @@ begin
          if not WriteFile(hFile, data[0], n, nWrite, nil) then
             RaiseLastOSError;
    finally
-      CloseHandle(hFile);
+      CloseFileHandle(hFile);
    end;
 end;
 
 // LoadRawBytesFromFile
 //
 function LoadRawBytesFromFile(const fileName : TFileName) : RawByteString;
+{$ifdef WINDOWS}
 const
    INVALID_FILE_SIZE = DWORD($FFFFFFFF);
 var
    hFile : THandle;
    n, nRead : Cardinal;
 begin
-   if fileName='' then Exit;
+   if fileName = '' then Exit;
    hFile := OpenFileForSequentialReadOnly(fileName);
    if hFile = INVALID_HANDLE_VALUE then Exit;
    try
@@ -1332,13 +1586,29 @@ begin
             SetLength(Result, nRead);
       end;
    finally
-      CloseHandle(hFile);
+      CloseFileHandle(hFile);
    end;
 end;
+{$else}
+var
+   fs : TFileStream;
+begin
+   if fileName = '' then Exit;
+   fs := TFileStream.Create(fileName, fmOpenRead);
+   try
+      SetLength(Result, fs.Size);
+      if Read(Pointer(Result)^, fs.Size) <> fs.Size then
+         raise Exception.Create('stream read exception - data size mismatch');
+   finally
+      fs.Free;
+   end;
+end;
+{$endif}
 
 // SaveRawBytesToFile
 //
 function SaveRawBytesToFile(const fileName : TFileName; const data : RawByteString) : Integer;
+{$ifdef WINDOWS}
 var
    hFile : THandle;
    nWrite : DWORD;
@@ -1352,13 +1622,31 @@ begin
             RaiseLastOSError;
       end;
    finally
-      CloseHandle(hFile);
+      CloseFileHandle(hFile);
    end;
 end;
+{$else}
+var
+   fs   : TFileStream;
+   dataSize : LongInt;
+begin
+   fs := TFileStream.Create(fileName,fmCreate);
+   fs.Seek(0, soEnd);
+   try
+      dataSize := Length(data);
+      Result := fs.Write(Pointer(data)^, dataSize);
+      if Result <> dataSize then
+         raise Exception.Create('stream write exception - data size mismatch')
+   finally
+      fs.Free;
+   end;
+end;
+{$endif}
 
 // LoadRawBytesAsScriptStringFromFile
 //
 procedure LoadRawBytesAsScriptStringFromFile(const fileName : TFileName; var result : String);
+{$ifdef WINDOWS}
 const
    INVALID_FILE_SIZE = DWORD($FFFFFFFF);
 var
@@ -1396,9 +1684,19 @@ begin
          until n <= 0;
       end;
    finally
-      CloseHandle(hFile);
+      CloseFileHandle(hFile);
    end;
 end;
+{$else}
+var
+   buf : RawByteString;
+begin
+   buf := LoadRawBytesFromFile(fileName);
+   if buf <> '' then
+      BytesToScriptString(Pointer(buf), Length(buf), Result)
+   else Result := '';
+end;
+{$endif}
 
 // SaveTextToUTF8File
 //
@@ -1441,9 +1739,13 @@ end;
 //
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
 begin
+   {$ifdef WINDOWS}
    Result:=CreateFile(PChar(fileName), GENERIC_WRITE, 0, nil, CREATE_ALWAYS,
                       FILE_ATTRIBUTE_NORMAL+FILE_FLAG_SEQUENTIAL_SCAN, 0);
-   if Result=INVALID_HANDLE_VALUE then
+   {$else}
+   Result := SysUtils.FileCreate(fileName, fmOpenWrite, $007);
+   {$endif}
+   if Result = INVALID_HANDLE_VALUE then
       RaiseLastOSError;
 end;
 
@@ -1451,37 +1753,68 @@ end;
 //
 procedure CloseFileHandle(hFile : THandle);
 begin
-   CloseHandle(hFile);
+   SysUtils.FileClose(hFile);
 end;
 
 // FileWrite
 //
 function FileWrite(hFile : THandle; buffer : Pointer; byteCount : Integer) : Cardinal;
 begin
+   {$ifdef WINDOWS}
    if not WriteFile(hFile, buffer^, byteCount, Result, nil) then
       RaiseLastOSError;
+   {$else}
+   Result := SysUtils.FileWrite(hFile, buffer^, byteCount);
+   if Result = -1 then
+      raise Exception.Create('file write exception')
+   {$endif}
 end;
 
 // FileFlushBuffers
 //
+{$ifdef WINDOWS}
 function FlushFileBuffers(hFile : THandle) : BOOL; stdcall; external 'kernel32.dll';
 function FileFlushBuffers(hFile : THandle) : Boolean;
 begin
    Result := FlushFileBuffers(hFile);
 end;
+{$else}
+function FileFlushBuffers(hFile : THandle) : Boolean;
+begin
+   // TODO
+end;
+{$endif}
 
 // FileCopy
 //
 function FileCopy(const existing, new : TFileName; failIfExists : Boolean) : Boolean;
 begin
-   Result:=Windows.CopyFileW(PWideChar(existing), PWideChar(new), failIfExists);
+   {$ifdef WINDOWS}
+   Result := Windows.CopyFileW(PWideChar(existing), PWideChar(new), failIfExists);
+   {$else}
+   try
+      IOUtils.TFile.Copy(existing, new, not failIfExists);
+      Result := True;
+   except
+      Result := False;
+   end;
+   {$endif}
 end;
 
 // FileMove
 //
 function FileMove(const existing, new : TFileName) : Boolean;
 begin
-   Result:=Windows.MoveFileW(PWideChar(existing), PWideChar(new));
+   {$ifdef WINDOWS}
+   Result := Windows.MoveFileW(PWideChar(existing), PWideChar(new));
+   {$else}
+   try
+      IOUtils.TFile.Move(existing, new);
+      Result := True;
+   except
+      Result := False;
+   end;
+   {$endif}
 end;
 
 // FileDelete
@@ -1501,20 +1834,34 @@ end;
 // FileSize
 //
 function FileSize(const name : TFileName) : Int64;
+{$ifdef WINDOWS}
 var
    info : TWin32FileAttributeData;
 begin
    if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then
-      Result:=info.nFileSizeLow or (Int64(info.nFileSizeHigh) shl 32)
-   else Result:=-1;
+      Result := info.nFileSizeLow or (Int64(info.nFileSizeHigh) shl 32)
+   else Result := -1;
 end;
+{$else}
+var
+   searchRec : TSearchRec;
+begin
+   try
+      if SysUtils.FindFirst(name, faAnyFile, searchRec) = 0 then
+         Result := searchRec.Size
+      else Result := 0;
+   finally
+      SysUtils.FindClose(searchRec);
+   end;
+end;
+{$endif}
 
 // FileDateTime
 //
 function FileDateTime(const name : TFileName; lastAccess : Boolean = False) : TdwsDateTime;
+{$ifdef WINDOWS}
 var
    info : TWin32FileAttributeData;
-   fileTime : TFileTime;
    buf : TdwsDateTime;
 begin
    if GetFileAttributesExW(PWideChar(Pointer(name)), GetFileExInfoStandard, @info) then begin
@@ -1524,6 +1871,21 @@ begin
    end else buf.Clear;
    Result := buf;
 end;
+{$else}
+var
+   searchRec : TSearchRec;
+   buf : TdwsDateTime;
+begin
+   try
+      if SysUtils.FindFirst(name, faAnyFile, searchRec) = 0 then
+         buf.AsLocalDateTime := searchRec.TimeStamp
+      else buf.Clear;
+   finally
+      SysUtils.FindClose(searchRec);
+   end;
+   Result := buf;
+end;
+{$endif}
 
 // FileSetDateTime
 //
@@ -1632,16 +1994,25 @@ end;
 
 // RDTSC
 //
-{$IFNDEF PUREPASCAL}
+{$ifdef WINDOWS}
 function RDTSC : UInt64;
 asm
    RDTSC
 end;
-{$ENDIF}
+{$else}
+var vFakeRDTSC :  Int64;
+function RDTSC : UInt64;
+begin
+   // TODO : Implement true RDTSC function
+   // if asm does not work we use a fake, monotonous, vaguely random ersatz
+   Result := Int64(InterlockedAdd64(vFakeRDTSC, (GetSystemTimeMilliseconds and $ffff)*7919));
+end;
+{$endif}
 
 // GetCurrentUserName
 //
 function GetCurrentUserName : String;
+{$ifdef WINDOWS}
 var
    len : Cardinal;
 begin
@@ -1650,6 +2021,11 @@ begin
    Windows.GetUserNameW(PWideChar(Result), len);
    SetLength(Result, len-1);
 end;
+{$else}
+begin
+   Result := Posix.Unistd.getlogin;
+end;
+{$endif}
 
 {$ifndef FPC}
 // Delphi 2009 is not able to cast a generic T instance to TObject or Pointer
@@ -1697,6 +2073,7 @@ begin
    Result := Format('%d.%d.%d.%d', [Major, Minor, Release, Build]);
 end;
 
+{$ifdef WINDOWS}
 // Adapted from Ian Boyd code published in
 // http://stackoverflow.com/questions/10854958/how-to-get-version-of-running-executable
 function GetModuleVersion(instance : THandle; var version : TModuleVersion) : Boolean;
@@ -1751,6 +2128,7 @@ begin
    if Result then
       version := vApplicationVersion;
 end;
+{$endif}
 
 // ApplicationVersion
 //
@@ -1758,14 +2136,23 @@ function ApplicationVersion : String;
 var
    version : TModuleVersion;
 begin
-   {$ifdef WIN64}
-   if GetApplicationVersion(version) then
-      Result := version.AsString + ' 64bit'
-   else Result := '?.?.?.? 64bit';
+   {$ifdef WINDOWS}
+      {$ifdef WIN64}
+      if GetApplicationVersion(version) then
+         Result := version.AsString + ' 64bit'
+      else Result := '?.?.?.? 64bit';
+      {$else}
+      if GetApplicationVersion(version) then
+         Result := version.AsString + ' 32bit'
+      else Result := '?.?.?.? 32bit';
+      {$endif}
    {$else}
-   if GetApplicationVersion(version) then
-      Result := version.AsString + ' 32bit'
-   else Result := '?.?.?.? 32bit';
+      // No version information available under Linux
+      {$ifdef LINUX64}
+      Result := 'linux build 64bit';
+      {$else}
+      Result := 'linux build 32bit';
+      {$endif}
    {$endif}
 end;
 
@@ -1773,6 +2160,7 @@ end;
 // ------------------ TdwsCriticalSection ------------------
 // ------------------
 
+{$ifndef UNIX}
 // Create
 //
 constructor TdwsCriticalSection.Create;
@@ -1807,6 +2195,7 @@ function TdwsCriticalSection.TryEnter : Boolean;
 begin
    Result:=TryEnterCriticalSection(FCS);
 end;
+{$endif}
 
 // ------------------
 // ------------------ TPath ------------------
@@ -1857,24 +2246,8 @@ end;
 // ReadAllBytes
 //
 class function TFile.ReadAllBytes(const filename : String) : TBytes;
-{$IFDEF VER200} // Delphi 2009
-var
-   fileStream : TFileStream;
-   n : Integer;
 begin
-   fileStream:=TFileStream.Create(filename, fmOpenRead or fmShareDenyWrite);
-   try
-      n:=fileStream.Size;
-      SetLength(Result, n);
-      if n>0 then
-         fileStream.ReadBuffer(Result[0], n);
-   finally
-      fileStream.Free;
-   end;
-{$ELSE}
-begin
-   Result:=IOUTils.TFile.ReadAllBytes(filename);
-{$ENDIF}
+   Result := LoadDataFromFile(fileName)
 end;
 
 // ------------------
@@ -1893,6 +2266,16 @@ end;
 
 {$ENDIF}
 {$ENDIF}
+
+// SetTimeCriticalPriority
+//
+procedure TdwsThread.SetTimeCriticalPriority;
+begin
+   {$ifdef WINDOWS}
+   // only supported in Windows
+   Priority := tpTimeCritical;
+   {$endif}
+end;
 
 // ------------------
 // ------------------ TMultiReadSingleWrite ------------------
@@ -1999,20 +2382,25 @@ end;
 // ------------------ TTimerTimeout ------------------
 // ------------------
 
-{$ifdef FPC}
-type TWaitOrTimerCallback = procedure (Context: Pointer; Success: Boolean); stdcall;
-function CreateTimerQueueTimer(out phNewTimer: THandle;
-   TimerQueue: THandle; CallBack: TWaitOrTimerCallback;
-   Parameter: Pointer; DueTime: DWORD; Period: DWORD; Flags: ULONG): BOOL; stdcall; external 'kernel32.dll';
-function DeleteTimerQueueTimer(TimerQueue: THandle;
-   Timer: THandle; CompletionEvent: THandle): BOOL; stdcall; external 'kernel32.dll';
-const
-   WT_EXECUTEDEFAULT       = ULONG($00000000);
-   WT_EXECUTEONLYONCE      = ULONG($00000008);
-   WT_EXECUTELONGFUNCTION  = ULONG($00000010);
+{$ifdef WINDOWS}
+   {$ifdef FPC}
+   type TWaitOrTimerCallback = procedure (Context: Pointer; Success: Boolean); stdcall;
+   function CreateTimerQueueTimer(out phNewTimer: THandle;
+      TimerQueue: THandle; CallBack: TWaitOrTimerCallback;
+      Parameter: Pointer; DueTime: DWORD; Period: DWORD; Flags: ULONG): BOOL; stdcall; external 'kernel32.dll';
+   function DeleteTimerQueueTimer(TimerQueue: THandle;
+      Timer: THandle; CompletionEvent: THandle): BOOL; stdcall; external 'kernel32.dll';
+   const
+      WT_EXECUTEDEFAULT       = ULONG($00000000);
+      WT_EXECUTEONLYONCE      = ULONG($00000008);
+      WT_EXECUTELONGFUNCTION  = ULONG($00000010);
+   {$endif}
 {$endif}
 
+// TTimerTimeoutCallBack
+//
 procedure TTimerTimeoutCallBack(Context: Pointer; {%H-}Success: Boolean); stdcall;
+{$ifdef WINDOWS}
 var
    tt : TTimerTimeout;
    event : TTimerEvent;
@@ -2029,19 +2417,48 @@ begin
       tt._Release;
    end;
 end;
+{$else}
+var
+   timer      : TdwsXTimer;
+   timerQueue : TdwsXTimerQueue;
+begin
+   timer := TdwsXTimer(Context);
+   if Assigned(timer.Event) then
+     timer.Event();
+
+   timerQueue := TdwsXTimerQueue.Create(false);
+   try
+      timerQueue.Release(timer.Handle);
+   finally
+      timerQueue.Free;
+   end;
+end;
+{$endif}
 
 // Create
 //
 class function TTimerTimeout.Create(delayMSec : Cardinal; onTimer : TTimerEvent) : ITimer;
 var
    obj : TTimerTimeout;
+   {$ifdef UNIX}
+   timerQueue : TdwsXTimerQueue;
+   {$endif}
 begin
    obj := TTimerTimeout(inherited Create);
    Result := obj;
    obj.FOnTimer := onTimer;
+   {$ifdef WINDOWS}
    CreateTimerQueueTimer(obj.FTimer, 0, TTimerTimeoutCallBack, obj,
                          delayMSec, 0,
                          WT_EXECUTEDEFAULT or WT_EXECUTELONGFUNCTION or WT_EXECUTEONLYONCE);
+   {$else}
+   timerQueue := TdwsXTimerQueue.Create(false);
+   try
+      obj.FTimer := timerQueue.Add(delayMSec, onTimer, TTimerTimeoutCallBack);
+   finally
+      timerQueue.Free;
+   end;
+   {$endif}
 end;
 
 // Destroy
@@ -2055,10 +2472,23 @@ end;
 // Cancel
 //
 procedure TTimerTimeout.Cancel;
+{$ifdef UNIX}
+var
+   timerQueue : TdwsXTimerQueue;
+{$endif}
 begin
    FOnTimer := nil;
    if FTimer = 0 then Exit;
+   {$ifdef WINDOWS}
    DeleteTimerQueueTimer(0, FTimer, INVALID_HANDLE_VALUE);
+   {$else}
+   timerQueue := TdwsXTimerQueue.Create(false);
+   try
+      timerQueue.ReleaseAll;
+   finally
+      timerQueue.Free;
+   end;
+   {$endif}
    FTimer:=0;
 end;
 
@@ -2069,12 +2499,18 @@ end;
 // Now
 //
 class function TdwsDateTime.Now : TdwsDateTime;
+{$ifdef WINDOWS}
 var
    fileTime : TFileTime;
 begin
    GetSystemTimeAsFileTime(fileTime);
    Result.AsFileTime := fileTime;
 end;
+{$else}
+begin
+   Result.AsLocalDateTime := Now;
+end;
+{$endif}
 
 // FromLocalDateTime
 //
@@ -2161,7 +2597,7 @@ const
 //
 procedure TdwsDateTime.SetAsFileTime(const val : TFileTime);
 var
-   temp : LARGE_INTEGER;
+   temp : TdwsLargeInteger;
 begin
    temp.LowPart := val.dwLowDateTime;
    temp.HighPart := val.dwHighDateTime;
@@ -2184,7 +2620,7 @@ end;
 //
 function TdwsDateTime.GetAsFileTime : TFileTime;
 var
-   temp : LARGE_INTEGER;
+   temp : TdwsLargeInteger;
 begin
    temp.QuadPart := (FValue * cFileTime_TicksPerMillisecond) + cFileTime_UnixTimeStart;
    Result.dwLowDateTime := temp.LowPart;
@@ -2242,5 +2678,29 @@ initialization
 // ------------------------------------------------------------------
 
    InitializeGetSystemMilliseconds;
+
+   {$IFDEF UNIX}
+      {$IFNDEF FPC}
+         {$IFDEF POSIXSYSLOG}
+         Posix.Syslog.openlog(nil, LOG_PID or LOG_NDELAY, LOG_DAEMON);
+         {$ENDIF}
+      {$ENDIF}
+   {$ENDIF}
+
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+finalization
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+
+   {$IFDEF UNIX}
+      {$IFNDEF FPC}
+         {$IFDEF POSIXSYSLOG}
+         Posix.Syslog.closelog();
+         {$ENDIF}
+      {$ENDIF}
+   {$ENDIF}
 
 end.

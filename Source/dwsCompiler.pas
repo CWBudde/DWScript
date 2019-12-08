@@ -1520,11 +1520,14 @@ end;
 //
 procedure TdwsCompiler.SetupMsgsOptions(conf : TdwsConfiguration);
 begin
-   FDefaultHintsLevel:=conf.HintsLevel;
+   FDefaultHintsLevel := conf.HintsLevel;
    if coHintsDisabled in conf.CompilerOptions then
-      FMsgs.HintsLevel:=hlDisabled
-   else FMsgs.HintsLevel:=conf.HintsLevel;
-   FMsgs.WarningsDisabled:=(coWarningsDisabled in conf.CompilerOptions);
+      FMsgs.HintsLevel := hlDisabled
+   else FMsgs.HintsLevel := conf.HintsLevel;
+   FMsgs.WarningsDisabled := (coWarningsDisabled in conf.CompilerOptions);
+   if (coHintKeywordCaseMismatch in conf.CompilerOptions) and (FMsgs.HintsLevel >= hlPedantic) then
+      FTokRules.CaseSensitive := tcsHintCaseMismatch
+   else FTokRules.CaseSensitive := tcsCaseInsensitive;
 end;
 
 // CleanupAfterCompile
@@ -3068,7 +3071,7 @@ function TdwsCompiler.ReadTypeDecl(firstInBlock : Boolean) : Boolean;
 var
    name : String;
    typNew, typOld : TTypeSymbol;
-   typePos, endPos : TScriptPos;
+   typePos : TScriptPos;
    oldSymPos : TSymbolPosition; // Mark *where* the old declaration was
    typContext : TdwsSourceContext;
    attributesBag : ISymbolAttributesBag;
@@ -3148,15 +3151,12 @@ begin
       end;
 
       ReadSemiColon;
-      endPos:=FTok.HotPos;
 
-      typNew.DeprecatedMessage:=ReadDeprecatedMessage;
-      if typNew.DeprecatedMessage<>'' then
-         endPos:=FTok.HotPos;
+      typNew.DeprecatedMessage := ReadDeprecatedMessage;
 
    finally
       if coContextMap in FOptions then
-         FSourceContextMap.CloseContext(endPos, ttName);
+         FSourceContextMap.CloseContext(FTok.CurrentPos, ttName);
    end;
 end;
 
@@ -5723,7 +5723,9 @@ begin
                               valueExpr.Typ, baseType.Typ);
          end;
 
-         Result := TAssociativeArraySetExpr.Create(FTok.HotPos, baseExpr, keyExpr, valueExpr);
+         if baseType.KeyAndElementSizeAreBaseTypesOfSizeOne then
+            Result := TAssociativeArrayValueSetExpr.Create(FTok.HotPos, baseExpr, keyExpr, valueExpr)
+         else Result := TAssociativeArraySetExpr.Create(FTok.HotPos, baseExpr, keyExpr, valueExpr);
          keyExpr := nil;
          Exit;
 
@@ -6228,7 +6230,8 @@ begin
             inExprVarSym := TScriptDataSymbol.Create('', inExpr.Typ);
             CurrentProg.Table.AddSymbol(inExprVarSym);
             inExprVarExpr := GetVarExpr(inPos, inExprVarSym);
-            inExprAssignExpr := TAssignExpr.Create(FCompilerContext, FTok.HotPos, inExprVarExpr, TTypedExpr(inExpr));
+            inExprAssignExpr := CreateAssignExpr(FCompilerContext, FTok.HotPos, ttASSIGN,
+                                                 inExprVarExpr, TTypedExpr(inExpr));
             inExpr := inExprVarExpr;
             inExpr.IncRefCount;
          end;
@@ -8872,6 +8875,8 @@ begin
 
             if ancestorTyp.IsSealed then
                FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_ClassIsSealed, [ancestorTyp.Name]);
+            if ancestorTyp.IsInternal then
+               FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_ClassIsInternal, [ancestorTyp.Name]);
 
             while FTok.TestDelete(ttCOMMA) do begin
 
@@ -12020,13 +12025,14 @@ function TdwsCompiler.ReadSwitch(const switchName: String) : Boolean;
 var
    sw : TSwitchInstruction;
 begin
-   sw:=StringToSwitchInstruction(SwitchName);
-   if sw<>siNone then
+   sw := StringToSwitchInstruction(SwitchName);
+   if sw <> siNone then
       Exit(True);
 
    Result := False;
 
-   FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_CompilerSwitchUnknown, [SwitchName]);
+   if Assigned(FTok.SwitchProcessor) then
+      FMsgs.AddCompilerErrorFmt(FTok.HotPos, CPE_CompilerSwitchUnknown, [SwitchName]);
 
    while FTok.HasTokens and not FTok.TestDelete(ttCRIGHT) do
       FTok.KillToken;

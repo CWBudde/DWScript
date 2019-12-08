@@ -738,7 +738,7 @@ end;
 
 procedure TLowerCaseFunc.DoEvalAsString(const args : TExprBaseListExec; var Result : String);
 begin
-   Result:=UnicodeLowerCase(args.AsString[0]);
+   UnicodeLowerCase(args.AsString[0], Result);
 end;
 
 { TASCIILowerCaseFunc }
@@ -752,7 +752,7 @@ end;
 
 procedure TUpperCaseFunc.DoEvalAsString(const args : TExprBaseListExec; var Result : String);
 begin
-   Result:=UnicodeUpperCase(args.AsString[0]);
+   UnicodeUpperCase(args.AsString[0], Result);
 end;
 
 { TASCIIUpperCaseFunc }
