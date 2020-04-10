@@ -384,6 +384,7 @@ const
   CPH_ReferenceTypeParamAsConst = '"%s" parameter is a reference type passed as CONST';
   CPH_UnitAlreadyReferred = 'Unit "%s" redeclared';
   CPH_UnitAlreadyReferredInInterface = 'Unit "%s" already declared in interface section';
+  CPH_AssigningToItself = 'Assigning %s to itself';
 
   CPH_OfObjectIsLegacy = 'OF OBJECT modifier is legacy and ignored';
   CPE_OfObjectExpected = 'OF OBJECT expected';
@@ -495,6 +496,8 @@ const
   CPW_ForwardIsMeaningless = '"forward" is meaningless for external functions';
   CPW_PropertyWriterDoesNothing = 'Property writer does nothing';
 
+  CPW_AmbiguousOperator = 'Operator "%s" is ambiguous';
+
   CPE_NoResultTypeRequired = 'No result type required';
   CPE_ResultTypeExpected = 'Result type expected';
   CPE_NoResultRequired = 'No result required';
@@ -584,7 +587,8 @@ const
   RTE_ClassInstanceCastFailed = 'Cannot cast instance of type "%s" to class "%s"';
   RTE_MetaClassCastFailed = 'Cannot cast "%s" to class "%s"';
   RTE_OrdinalExpected = 'Ordinal expected';
-  RTE_VariantCastFailed = 'Could not cast variant from "%s" to "%s" (%s)';
+  RTE_VariantVTCastFailed = 'Could not cast variant (%d) to %s';
+  RTE_VariantCastFailed = 'Could not cast variant from %s to %s';
 
   RTE_ObjCastToIntfFailed = 'Class "%s" does not implement interface "%s"';
   RTE_IntfCastToObjFailed = 'Cannot cast interface of "%s" to class "%s"';

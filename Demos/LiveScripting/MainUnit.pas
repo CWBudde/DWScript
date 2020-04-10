@@ -31,7 +31,8 @@ uses
   dwsUnitSymbols, {$IFDEF LLVM}dwsLLVMCodeGen, dwsLLVM, {$ENDIF}
   {$IFDEF JS}dwsJSCodeGen, {$ENDIF} SynEdit, SynEditHighlighter,
   SynHighlighterDWS, SynCompletionProposal, SynEditMiscClasses, SynEditSearch,
-  SynEditOptionsDialog, SynEditPlugins, SynMacroRecorder;
+  SynEditOptionsDialog, SynEditPlugins, SynMacroRecorder, System.Actions,
+  SynEditCodeFolding, System.ImageList;
 
 type
   TRescanThread = class(TThread)
@@ -131,6 +132,7 @@ type
     procedure SynEditGutterPaint(Sender: TObject; aLine, X, Y: Integer);
     procedure SynParametersExecute(Kind: SynCompletionType; Sender: TObject; var CurrentInput: string; var x, y: Integer; var CanExecute: Boolean);
     procedure AcnCodeGenJSExecute(Sender: TObject);
+    procedure dwsUnitExternalFunctionsWriteLnEval(info: TProgramInfo);
   private
     FRecentScriptName: TFileName;
     FRescanThread: TRescanThread;
@@ -328,6 +330,11 @@ begin
   Info.ResultAsVariant := TdwsRTTIVariant.FromObject(Self);
 end;
 
+procedure TFrmBasic.dwsUnitExternalFunctionsWriteLnEval(info: TProgramInfo);
+begin
+  ListBoxOutput.Items.Add(info.Params[0].ValueAsString);
+end;
+
 procedure TFrmBasic.CompileScript;
 begin
   FSyncEvent.ResetEvent;
@@ -364,7 +371,7 @@ begin
   try
     ExecutedProgram := FCompiledProgram.Execute;
 
-    ListBoxOutput.Items.Text := ExecutedProgram.Result.ToString;
+    ListBoxOutput.Items.Append(ExecutedProgram.Result.ToString);
     StatusBar.SimpleText := 'Executed';
   except
     StatusBar.SimpleText := 'Error';

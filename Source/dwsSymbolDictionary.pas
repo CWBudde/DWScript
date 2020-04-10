@@ -34,7 +34,7 @@ type
      suImplicit indicates that the symbol was only implicitly present
      suRTTI indicates explicit RTTI access of the symbol }
    TSymbolUsage = (suForward, suDeclaration, suImplementation, suReference,
-                   suRead, suWrite, suImplicit, suRTTI );
+                   suRead, suWrite, suImplicit, suRTTI, suString );
    TSymbolUsages = set of TSymbolUsage;
 
    TdwsSymbolDictionary = class;

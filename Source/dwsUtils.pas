@@ -885,12 +885,6 @@ type
 
    EStringIterator = class (Exception) end;
 
-   EdwsVariantTypeCastError = class(EVariantTypeCastError)
-      public
-         constructor Create(const v : Variant; const desiredType : String;
-                            originalException : Exception);
-   end;
-
    PFormatSettings = ^TFormatSettings;
 
    TPooledObject = class
@@ -1020,7 +1014,8 @@ type
    EHexEncodingException = class (Exception)
    end;
 
-function BinToHex(const data; n : Integer) : UnicodeString; overload;
+function BinToHex(data : Pointer; n : Integer) : UnicodeString; overload;
+function BinToHex(const data; n : Integer) : UnicodeString; overload; inline;
 function BinToHex(const data : RawByteString) : UnicodeString; overload; inline;
 
 function HexToBin(const data : String) : RawByteString; overload;
@@ -1338,7 +1333,7 @@ end;
 
 // BinToHex
 //
-function BinToHex(const data; n : Integer) : UnicodeString;
+function BinToHex(data : Pointer; n : Integer) : UnicodeString;
 const
    cHexDigits : array [0..15] of Char = (
       '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
@@ -1354,12 +1349,19 @@ begin
    SetLength(Result, n*2);
 
    pDest:=Pointer(Result);
-   p:=@data;
+   p := data;
    for i:=1 to n do begin
       pDest^ := Ord(cHexDigits[p^ shr 4]) + (Ord(cHexDigits[p^ and 15]) shl 16);
       Inc(pDest);
       Inc(p);
    end;
+end;
+
+// BinToHex
+//
+function BinToHex(const data; n : Integer) : UnicodeString;
+begin
+   Result := BinToHex(@data, n);
 end;
 
 // BinToHex
@@ -2164,7 +2166,14 @@ procedure VariantToInt64(const v : Variant; var r : Int64);
          r := 0
       else if unknown.QueryInterface(IToNumeric, intf)=0 then
          r := intf.ToInteger
-      else raise EVariantTypeCastError.CreateFmt(CPE_AssignIncompatibleTypes, ['[IUnknown]', SYS_INTEGER]);
+      else raise EVariantTypeCastError.CreateFmt(RTE_VariantCastFailed, [ 'IUnknown', SYS_INTEGER ]);
+   end;
+
+   procedure StringToInt64(const s : String; var r : Int64);
+   begin
+      if not TryStrToInt64(s, r) then begin
+         raise EVariantTypeCastError.CreateFmt(RTE_VariantCastFailed, [ SYS_STRING, SYS_INTEGER ]);
+      end;
    end;
 
    procedure DefaultCast(const v : Variant; var r : Int64);
@@ -2175,7 +2184,10 @@ procedure VariantToInt64(const v : Variant; var r : Int64);
          // workaround for RTL bug that will sometimes report a failed cast to Int64
          // as being a failed cast to Boolean
          on E : EVariantError do begin
-            raise EdwsVariantTypeCastError.Create(v, SYS_INTEGER, E);
+            raise EVariantTypeCastError.CreateFmt(
+               RTE_VariantVTCastFailed,
+               [ VarType(v), SYS_INTEGER ]
+            );
          end else raise;
       end;
    end;
@@ -2188,6 +2200,8 @@ begin
          r := Ord(Boolean(TVarData(v).VBoolean));
       varUnknown :
          UnknownAsInteger(IUnknown(TVarData(v).VUnknown), r);
+      varUString :
+         StringToInt64(String(TVarData(v).VString), r);
       varNull :
          r := 0;
    else
@@ -2241,7 +2255,7 @@ function VariantToFloat(const v : Variant) : Double;
          Result := 0
       else if unknown.QueryInterface(IToNumeric, intf)=0 then
          Result := intf.ToFloat
-      else raise EVariantTypeCastError.CreateFmt(CPE_AssignIncompatibleTypes, ['[IUnknown]', SYS_FLOAT]);
+      else raise EVariantTypeCastError.CreateFmt(RTE_VariantCastFailed, [ 'IUnknown', SYS_FLOAT]);
    end;
 
 begin
@@ -6620,20 +6634,6 @@ begin
    end;
    FFirst:=nil;
    FLast:=nil;
-end;
-
-// ------------------
-// ------------------ EdwsVariantTypeCastError ------------------
-// ------------------
-
-// Create
-//
-constructor EdwsVariantTypeCastError.Create(const v : Variant;
-      const desiredType : String; originalException : Exception);
-begin
-   inherited CreateFmt(RTE_VariantCastFailed,
-                       [VarTypeAsText(VarType(v)), desiredType, originalException.ClassName])
-
 end;
 
 // ------------------

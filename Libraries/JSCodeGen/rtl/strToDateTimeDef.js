@@ -62,10 +62,12 @@ function strToDateTimeDef(fmt, str_dt, def, utc) {
                 case "mmm": 
                     month = indexOfCI($fmt.ShortMonthNames);
                     if (month < 0) return def;
+                    month++;
                     break;
                 case "mmmm": 
                     month = indexOfCI($fmt.LongMonthNames);
                     if (month < 0) return def;
+                    month++;
                     break;
                 case "d": 
                     day = getVar(2);

@@ -38,11 +38,13 @@ object FrmBasic: TFrmBasic
     Font.Name = 'Courier New'
     Font.Style = []
     TabOrder = 0
+    CodeFolding.GutterShapeSize = 11
     CodeFolding.CollapsedLineColor = clGrayText
     CodeFolding.FolderBarLinesColor = clGrayText
-    CodeFolding.ShowCollapsedLine = True
     CodeFolding.IndentGuidesColor = clGray
     CodeFolding.IndentGuides = True
+    CodeFolding.ShowCollapsedLine = True
+    CodeFolding.ShowHintMark = True
     UseCodeFolding = False
     Gutter.Font.Charset = DEFAULT_CHARSET
     Gutter.Font.Color = clWindowText
@@ -77,11 +79,15 @@ object FrmBasic: TFrmBasic
     Top = 464
     Width = 1000
     Height = 117
-    ActivePage = TabSheetCompiler
+    ActivePage = TabSheetOutput
     Align = alBottom
     TabOrder = 2
     object TabSheetCompiler: TTabSheet
       Caption = '&Compiler'
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object ListBoxCompiler: TListBox
         Left = 0
         Top = 0
@@ -96,6 +102,10 @@ object FrmBasic: TFrmBasic
     object TabSheetOutput: TTabSheet
       Caption = '&Output'
       ImageIndex = 1
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object ListBoxOutput: TListBox
         Left = 0
         Top = 0
@@ -726,6 +736,15 @@ object FrmBasic: TFrmBasic
             Name = 'Color'
             DataType = 'Integer'
           end>
+      end
+      item
+        Name = 'WriteLn'
+        Parameters = <
+          item
+            Name = 'Value'
+            DataType = 'String'
+          end>
+        OnEval = dwsUnitExternalFunctionsWriteLnEval
       end>
     UnitName = 'ExternalUnit'
     StaticSymbols = False

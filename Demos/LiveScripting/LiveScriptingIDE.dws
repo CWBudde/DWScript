@@ -1,2 +1,1 @@
-type
-  TClassTest =
+WriteLn(FloatToStr(3.1415)); 
