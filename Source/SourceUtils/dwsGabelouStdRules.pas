@@ -45,7 +45,13 @@ type
          procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
    end;
 
-   TGR_PrefixedFields = class abstract (TdwsSymbolDictionaryGabelouRule)
+   TGR_PrefixedPrivateFields = class abstract (TdwsSymbolDictionaryGabelouRule)
+      public
+         constructor Create; override;
+         procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
+   end;
+
+   TGR_PrefixedPublicFields = class abstract (TdwsSymbolDictionaryGabelouRule)
       public
          constructor Create; override;
          procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
@@ -236,20 +242,20 @@ begin
 end;
 
 // ------------------
-// ------------------ TGR_PrefixedFields ------------------
+// ------------------ TGR_PrefixedPrivateFields ------------------
 // ------------------
 
 // Create
 //
-constructor TGR_PrefixedFields.Create;
+constructor TGR_PrefixedPrivateFields.Create;
 begin
-   Name:=GAB_PrefixedFields_Name;
-   Description:=GAB_PrefixedFields_Description;
+   Name:=GAB_PrefixedPrivateFields_Name;
+   Description := GAB_PrefixedPrivateFields_Description;
 end;
 
 // EvaluateSymbol
 //
-procedure TGR_PrefixedFields.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
+procedure TGR_PrefixedPrivateFields.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
 var
    fld : TFieldSymbol;
 begin
@@ -262,7 +268,33 @@ begin
       if    (Length(aSymbolList.Symbol.Name)<2)
          or (aSymbolList.Symbol.Name[1]<>'F') or aSymbolList.Symbol.Name[2].IsLower() then
          TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
-   end else begin
+   end;
+end;
+
+// ------------------
+// ------------------ TGR_PrefixedPublicFields ------------------
+// ------------------
+
+// Create
+//
+constructor TGR_PrefixedPublicFields.Create;
+begin
+   Name:=GAB_PrefixedPublicFields_Name;
+   Description := GAB_PrefixedPublicFields_Description;
+end;
+
+// EvaluateSymbol
+//
+procedure TGR_PrefixedPublicFields.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
+var
+   fld : TFieldSymbol;
+begin
+   if aSymbolList.Symbol.ClassType<>TFieldSymbol then Exit;
+
+   fld:=TFieldSymbol(aSymbolList.Symbol);
+   if fld.StructSymbol.IsExternal or (fld.StructSymbol.Name='') then Exit;
+
+   if fld.Visibility in [cvPublic, cvPublished] then begin
       if aSymbolList.Symbol.Name[1].IsLower() then
          TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
    end;
@@ -361,7 +393,7 @@ initialization
       TGR_PascalCaseFunctions, TGR_PascalCaseProperties, TGR_PascalCaseTypes,
       TGR_AttributeClassNaming,
 
-      TGR_PrefixedFields, TGR_PrefixedClassVariables
+      TGR_PrefixedPrivateFields, TGR_PrefixedPublicFields, TGR_PrefixedClassVariables
       ]);
 
 end.

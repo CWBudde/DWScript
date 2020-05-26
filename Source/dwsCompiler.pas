@@ -5759,7 +5759,9 @@ begin
 
       if FTok.TestDeleteAnyNamePos(name, namePos) then begin
 
-         baseType:=expr.BaseType;
+         if expr <> nil then
+            baseType := expr.BaseType
+         else baseType := nil;
 
          if (baseType<>nil) and FCompilerContext.HelperMemberNames.Contains(name) then begin
             helperExpr:=ReadTypeHelper(expr as TTypedExpr,
@@ -5897,7 +5899,7 @@ begin
             Result:=ReadSetOfMethod(name, namePos, expr as TTypedExpr);
 
          // enumeration element symbol
-         end else if expr.Typ.UnAliasedTypeIs(TEnumerationSymbol) then begin
+         end else if (expr <> nil) and expr.Typ.UnAliasedTypeIs(TEnumerationSymbol) then begin
 
             Result:=nil;
             Result:=ReadElementMethod(name, namePos, expr as TTypedExpr);
@@ -6810,8 +6812,11 @@ var
                FMsgs.AddCompilerHintFmt(hotPos, CPH_AssigningToItself, [ leftSymbol.QualifiedName ])
          end else if left is TFieldExpr then begin
             leftSymbol := TFieldExpr(left).FieldSym;
-            if (leftSymbol <> nil) and (leftSymbol = TFieldExpr(right).FieldSym) then
-               FMsgs.AddCompilerHintFmt(hotPos, CPH_AssigningToItself, [ leftSymbol.QualifiedName ])
+            if     (leftSymbol <> nil)
+               and (leftSymbol = TFieldExpr(right).FieldSym)
+               and TFieldExpr(left).ObjectExpr.SameDataExpr(TFieldExpr(right).ObjectExpr) then begin
+               FMsgs.AddCompilerHintFmt(hotPos, CPH_AssigningToItself, [ leftSymbol.QualifiedName ]);
+            end;
          end;
       end;
    end;
@@ -13796,8 +13801,10 @@ begin
 
       case specialKind of
          skAssert : begin
-            if not argTyp.IsOfType(FCompilerContext.TypBoolean) then
-               FMsgs.AddCompilerError(argPos, CPE_BooleanExpected);
+            argExpr := TConvExpr.WrapWithConvCast(
+               FCompilerContext, argPos,
+               FCompilerContext.TypBoolean, argExpr, CPE_BooleanExpected
+            );
             if FTok.TestDelete(ttCOMMA) then begin
                FTok.HasTokens;
                argPos:=FTok.HotPos;
