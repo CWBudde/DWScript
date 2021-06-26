@@ -249,6 +249,7 @@ type
          property Value : Int64 read FValue write FValue;
 
          property AsUnixTime : Int64 read GetAsUnixTime write SetAsUnixTime;
+         property AsJavaScriptTime : Int64 read FValue write FValue;
          property AsFileTime : TFileTime read GetAsFileTime write SetAsFileTime;
          property AsDosDateTime : Integer read GetAsDosDateTime;
 
@@ -329,7 +330,12 @@ function RawByteStringToBytes(const buf : RawByteString) : TBytes;
 function BytesToRawByteString(const buf : TBytes; startIndex : Integer = 0) : RawByteString; overload;
 function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString; overload;
 
-procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
+function PosExA(const needle, haystack : RawByteString; hayStackOffset : Integer) : Integer;
+
+procedure BytesToScriptString(const p : PByteArray; n : Integer; var result : UnicodeString);
+
+procedure WordsToBytes(src : PWordArray; dest : PByteArray; nbWords : Integer);
+procedure BytesToWords(src : PByteArray; dest : PWordArray; nbBytes : Integer);
 
 function LoadDataFromFile(const fileName : TFileName) : TBytes;
 procedure SaveDataToFile(const fileName : TFileName; const data : TBytes);
@@ -343,7 +349,7 @@ function LoadTextFromBuffer(const buf : TBytes) : UnicodeString;
 function LoadTextFromRawBytes(const buf : RawByteString) : UnicodeString;
 function LoadTextFromStream(aStream : TStream) : UnicodeString;
 function LoadTextFromFile(const fileName : TFileName) : UnicodeString;
-procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
+procedure SaveTextToUTF8File(const fileName : TFileName; const text : String);
 procedure AppendTextToUTF8File(const fileName : TFileName; const text : UTF8String);
 function OpenFileForSequentialReadOnly(const fileName : TFileName) : THandle;
 function OpenFileForSequentialWriteOnly(const fileName : TFileName) : THandle;
@@ -1340,6 +1346,42 @@ begin
    end;
 end;
 
+// PosExA
+//
+function PosExA(const needle, haystack : RawByteString; hayStackOffset : Integer) : Integer;
+var
+	lenNeedle : Integer;
+   charToFind : AnsiChar;
+   pHaystack, pEndSearch : PAnsiChar;
+begin
+	Result := 0;
+	if (haystack = '') or (needle = '') then Exit;
+   if hayStackOffset <= 0 then
+      hayStackOffset := 1;
+
+   lenNeedle := Length(needle);
+
+   charToFind := PAnsiChar(Pointer(needle))^;
+
+   pHaystack := Pointer(hayStack);
+   Inc(pHaystack, hayStackOffset - 1);
+
+   pEndSearch := Pointer(hayStack);
+   Inc(pEndSearch, Length(haystack) - lenNeedle + 1);
+
+   while pHaystack <= pEndSearch do begin
+      while pHaystack^ <> charToFind do begin
+         Inc(pHaystack);
+         if pHaystack > pEndSearch then Break;
+      end;
+      if CompareMem(pHaystack, Pointer(needle), lenNeedle) then begin
+         Result := NativeUInt(pHaystack) - NativeUInt(Pointer(haystack)) + 1;
+         Break;
+      end;
+      Inc(pHaystack);
+   end;
+end;
+
 // BytesToRawByteString
 //
 function BytesToRawByteString(p : Pointer; size : Integer) : RawByteString;
@@ -1350,29 +1392,145 @@ end;
 
 // BytesToScriptString
 //
-procedure BytesToScriptString(const p : PByte; n : Integer; var result : UnicodeString);
-var
-   pSrc : PByteArray;
-   pDest : PWordArray;
+procedure BytesToScriptString(const p : PByteArray; n : Integer; var result : UnicodeString);
 begin
    SetLength(result, n);
-   pSrc := PByteArray(p);
-   pDest := PWordArray(Pointer(result));
-   while n >= 4 do begin
-      Dec(n, 4);
-      pDest[0] := pSrc[0];
-      pDest[1] := pSrc[1];
-      pDest[2] := pSrc[2];
-      pDest[3] := pSrc[3];
-      pDest := @pDest[4];
-      pSrc := @pSrc[4];
+   BytesToWords(p, PWordArray(Pointer(result)), n);
+end;
+
+// WordsToBytes
+//
+procedure WordsToBytes(src : PWordArray; dest : PByteArray; nbWords : Integer);
+{$ifdef WIN64_ASM}
+asm  // src -> rcx     dest -> rdx      nbBytes -> r8
+   cmp         r8, 16
+   jb          @@tail8
+
+   mov         eax, r8d
+   shr         eax, 4
+   and         r8, 15
+
+@@loop16:
+   movdqu      xmm1, [rcx]
+   movdqu      xmm2, [rcx+16]
+   packuswb    xmm1, xmm2
+   movdqu      [rdx], xmm1
+   add         rcx,  32
+   add         rdx,  16
+   dec         eax
+   jnz         @@loop16
+
+@@tail8:
+   cmp         r8, 8
+   jb          @@tail
+
+   and         r8, 7
+   movdqu      xmm1, [rcx]
+   packuswb    xmm1, xmm1
+   movq        [rdx], xmm1
+   add         rcx,  16
+   add         rdx,  8
+
+@@tail:
+   test        r8, r8
+   jz          @@end
+
+@@loop1:
+   mov         ax, [rcx+r8*2-2]
+   mov         [rdx+r8-1], al
+   dec         r8
+   jnz         @@loop1
+
+@@end:
+end;
+{$else}
+begin
+   while nbWords >= 4 do begin
+      Dec(nbWords, 4);
+      dest[0] := src[0];
+      dest[1] := src[1];
+      dest[2] := src[2];
+      dest[3] := src[3];
+      dest := @dest[4];
+      src := @src[4];
    end;
-   for n := 1 to n do begin
-      pDest[0] := pSrc[0];
-      pDest := @pDest[1];
-      pSrc := @pSrc[1];
+   while nbWords > 0 do begin
+      Dec(nbWords);
+      dest[0] := src[0];
+      dest := @dest[1];
+      src := @src[1];
    end;
 end;
+{$endif}
+
+// BytesToWords
+//
+procedure BytesToWords(src : PByteArray; dest : PWordArray; nbBytes : Integer);
+{$ifdef WIN64_ASM}
+asm  // src -> rcx     dest -> rdx      nbBytes -> r8
+   pxor        xmm0, xmm0
+
+   cmp         r8, 16
+   jb          @@tail8
+
+   mov         eax, r8d
+   shr         eax, 4
+   and         r8, 15
+
+@@loop16:
+   movq        xmm1, [rcx]
+   movq        xmm2, [rcx+8]
+   punpcklbw   xmm1, xmm0
+   punpcklbw   xmm2, xmm0
+   movdqu      [rdx], xmm1
+   movdqu      [rdx+16], xmm2
+   add         rcx,  16
+   add         rdx,  32
+   dec         eax
+   jnz         @@loop16
+
+@@tail8:
+   cmp         r8, 8
+   jb          @@tail
+
+   and         r8, 7
+   movq        xmm1, [rcx]
+   punpcklbw   xmm1, xmm0
+   movdqu      [rdx], xmm1
+   add         rcx,  8
+   add         rdx,  16
+
+@@tail:
+   test        r8, r8
+   jz          @@end
+
+@@loop1:
+   movzx       eax, [rcx + r8 - 1]
+   mov         [rdx + r8*2 - 2], ax
+   dec         r8
+   jnz         @@loop1
+
+@@end:
+end;
+{$else}
+begin
+   while nbBytes >= 4 do begin
+      Dec(nbBytes, 4);
+      dest[0] := src[0];
+      dest[1] := src[1];
+      dest[2] := src[2];
+      dest[3] := src[3];
+      dest := @dest[4];
+      src := @src[4];
+   end;
+   while nbBytes > 0 do begin
+      Dec(nbBytes);
+      dest[0] := src[0];
+      dest := @dest[1];
+      src := @src[1];
+   end;
+end;
+{$endif}
 
 // TryTextToFloat
 //
@@ -1700,7 +1858,7 @@ end;
 
 // SaveTextToUTF8File
 //
-procedure SaveTextToUTF8File(const fileName : TFileName; const text : UTF8String);
+procedure SaveTextToUTF8File(const fileName : TFileName; const text : String);
 begin
    SaveRawBytesToFile(fileName, UTF8Encode(text));
 end;
@@ -1971,7 +2129,13 @@ end;
 // SwapInt64
 //
 procedure SwapInt64(src, dest : PInt64);
-{$ifdef WIN32_ASM}
+{$ifdef WIN64_ASM}
+asm
+   mov   rax, [rcx]
+   bswap rax
+   mov   [rdx], rax
+end;
+{$else}{$ifdef WIN32_ASM}
 asm
    mov   ecx, [eax]
    mov   eax, [eax+4]
@@ -1979,6 +2143,7 @@ asm
    bswap eax
    mov   [edx+4], ecx
    mov   [edx], eax
+end;
 {$else}
 begin
    PByteArray(dest)[0] := PByteArray(src)[7];
@@ -1989,8 +2154,8 @@ begin
    PByteArray(dest)[5] := PByteArray(src)[2];
    PByteArray(dest)[6] := PByteArray(src)[1];
    PByteArray(dest)[7] := PByteArray(src)[0];
-{$endif}
 end;
+{$endif}{$endif}
 
 // RDTSC
 //
@@ -1998,6 +2163,10 @@ end;
 function RDTSC : UInt64;
 asm
    RDTSC
+   {$ifdef WIN64}
+   SHL   RDX, 32
+   OR    RAX, RDX
+   {$endif}
 end;
 {$else}
 var vFakeRDTSC :  Int64;

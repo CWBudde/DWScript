@@ -199,6 +199,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+uses dwsDynamicArrays;
+
 type
 
    TGlobalQueue = TSimpleQueue<Variant>;
@@ -234,6 +236,23 @@ begin
    Result := PrivateVarPrefix(args) + args.AsString[0];
 end;
 
+procedure CheckVariantForGlobalStorage(const v : Variant);
+var
+   vt : TVarType;
+begin
+   vt := VarType(v);
+   case vt of
+      varEmpty, varNull,
+      varSmallint, varShortInt, varInteger, varInt64,
+      varByte, varWord, varUInt32, varUInt64,
+      varSingle, varDouble,
+      varCurrency, varDate, varBoolean,
+      varOleStr, varString, varUString : ;
+   else
+      raise EGlobalVarError.CreateFmt('Cannot store global of type %d',  [ vt ]);
+   end;
+end;
+
 // ------------------
 // ------------------ stubs ------------------
 // ------------------
@@ -242,6 +261,7 @@ end;
 //
 function WriteGlobalVar(const aName : String; const aValue : Variant; expirationSeconds : Double) : Boolean;
 begin
+   CheckVariantForGlobalStorage(aValue);
    Result:=vGlobalVars.Write(aName, aValue, expirationSeconds);
 end;
 
@@ -264,6 +284,8 @@ end;
 //
 function CompareExchangeGlobalVar(const aName : String; const value, comparand : Variant) : Variant;
 begin
+   CheckVariantForGlobalStorage(value);
+
    Result:=vGlobalVars.CompareExchange(aName, value, comparand);
 end;
 
@@ -410,6 +432,7 @@ function GlobalQueuePush(const aName : String; const aValue : Variant) : Integer
 var
    gq : TGlobalQueue;
 begin
+   CheckVariantForGlobalStorage(aValue);
    vGlobalQueuesCS.BeginWrite;
    try
       gq:=vGlobalQueues.GetOrCreate(aName);
@@ -426,6 +449,7 @@ function GlobalQueueInsert(const aName : String; const aValue : Variant) : Integ
 var
    gq : TGlobalQueue;
 begin
+   CheckVariantForGlobalStorage(aValue);
    vGlobalQueuesCS.BeginWrite;
    try
       gq:=vGlobalQueues.GetOrCreate(aName);
@@ -568,6 +592,7 @@ var
    buf : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, buf);
+   CheckVariantForGlobalStorage(buf);
    Result:=vGlobalVars.Write(args.AsString[0], buf, 0);
 end;
 
@@ -578,6 +603,7 @@ var
    buf : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, buf);
+   CheckVariantForGlobalStorage(buf);
    Result:=vGlobalVars.Write(args.AsString[0], buf, args.AsFloat[2]);
 end;
 
@@ -599,6 +625,7 @@ var
    value, comparand : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, value);
+   CheckVariantForGlobalStorage(value);
    args.ExprBase[2].EvalAsVariant(args.Exec, comparand);
    result:=vGlobalVars.CompareExchange(args.AsString[0], value, comparand);
 end;
@@ -625,13 +652,18 @@ end;
 //
 procedure TGlobalVarsNamesFunc.DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant);
 var
-   newArray : TScriptDynamicStringArray;
-   typString : TTypeSymbol;
+   newArray : IScriptDynArray;
+   sl : TStringList;
 begin
-   typString:=(args.Exec as TdwsProgramExecution).CompilerContext.TypString;
-   newArray:=TScriptDynamicArray.CreateNew(typString) as TScriptDynamicStringArray;
-   result:=IScriptDynArray(newArray);
-   vGlobalVars.EnumerateNames(args.AsString[0], newArray.Add);
+   sl := TStringList.Create;
+   try
+      vGlobalVars.EnumerateNamesToStrings(args.AsString[0], sl);
+      newArray := CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypString);
+      result := newArray;
+      newArray.AddStrings(sl);
+   finally
+      sl.Free;
+   end;
 end;
 
 { TGlobalVarsNamesCommaText }
@@ -668,6 +700,7 @@ var
    buf : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, buf);
+   CheckVariantForGlobalStorage(buf);
    Result:=GlobalQueuePush(args.AsString[0], buf);
 end;
 
@@ -682,6 +715,7 @@ var
    buf : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, buf);
+   CheckVariantForGlobalStorage(buf);
    Result:=GlobalQueueInsert(args.AsString[0], buf);
 end;
 
@@ -760,6 +794,7 @@ var
    buf : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, buf);
+   CheckVariantForGlobalStorage(buf);
    Result:=vPrivateVars.Write(PrivateVarName(args), buf, args.AsFloat[2]);
 end;
 
@@ -777,6 +812,7 @@ var
    value, comparand : Variant;
 begin
    args.ExprBase[1].EvalAsVariant(args.Exec, value);
+   CheckVariantForGlobalStorage(value);
    args.ExprBase[2].EvalAsVariant(args.Exec, comparand);
    result := vPrivateVars.CompareExchange(PrivateVarName(args), value, comparand);
 end;
@@ -784,33 +820,35 @@ end;
 { TPrivateVarsNamesFunc }
 
 type
-   TPrivateVarEnumerator = class
-      FArray : TScriptDynamicStringArray;
-      FOffset : Integer;
-      procedure Add(const s : String);
+   TPrivateVarEnumerator = class (TStringList)
+      public
+         FOffset : Integer;
+         procedure Add(const s : String); reintroduce;
    end;
 procedure TPrivateVarEnumerator.Add(const s : String);
 begin
-   FArray.Add(Copy(s, FOffset));
+   inherited Add(Copy(s, FOffset));
 end;
 procedure TPrivateVarsNamesFunc.DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant);
 var
    typString : TTypeSymbol;
    filter, prefix : String;
    enum : TPrivateVarEnumerator;
+   dynArray : IScriptDynArray;
 begin
    typString:=(args.Exec as TdwsProgramExecution).CompilerContext.TypString;
    enum := TPrivateVarEnumerator.Create;
    try
-      enum.FArray := TScriptDynamicArray.CreateNew(typString) as TScriptDynamicStringArray;
-      result := IScriptDynArray(enum.FArray);
-
       filter := args.AsString[0];
       if filter = '' then
          filter := '*';
       prefix := PrivateVarPrefix(args);
       enum.FOffset := Length(prefix)+1;
       vPrivateVars.EnumerateNames(prefix + filter, enum.Add);
+
+      dynArray := CreateNewDynamicArray(typString);
+      result := dynArray;
+      dynArray.AddStrings(enum);
    finally
       enum.Free;
    end;

@@ -4,8 +4,8 @@ interface
 uses
    Classes,
    dwsComp, dwsCompiler, dwsLanguageExtension, dwsSymbols, dwsExprs, dwsUtils,
-   dwsXPlatform, dwsScriptSource,
-   dwsTokenizer, dwsErrors, dwsConstExprs, dwsRelExprs, dwsMethodExprs, dwsCoreExprs;
+   dwsXPlatform, dwsScriptSource, dwsTokenTypes, dwsTokenizer, dwsErrors,
+   dwsConstExprs, dwsRelExprs, dwsMethodExprs, dwsCoreExprs;
 
 type
    TSqlList = class;
@@ -135,7 +135,8 @@ type
 implementation
 uses
    SysUtils,
-   dwsExprList, dwsDatabaseLibModule, dwsUnitSymbols, dwsConvExprs;
+   dwsExprList, dwsDatabaseLibModule, dwsUnitSymbols, dwsConvExprs,
+   dwsArrayExprs, dwsArrayIndexOfExprs;
 
 { TdwsLinqFactory }
 

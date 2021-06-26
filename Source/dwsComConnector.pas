@@ -459,6 +459,7 @@ type
    TComVariantArrayLengthMember = class (TComVariantArrayMember, IConnectorFastMember)
       procedure FastRead(const exec : TdwsExecution; const base : TExprBase; var result : Variant);
       procedure FastWrite(const exec : TdwsExecution; const base, value : TExprBase);
+      function  FastReadBoolean(const exec : TdwsExecution; const base : TExprBase) : Boolean;
    end;
    TComVariantArrayHighBoundMember = class (TComVariantArrayMember, IConnectorDataMember)
       function Read(const base: Variant): TData;
@@ -813,7 +814,8 @@ end;
 
 constructor TComConnectorType.Create(Table: TSymbolTable);
 begin
-  FTable := Table;
+   inherited Create;
+   FTable := Table;
 end;
 
 function TComConnectorType.HasIndex(const aPropName : UnicodeString; const aParams : TConnectorParamArray;
@@ -920,9 +922,10 @@ end;
 //
 constructor TComConnectorCall.Create(const aMethodName: UnicodeString; aMethodType: Cardinal);
 begin
-   FMethodName:=aMethodName;
-   FPMethodName:=PWideString(FMethodName);
-   FMethodType:=aMethodType;
+   inherited Create;
+   FMethodName := aMethodName;
+   FPMethodName := PWideString(FMethodName);
+   FMethodType := aMethodType;
 end;
 
 // Call
@@ -959,6 +962,7 @@ end;
 //
 constructor TComConnectorMember.Create(const memberName : UnicodeString);
 begin
+   inherited Create;
    FMemberName:=memberName;
    FPMemberName:=PWideString(FMemberName);
 end;
@@ -1276,6 +1280,16 @@ end;
 procedure TComVariantArrayLengthMember.FastWrite(const exec : TdwsExecution; const base, value : TExprBase);
 begin
    raise Exception.Create('FastWrite not supported by '+ClassName);
+end;
+
+// FastReadBoolean
+//
+function TComVariantArrayLengthMember.FastReadBoolean(const exec : TdwsExecution; const base : TExprBase) : Boolean;
+var
+   v : Variant;
+begin
+   FastRead(exec, base, v);
+   Result := VariantToBool(v);
 end;
 
 procedure TComVariantArrayLengthCall.FastCall(const args : TExprBaseListExec; var result : Variant);

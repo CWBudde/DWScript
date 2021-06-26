@@ -27,7 +27,8 @@ uses
   Classes, SysUtils, TypInfo, Variants,
   dwsCompiler, dwsExprs, dwsSymbols, dwsDataContext, dwsExprList, dwsScriptSource,
   dwsStack, dwsFunctions, dwsStrings, dwsLanguageExtension, dwsCompilerContext,
-  dwsTokenizer, dwsUtils, dwsOperators, dwsUnitSymbols, dwsXPlatform, dwsUnicode,
+  dwsTokenTypes, dwsTokenizer, dwsUtils, dwsOperators, dwsUnitSymbols,
+  dwsXPlatform, dwsUnicode,
   // Built-In functions
 {$IFNDEF DWS_NO_BUILTIN_FUNCTIONS}
   dwsMathFunctions, dwsStringFunctions, dwsTimeFunctions, dwsVariantFunctions,
@@ -3339,6 +3340,7 @@ end;
 //
 constructor TdwsCallable.Create(owner : TObject);
 begin
+   inherited Create;
    FOwner:=owner;
    _AddRef;
 end;
@@ -5137,22 +5139,37 @@ function TdwsClassOperator.DoGenerate(systemTable : TSystemSymbolTable; Table: T
 var
    opSymbol : TClassOperatorSymbol;
    sym : TSymbol;
+   i : Integer;
+   foundNameMatch : Boolean;
+   members : TMembersSymbolTable;
 begin
    FIsGenerating := True;
 
-   opSymbol:=TClassOperatorSymbol.Create(FOperator);
-   Result:=opSymbol;
+   opSymbol := TClassOperatorSymbol.Create(FOperator);
+   Result := opSymbol;
 
-   Result.Typ:=GetDataType(systemTable, Table, DataType);
-   sym:=TClassSymbol(ParentSym).Members.FindLocal(FUsesAccess);
-   if (sym=nil) or not (sym is TMethodSymbol) then
-      raise Exception.CreateFmt(UNT_UsesAccessNotFound, [FUsesAccess]);
-   opSymbol.UsesSym:=TMethodSymbol(sym);
+   Result.Typ := GetDataType(systemTable, Table, DataType);
 
-   if opSymbol.UsesSym.Params.Count<>1 then
-      raise Exception.Create(CPE_SingleParameterExpected);
-   if opSymbol.UsesSym.Params[0].Typ<>Result.Typ then
-      raise Exception.CreateFmt(CPE_InvalidParameterType, [opSymbol.UsesSym.Name]);
+   foundNameMatch := False;
+   members := TClassSymbol(ParentSym).Members;
+   for i := 0 to members.Count-1 do begin
+      sym := members[i];
+      if     UnicodeSameText(sym.Name, FUsesAccess) and (sym is TMethodSymbol) then begin
+         foundNameMatch := True;
+         if     (TMethodSymbol(sym).Params.Count = 1)
+            and (TMethodSymbol(sym).Params[0].Typ = Result.Typ) then begin
+
+            opSymbol.UsesSym := TMethodSymbol(sym);
+            break;
+
+         end;
+      end;
+   end;
+   if opSymbol.UsesSym = nil then begin
+      if foundNameMatch then
+         raise Exception.CreateFmt(CPE_InvalidParameterType, [ FUsesAccess ])
+      else raise Exception.CreateFmt(UNT_UsesAccessNotFound, [FUsesAccess]);
+   end;
 end;
 
 function TdwsClassOperator.GetDisplayName: String;

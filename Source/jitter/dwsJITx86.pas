@@ -28,8 +28,9 @@ interface
 uses
    Classes, SysUtils, Math, Windows,
    dwsExprs, dwsSymbols, dwsErrors, dwsUtils, dwsExprList, dwsXPlatform,
-   dwsCoreExprs, dwsRelExprs, dwsMagicExprs, dwsConstExprs,
+   dwsCoreExprs, dwsRelExprs, dwsMagicExprs, dwsConstExprs, dwsArrayExprs,
    dwsMathFunctions, dwsDataContext, dwsConvExprs, dwsSetOfExprs, dwsMethodExprs,
+   dwsArrayIndexOfExprs,
    dwsJIT, dwsJITFixups, dwsJITAllocatorWin, dwsJITx86Intrinsics, dwsVMTOffsets;
 
 type
@@ -119,7 +120,7 @@ type
 
          FPreamble : TFixupPreamble;
          FPostamble : TFixupPostamble;
-         x86 : Tx86WriteOnlyStream;
+         x86 : Tx86_32_WriteOnlyStream;
 
          FAllocator : TdwsJITAllocatorWin;
 
@@ -132,7 +133,7 @@ type
          FInterpretedJITter : TdwsJITter;
 
       protected
-         function CreateOutput : TWriteOnlyBlockStream; override;
+         function CreateOutput : Tx86BaseWriteOnlyStream; override;
          function CreateFixupLogic : TFixupLogic; override;
 
          procedure StartJIT(expr : TExprBase; exitable : Boolean); override;
@@ -159,8 +160,9 @@ type
          function Is32BitHinted(obj : TRefCountedObject) : Boolean;
 
          property Allocator : TdwsJITAllocatorWin read FAllocator write FAllocator;
-         property AbsMaskPD : Pointer read FAbsMaskPD.Code;
-         property SignMaskPD : Pointer read FSignMaskPD.Code;
+         function AllocateStatic(const data : TBytes) : TdwsJITCodeBlock;
+         function AbsMaskPD : Pointer; inline;
+         function SignMaskPD : Pointer; inline;
 
          function CompileFloat(expr : TTypedExpr) : TxmmRegister; inline;
          procedure CompileAssignFloat(expr : TTypedExpr; source : TxmmRegister); inline;
@@ -201,11 +203,11 @@ type
    TdwsJITter_x86 = class (TdwsJITter)
       private
          FJIT : TdwsJITx86;
-         Fx86 : Tx86WriteOnlyStream;
+         Fx86 : Tx86_32_WriteOnlyStream;
 
       protected
          property jit : TdwsJITx86 read FJIT;
-         property x86 : Tx86WriteOnlyStream read Fx86;
+         property x86 : Tx86_32_WriteOnlyStream read Fx86;
 
       public
          constructor Create(jit : TdwsJITx86);
@@ -272,13 +274,13 @@ type
       procedure CompileAssignInteger(expr : TTypedExpr; source : Integer); override;
       procedure DoCompileBoolean(expr : TTypedExpr; targetTrue, targetFalse : TFixup); override;
    end;
-   Tx86VarParam = class (TdwsJITter_x86)
-      class procedure CompileAsPVariant(x86 : Tx86WriteOnlyStream; expr : TByRefParamExpr);
-      function DoCompileFloat(expr : TTypedExpr) : TxmmRegister; override;
-      function CompileInteger(expr : TTypedExpr) : Integer; override;
-      procedure DoCompileAssignFloat(expr : TTypedExpr; source : TxmmRegister); override;
-      procedure CompileAssignInteger(expr : TTypedExpr; source : Integer); override;
-   end;
+//   Tx86VarParam = class (TdwsJITter_x86)
+//      class procedure CompileAsPVariant(x86 : Tx86_32_WriteOnlyStream; expr : TByRefParamExpr);
+//      function DoCompileFloat(expr : TTypedExpr) : TxmmRegister; override;
+//      function CompileInteger(expr : TTypedExpr) : Integer; override;
+//      procedure DoCompileAssignFloat(expr : TTypedExpr; source : TxmmRegister); override;
+//      procedure CompileAssignInteger(expr : TTypedExpr; source : Integer); override;
+//   end;
 
    Tx86FieldVar = class (Tx86InterpretedExpr)
       procedure CompileToData(expr : TFieldVarExpr; dest : TgpRegister);
@@ -296,6 +298,7 @@ type
       procedure DoCompileAssignFloat(expr : TTypedExpr; source : TxmmRegister); override;
       procedure CompileAssignInteger(expr : TTypedExpr; source : Integer); override;
    end;
+   (*
    Tx86DynamicArrayBase = class (Tx86ArrayBase)
       procedure CompileAsData(expr : TTypedExpr);
    end;
@@ -309,6 +312,7 @@ type
    Tx86DynamicArraySet = class (Tx86DynamicArrayBase)
       procedure CompileStatement(expr : TExprBase); override;
    end;
+   *)
 
    Tx86AssignConstToFloatVar = class (Tx86InterpretedExpr)
       procedure CompileStatement(expr : TExprBase); override;
@@ -581,6 +585,7 @@ implementation
 const
    cExecInstanceGPR = gprEDI;
    cExecInstanceEBPoffset = 4;
+   cVariant_DataOffset = 8;
 
 function int64_div(a, b : Int64) : Int64;
 begin
@@ -713,12 +718,12 @@ begin
 
    FAllocator:=TdwsJITAllocatorWin.Create;
 
-   FAbsMaskPD:=FAllocator.Allocate(TBytes.Create($FF, $FF, $FF, $FF, $FF, $FF, $FF, $7F,
-                                                 $FF, $FF, $FF, $FF, $FF, $FF, $FF, $7F));
-   FSignMaskPD:=FAllocator.Allocate(TBytes.Create($00, $00, $00, $00, $00, $00, $00, $80,
-                                                  $00, $00, $00, $00, $00, $00, $00, $80));
-   FBufferBlock:=FAllocator.Allocate(TBytes.Create($66, $66, $66, $90, $66, $66, $66, $90,
-                                                   $66, $66, $66, $90, $66, $66, $66, $90));
+   FAbsMaskPD  := AllocateStatic(TBytes.Create($FF, $FF, $FF, $FF, $FF, $FF, $FF, $7F,
+                                               $FF, $FF, $FF, $FF, $FF, $FF, $FF, $7F));
+   FSignMaskPD := AllocateStatic(TBytes.Create($00, $00, $00, $00, $00, $00, $00, $80,
+                                               $00, $00, $00, $00, $00, $00, $00, $80));
+   FBufferBlock:= AllocateStatic(TBytes.Create($66, $66, $66, $90, $66, $66, $66, $90,
+                                               $66, $66, $66, $90, $66, $66, $66, $90));
 
    FHint32bitSymbol:=TObjectsLookup.Create;
 
@@ -745,25 +750,31 @@ begin
    RegisterJITter(TFieldExpr,                   FInterpretedJITter.IncRefCount);
    RegisterJITter(TFieldVarExpr,                Tx86FieldVar.Create(Self));
 
-   RegisterJITter(TVarParamExpr,                Tx86VarParam.Create(Self));
+   RegisterJITter(TVarParamExpr,                FInterpretedJITter.IncRefCount); // Tx86VarParam.Create(Self));
    RegisterJITter(TConstParamExpr,              FInterpretedJITter.IncRefCount);
    RegisterJITter(TLazyParamExpr,               FInterpretedJITter.IncRefCount);
    RegisterJITter(TVarParentExpr,               FInterpretedJITter.IncRefCount);
    RegisterJITter(TVarParamParentExpr,          FInterpretedJITter.IncRefCount);
 
    RegisterJITter(TStaticArrayExpr,             Tx86StaticArray.Create(Self));
-   RegisterJITter(TDynamicArrayExpr,            Tx86DynamicArray.Create(Self));
-   RegisterJITter(TDynamicArrayVarExpr,         Tx86DynamicArray.Create(Self));
-   RegisterJITter(TDynamicArraySetExpr,         Tx86DynamicArraySet.Create(Self));
-   RegisterJITter(TDynamicArraySetVarExpr,      Tx86DynamicArraySet.Create(Self));
+   RegisterJITter(TDynamicArrayExpr,            FInterpretedJITter.IncRefCount); //Tx86DynamicArray.Create(Self));
+   RegisterJITter(TDynamicArrayVarExpr,         FInterpretedJITter.IncRefCount); //Tx86DynamicArray.Create(Self));
+   RegisterJITter(TDynamicArraySetExpr,         FInterpretedJITter.IncRefCount); //Tx86DynamicArraySet.Create(Self));
+   RegisterJITter(TDynamicArraySetVarExpr,      FInterpretedJITter.IncRefCount); //Tx86DynamicArraySet.Create(Self));
    RegisterJITter(TDynamicArraySetDataExpr,     FInterpretedJITter.IncRefCount);
 
    RegisterJITter(TArrayLengthExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArraySetLengthExpr,          FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayAddExpr,                FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayInsertExpr,             FInterpretedJITter.IncRefCount);
-   RegisterJITter(TArrayIndexOfExpr,            FInterpretedJITter.IncRefCount);
-   RegisterJITter(TDynamicArrayIndexOfExpr,     FInterpretedJITter.IncRefCount);
+
+   RegisterJITter(TDynamicArrayIndexOfDataExpr,    FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfFuncPtrExpr, FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfVariantExpr, FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfIntegerExpr, FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfStringExpr,  FInterpretedJITter.IncRefCount);
+   RegisterJITter(TDynamicArrayIndexOfFloatExpr,   FInterpretedJITter.IncRefCount);
+
    RegisterJITter(TArrayRemoveExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayDeleteExpr,             FInterpretedJITter.IncRefCount);
    RegisterJITter(TArrayPopExpr,                FInterpretedJITter.IncRefCount);
@@ -1026,9 +1037,9 @@ end;
 
 // CreateOutput
 //
-function TdwsJITx86.CreateOutput : TWriteOnlyBlockStream;
+function TdwsJITx86.CreateOutput : Tx86BaseWriteOnlyStream;
 begin
-   x86:=Tx86WriteOnlyStream.Create;
+   x86:=Tx86_32_WriteOnlyStream.Create;
    Result:=x86;
 end;
 
@@ -1204,6 +1215,31 @@ begin
    Result:=(FHint32bitSymbol.Count>0) and (FHint32bitSymbol.IndexOf(obj)>=0);
 end;
 
+// AllocateStatic
+//
+function TdwsJITx86.AllocateStatic(const data : TBytes) : TdwsJITCodeBlock;
+var
+   sub : IdwsJITCodeSubAllocator;
+   ptr : Pointer;
+begin
+   ptr := FAllocator.Allocate(data, sub);
+   Result := TdwsJITCodeBlock.Create(ptr, sub);
+end;
+
+// AbsMaskPD
+//
+function TdwsJITx86.AbsMaskPD : Pointer;
+begin
+   Result := FAbsMaskPD.CodePtr;
+end;
+
+// SignMaskPD
+//
+function TdwsJITx86.SignMaskPD : Pointer;
+begin
+   Result := FSignMaskPD.CodePtr;
+end;
+
 // CompileFloat
 //
 function TdwsJITx86.CompileFloat(expr : TTypedExpr) : TxmmRegister;
@@ -1228,10 +1264,15 @@ end;
 // CompiledOutput
 //
 function TdwsJITx86.CompiledOutput : TdwsJITCodeBlock;
+var
+   sub : IdwsJITCodeSubAllocator;
+   ptr : Pointer;
 begin
    Fixups.FlushFixups(Output.ToBytes, Output);
+   Fixups.ClearFixups;
 
-   Result:=Allocator.Allocate(Output.ToBytes);
+   ptr := Allocator.Allocate(Output.ToBytes, sub);
+   Result := TdwsJITCodeBlock.Create(ptr, sub);
    Result.Steppable:=(jitoDoStep in Options);
 end;
 
@@ -1457,7 +1498,7 @@ end;
 //
 procedure TFixupAlignedTarget.Write(output : TWriteOnlyBlockStream);
 begin
-   (output as Tx86WriteOnlyStream)._nop(GetSize);
+   (output as Tx86_32_WriteOnlyStream)._nop(GetSize);
 end;
 
 // JumpLocation
@@ -1494,12 +1535,8 @@ end;
 function TFixupJump.GetSize : Integer;
 begin
    if (Next=Target) and (Location=Next.Location) then
-      Result:=0
-   else if NearJump then
-      Result:=2
-   else if FFlags=flagsNone then
-      Result:=5
-   else Result:=6;
+      Result := 0
+   else Result := Tx86_Platform_WriteOnlyStream.SizeOf_jump(FFlags, Target.JumpLocation-FixedLocation);
 end;
 
 // NearJump
@@ -1525,25 +1562,7 @@ begin
       Exit;
 
    offset:=Target.JumpLocation-FixedLocation;
-   if NearJump then begin
-
-      if FFlags=flagsNone then
-         output.WriteByte($EB)
-      else output.WriteByte(Ord(FFlags));
-      output.WriteByte(Byte(offset-2));
-
-   end else begin
-
-      if FFlags=flagsNone then begin
-         output.WriteByte($E9);
-         output.WriteInt32(offset-5);
-      end else begin
-         output.WriteByte($0F);
-         output.WriteByte(Ord(FFlags)+$10);
-         output.WriteInt32(offset-6);
-      end;
-
-   end;
+   (output as Tx86_Platform_WriteOnlyStream)._jump(FFlags, offset);
 end;
 
 // ------------------
@@ -1577,9 +1596,9 @@ end;
 //
 procedure TFixupPreamble.Write(output : TWriteOnlyBlockStream);
 var
-   x86 : Tx86WriteOnlyStream;
+   x86 : Tx86_32_WriteOnlyStream;
 begin
-   x86:=(output as Tx86WriteOnlyStream);
+   x86:=(output as Tx86_32_WriteOnlyStream);
 
    x86._push_reg(cExecMemGPR);
 
@@ -1594,7 +1613,7 @@ begin
    if TempSpaceOnStack+AllocatedStackSpace>0 then
       x86._sub_reg_int32(gprESP, TempSpaceOnStack+AllocatedStackSpace);
 
-   x86._mov_reg_dword_ptr_reg(cExecMemGPR, gprEDX, cStackMixinBaseDataOffset);
+   x86._mov_reg_dword_ptr_reg(cExecMemGPR, gprEDX, TdwsExecution.StackMixin_Offset);
 end;
 
 // NeedTempSpace
@@ -1647,9 +1666,9 @@ end;
 //
 procedure TFixupPostamble.Write(output : TWriteOnlyBlockStream);
 var
-   x86 : Tx86WriteOnlyStream;
+   x86 : Tx86_32_WriteOnlyStream;
 begin
-   x86:=(output as Tx86WriteOnlyStream);
+   x86:=(output as Tx86_32_WriteOnlyStream);
 
    if FPreamble.TempSpaceOnStack+FPreamble.AllocatedStackSpace>0 then
       x86._add_reg_int32(gprESP, FPreamble.TempSpaceOnStack+FPreamble.AllocatedStackSpace);
@@ -1817,7 +1836,7 @@ end;
 //
 procedure TProgramExpr86.EvalNoResult(exec : TdwsExecution);
 asm
-   jmp [eax+FCode]
+   jmp [eax+FCodePtr]
 end;
 
 // ------------------
@@ -1828,7 +1847,7 @@ end;
 //
 function TFloatExpr86.EvalAsFloat(exec : TdwsExecution) : Double;
 asm
-   jmp [eax+FCode]
+   jmp [eax+FCodePtr]
 end;
 
 // ------------------
@@ -1839,7 +1858,7 @@ end;
 //
 function TIntegerExpr86.EvalAsInteger(exec : TdwsExecution) : Int64;
 asm
-   jmp [eax+FCode]
+   jmp [eax+FCodePtr]
 end;
 
 // ------------------
@@ -1988,14 +2007,14 @@ procedure Tx86OpAssignFloat.CompileStatement(expr : TExprBase);
 var
    e : TOpAssignExpr;
    reg, regRight : TxmmRegister;
-   jitLeft : TdwsJITter;
-   delta : Integer;
+//   jitLeft : TdwsJITter;
+//   delta : Integer;
 begin
    e:=TOpAssignExpr(expr);
 
    regRight:=jit.CompileFloat(e.Right);
 
-   if e.Left is TDynamicArrayExpr then begin
+(*   if e.Left is TDynamicArrayExpr then begin
 
       jitLeft:=jit.FindJITter(e.Left.ClassType);
 
@@ -2006,7 +2025,7 @@ begin
       x86._xmm_reg_reg(OP, reg, regRight);
       x86._movsd_qword_ptr_indexed_reg(gprEAX, gprECX, 1, delta, reg);
 
-   end else begin
+   end else*) begin
 
       reg:=jit.CompileFloat(e.Left);
 
@@ -2099,15 +2118,16 @@ begin
    jit.Fixups.AddFixup(targetTrue);
 
    jit.CompileStatement(e.ThenExpr);
+   jit.ResetXMMReg;
+
    jit.Fixups.NewJump(flagsNone, targetDone);
 
    jit.Fixups.AddFixup(targetFalse);
 
    jit.CompileStatement(e.ElseExpr);
+   jit.ResetXMMReg;
 
    jit.Fixups.AddFixup(targetDone);
-
-   jit.ResetXMMReg;
 end;
 
 // ------------------
@@ -3037,10 +3057,10 @@ end;
 // ------------------
 // ------------------ Tx86VarParam ------------------
 // ------------------
-
+(*
 // CompileAsPVariant
 //
-class procedure Tx86VarParam.CompileAsPVariant(x86 : Tx86WriteOnlyStream; expr : TByRefParamExpr);
+class procedure Tx86VarParam.CompileAsPVariant(x86 : Tx86_32_WriteOnlyStream; expr : TByRefParamExpr);
 begin
    x86._mov_reg_execmem(gprEAX, expr.StackAddr);
    x86._xor_reg_reg(gprEDX, gprEDX);
@@ -3122,7 +3142,7 @@ begin
 
    end else inherited;
 end;
-
+*)
 // ------------------
 // ------------------ Tx86FieldVar ------------------
 // ------------------
@@ -3252,7 +3272,7 @@ begin
 
    if jit.IsFloat(e) then begin
 
-      if (e.BaseExpr is TByRefParamExpr) and (e.IndexExpr is TConstIntExpr) then begin
+      (*if (e.BaseExpr is TByRefParamExpr) and (e.IndexExpr is TConstIntExpr) then begin
 
          index:=TConstIntExpr(e.IndexExpr).Value-e.LowBound;
 
@@ -3261,7 +3281,7 @@ begin
          Result:=jit.AllocXMMReg(e);
          x86._movsd_reg_qword_ptr_indexed(Result, gprEAX, gprECX, 1, cVariant_DataOffset);
 
-      end else if e.BaseExpr.ClassType=TVarExpr then begin
+      end else*) if e.BaseExpr.ClassType=TVarExpr then begin
 
          if e.IndexExpr is TConstIntExpr then begin
 
@@ -3352,7 +3372,7 @@ begin
 
    if jit.IsFloat(e) then begin
 
-      if (e.BaseExpr.ClassType=TVarParamExpr) and (e.IndexExpr is TConstIntExpr) then begin
+      (*if (e.BaseExpr.ClassType=TVarParamExpr) and (e.IndexExpr is TConstIntExpr) then begin
 
          index:=TConstIntExpr(e.IndexExpr).Value;
 
@@ -3360,7 +3380,7 @@ begin
          x86._mov_reg_dword(gprECX, index*SizeOf(Variant));
          x86._movsd_qword_ptr_indexed_reg(gprEAX, gprECX, 1, cVariant_DataOffset, source);
 
-      end else if (e.BaseExpr.ClassType=TVarExpr) and (e.IndexExpr is TConstIntExpr) then begin
+      end else *)if (e.BaseExpr.ClassType=TVarExpr) and (e.IndexExpr is TConstIntExpr) then begin
 
          index:=TConstIntExpr(e.IndexExpr).Value;
 
@@ -3416,7 +3436,7 @@ end;
 // ------------------
 // ------------------ Tx86DynamicArrayBase ------------------
 // ------------------
-
+(*
 // CompileAsData
 //
 procedure Tx86DynamicArrayBase.CompileAsData(expr : TTypedExpr);
@@ -3527,7 +3547,7 @@ begin
 
    end;
 end;
-
+*)
 // ------------------
 // ------------------ Tx86NegInt ------------------
 // ------------------

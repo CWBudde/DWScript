@@ -336,6 +336,7 @@ end;
 constructor TScriptSourceItem.Create(const ANameReference: String; ASourceFile: TSourceFile;
   ASourceType: TScriptSourceType);
 begin
+   inherited Create;
    FNameReference := ANameReference;
    FSourceFile := ASourceFile;
    FSourceType := ASourceType;

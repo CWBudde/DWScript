@@ -18,7 +18,7 @@ interface
 
 uses
    Classes, SysUtils,
-   dwsUtils;
+   dwsUtils, dwsJITx86Intrinsics;
 
 type
    TFixup = class;
@@ -37,6 +37,8 @@ type
          procedure SortFixups;
          procedure ResolveFixups;
 
+         procedure AfterResolve; virtual;
+
       public
          constructor Create;
          destructor Destroy; override;
@@ -46,8 +48,8 @@ type
          function  NewTarget(align : Boolean) : TFixupTarget;
          function  NewHangingTarget(align : Boolean) : TFixupTarget; virtual;
 
-         procedure FlushFixups(const rawCode : TBytes; outStream : TWriteOnlyBlockStream);
-         procedure ClearFixups;
+         procedure FlushFixups(const rawCode : TBytes; outStream : Tx86BaseWriteOnlyStream); virtual;
+         procedure ClearFixups; virtual;
 
          property Base : TFixup read FBase write FBase;
          property OnNeedLocation : TFixupNeedLocationEvent read FOnNeedLocation write FOnNeedLocation;
@@ -273,11 +275,20 @@ begin
          fixup:=fixup.Next;
       end;
    until not changed;
+
+   AfterResolve;
+end;
+
+// AfterResolve
+//
+procedure TFixupLogic.AfterResolve;
+begin
+   // nothing here
 end;
 
 // FlushFixups
 //
-procedure TFixupLogic.FlushFixups(const rawCode : TBytes; outStream : TWriteOnlyBlockStream);
+procedure TFixupLogic.FlushFixups(const rawCode : TBytes; outStream : Tx86BaseWriteOnlyStream);
 var
    fixup : TFixup;
    prevLocation, n : Integer;
@@ -309,8 +320,6 @@ begin
    end;
    if prevLocation<Length(rawCode) then
       outStream.Write(rawCode[prevLocation], Length(rawCode)-prevLocation);
-
-   ClearFixups;
 end;
 
 // ClearFixups
@@ -338,12 +347,6 @@ begin
    if Result=0 then
       Result:=item2.FOrder-item1.FOrder;
 end;
-
-// ------------------
-// ------------------ TFixup ------------------
-// ------------------
-
-
 
 // ------------------
 // ------------------ TFixupTarget ------------------

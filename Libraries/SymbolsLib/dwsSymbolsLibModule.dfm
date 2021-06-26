@@ -87,6 +87,12 @@ object dwsSymbolsLib: TdwsSymbolsLib
             Kind = mkFunction
           end
           item
+            Name = 'Visibility'
+            ResultType = 'TSymbolVisibility'
+            OnEval = dwsUnitClassesTSymbolsMethodsVisibilityEval
+            Kind = mkFunction
+          end
+          item
             Name = 'GetMembers'
             ResultType = 'TSymbols'
             OnEval = dwsUnitClassesTSymbolsMethodsGetMembersEval
@@ -99,7 +105,7 @@ object dwsSymbolsLib: TdwsSymbolsLib
             Kind = mkFunction
           end
           item
-            Name = 'GetSuperClass'
+            Name = 'GetSuperSymbol'
             ResultType = 'TSymbols'
             OnEval = dwsUnitClassesTSymbolsMethodsGetSuperClassEval
             Kind = mkFunction
@@ -114,10 +120,44 @@ object dwsSymbolsLib: TdwsSymbolsLib
             ResultType = 'Boolean'
             OnEval = dwsUnitClassesTSymbolsMethodsLocateEval
             Kind = mkFunction
+          end
+          item
+            Name = 'QualifiedName'
+            ResultType = 'String'
+            OnEval = dwsUnitClassesTSymbolsMethodsQualifiedNameEval
+            Kind = mkFunction
+          end
+          item
+            Name = 'IsType'
+            ResultType = 'Boolean'
+            OnEval = dwsUnitClassesTSymbolsMethodsIsTypeEval
+            Kind = mkFunction
+          end
+          item
+            Name = 'GetMetaSymbol'
+            ResultType = 'TSymbols'
+            OnEval = dwsUnitClassesTSymbolsMethodsMetaSymbolEval
+            Kind = mkFunction
+          end
+          item
+            Name = 'InternalClassName'
+            ResultType = 'String'
+            OnEval = dwsUnitClassesTSymbolsMethodsInternalClassNameEval
+            Kind = mkFunction
+          end
+          item
+            Name = 'TypeName'
+            ResultType = 'String'
+            OnEval = dwsUnitClassesTSymbolsMethodsTypeNameEval
+            Kind = mkFunction
+          end
+          item
+            Name = 'GetType'
+            ResultType = 'TSymbols'
+            OnEval = dwsUnitClassesTSymbolsMethodsGetTypeEval
+            Kind = mkFunction
           end>
       end>
-    Dependencies.Strings = (
-      'Classes')
     Enumerations = <
       item
         Name = 'TSymbolType'
@@ -185,9 +225,38 @@ object dwsSymbolsLib: TdwsSymbolsLib
             Name = 'stInterface'
             UserDefValue = 11
             IsUserDef = True
+          end
+          item
+            Name = 'stEnumeration'
+            UserDefValue = 12
+            IsUserDef = True
+          end
+          item
+            Name = 'stMetaClass'
+            UserDefValue = 13
+            IsUserDef = True
+          end>
+      end
+      item
+        Name = 'TSymbolVisibility'
+        Elements = <
+          item
+            Name = 'visUnknown'
+          end
+          item
+            Name = 'visPrivate'
+          end
+          item
+            Name = 'visProtected'
+          end
+          item
+            Name = 'visPublic'
+          end
+          item
+            Name = 'visPublished'
           end>
       end>
-    UnitName = 'Symbols'
+    UnitName = 'SystemSymbols'
     StaticSymbols = False
     Left = 52
     Top = 24

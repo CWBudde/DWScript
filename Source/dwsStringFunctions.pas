@@ -341,6 +341,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+uses dwsDynamicArrays, dwsArrayExprs;
+
 // StrRevFind
 //
 function StrRevFind(const stringSearched, stringToFind : String; startPos : Integer = 0) : Integer;
@@ -1165,14 +1167,14 @@ end;
 procedure TStrSplitFunc.DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant);
 var
    str, delim : String;
-   dyn : TScriptDynamicArray;
+   dyn : IScriptDynArray;
    p, pn, nDelim, k, n : Integer;
    c : WideChar;
 begin
    args.EvalAsString(0, str);
    args.EvalAsString(1, delim);
 
-   dyn:=TScriptDynamicArray.CreateNew((args.ExprBase[0] as TTypedExpr).Typ);
+   dyn := CreateNewDynamicArray((args.ExprBase[0] as TTypedExpr).Typ);
 
    if delim='' then begin
 
@@ -1180,7 +1182,7 @@ begin
       pn:=Length(str);
       dyn.ArrayLength:=pn;
       for k:=1 to pn do
-         dyn.AsString[k-1]:=str[k];
+         dyn.AsString[k-1] := str[k];
 
    end else if Length(delim)=1 then begin
 
@@ -1225,7 +1227,7 @@ begin
 
    end;
 
-   Result:=IScriptDynArray(dyn);
+   Result := dyn;
 end;
 
 { TStrJoinFunc }

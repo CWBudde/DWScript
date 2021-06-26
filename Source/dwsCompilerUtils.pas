@@ -25,8 +25,8 @@ uses
    dwsErrors, dwsStrings, dwsXPlatform, dwsUtils, dwsScriptSource,
    dwsSymbols, dwsUnitSymbols, dwsCompilerContext, dwsExprList,
    dwsExprs, dwsCoreExprs, dwsConstExprs, dwsMethodExprs, dwsMagicExprs,
-   dwsConvExprs, dwsTokenizer, dwsOperators, dwsConnectorSymbols,
-   dwsArrayMethodKinds;
+   dwsConvExprs, dwsTokenTypes, dwsOperators, dwsConnectorSymbols,
+   dwsArrayMethodKinds, dwsArrayExprs;
 
 type
 
@@ -234,6 +234,8 @@ begin
                   if right.InheritsFrom(TArrayConstantExpr) and (left.Typ is TArraySymbol) then
                      Result:=TAssignArrayConstantExpr.Create(context, scriptPos, left, TArrayConstantExpr(right))
                   else Result:=TAssignDataExpr.Create(context, scriptPos, left, right)
+               end else if leftTyp is TConnectorSymbol then begin
+                  Result:=TConnectorSymbol(leftTyp).CreateAssignExpr(context, scriptPos, left, right);
                end else if leftTyp.AsFuncSymbol<>nil then begin
                   if (right.Typ.AsFuncSymbol<>nil) or (right.Typ is TNilSymbol) then begin
                      if right is TFuncRefExpr then begin
@@ -252,8 +254,6 @@ begin
                      context.Msgs.AddCompilerError(scriptPos, CPE_IncompatibleOperands);
                      Result:=TAssignExpr.Create(context, scriptPos, left, right); // keep going
                   end;
-               end else if leftTyp is TConnectorSymbol then begin
-                  Result:=TConnectorSymbol(leftTyp).CreateAssignExpr(context, scriptPos, left, right);
                end else begin
                   if left.IsExternal then
                      Result:=TAssignExternalExpr.Create(context, scriptPos, left, right)
@@ -614,7 +614,8 @@ var
    tooManyArguments, tooFewArguments : Boolean;
    argPos : TScriptPos;
 begin
-   funcSym:=funcExpr.FuncSym;
+   funcSym := funcExpr.FuncSym;
+   if funcSym = nil then Exit;
 
    paramCount:=funcSym.Params.Count;
 
@@ -807,7 +808,8 @@ var
 begin
    if valueExpr.Typ <> nil then begin
       typSize := valueExpr.Typ.Size;
-      Assert(arrayExpr.Typ.Typ.Size = typSize);
+      if typSize > 0 then
+         Assert(arrayExpr.Typ.Typ.Size = typSize, 'Mismtached element size at ' + scriptPos.AsInfo);
    end else typSize :=  1;
    if typSize = 1 then
       if arrayExpr is TObjectVarExpr then

@@ -68,8 +68,8 @@ type
          function InTransaction : Boolean;
          function CanReleaseToPool : String;
 
-         procedure Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
-         function Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
+         procedure Exec(const sql : String; const parameters : IScriptDynArray; context : TExprBase);
+         function Query(const sql : String; const parameters : IScriptDynArray; context : TExprBase) : IdwsDataSet;
 
          function VersionInfoText : String;
    end;
@@ -103,7 +103,7 @@ type
          function GetLength(index : Integer) : Integer;
 
       public
-         constructor Create(db : TdwsPostgreSQLDataBase; const sql : String; const parameters : IDataContext;
+         constructor Create(db : TdwsPostgreSQLDataBase; const sql : String; const parameters : IScriptDynArray;
                             aMode : TdwsPostgreSQLDataSetMode = dsmAutomatic);
          destructor Destroy; override;
 
@@ -198,23 +198,25 @@ type
       Formats : TPGParamFormats;
    end;
 
-procedure PreparePGParams(const data : IDataContext; var params : TPosgreSQLParams);
+procedure PreparePGParams(const data : IScriptDynArray; var params : TPosgreSQLParams);
 var
    i, n : Integer;
+   v : Variant;
    p : PVarData;
    dt : Int64;
 begin
-   n := data.DataLength;
+   n := data.ArrayLength;
    params.Length := n;
    SetLength(params.Types, n);
    SetLength(params.Values, n);
    SetLength(params.Lengths, n);
    SetLength(params.Formats, n);
    for i := 0 to n-1 do begin
-      p := PVarData(data.AsPVariant(i));
+      data.EvalAsVariant(i, v);
+      p := @v;
       case p.VType of
          varInt64 : begin
-            if Abs(p.VInt64) < MaxInt then begin
+            if Int32(p.VInt64) = p.VInt64 then begin
                params.Types[i] := INT4OID;
                SetLength(params.Values[i], 4);
                PCardinal(params.Values[i])^ := SwapBytes(p.VLongWord);
@@ -305,6 +307,7 @@ begin
    hash.Update(Pointer(item1.SQL), Length(item1.SQL)*SizeOf(AnsiChar));
    hash.Update(Pointer(item1.ParamTypes), Length(item1.ParamTypes)*SizeOf(Oid));
    Result := hash.Digest;
+   if Result = 0 then Result := 1;
 end;
 
 // ------------------
@@ -444,7 +447,7 @@ end;
 
 // Exec
 //
-procedure TdwsPostgreSQLDataBase.Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
+procedure TdwsPostgreSQLDataBase.Exec(const sql : String; const parameters : IScriptDynArray; context : TExprBase);
 var
    query : RawByteString;
 
@@ -502,7 +505,7 @@ end;
 
 // Query
 //
-function TdwsPostgreSQLDataBase.Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
+function TdwsPostgreSQLDataBase.Query(const sql : String; const parameters : IScriptDynArray; context : TExprBase) : IdwsDataSet;
 var
    ds : TdwsPostgreSQLDataSet;
 begin
@@ -553,7 +556,7 @@ end;
 //
 constructor TdwsPostgreSQLDataSet.Create(
       db : TdwsPostgreSQLDataBase;
-      const sql : String; const parameters : IDataContext;
+      const sql : String; const parameters : IScriptDynArray;
       aMode : TdwsPostgreSQLDataSetMode = dsmAutomatic
       );
 

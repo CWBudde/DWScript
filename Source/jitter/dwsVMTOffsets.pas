@@ -25,7 +25,6 @@ var
    vmt_Prepared : Boolean;
 
    vmt_IDataContext_GetSelf : Integer;
-   vmt_IDataContext_AsPVariant : Integer;
    vmt_IDataContext_AsPData : Integer;
    vmt_IDataContext_FData : Integer;
    vmt_IScriptObj_ExternalObject : Integer;
@@ -39,9 +38,14 @@ var
    vmt_TExprBase_EvalAsDynArray: Integer;
    vmt_TExprBase_AssignValueAsFloat : Integer;
    vmt_TExprBase_AssignValueAsInteger : Integer;
+   vmt_TExprBase_AssignValueAsBoolean : Integer;
 
-   vmt_ScriptDynamicArray_IScriptObj_To_FData : Integer;
+//   vmt_ScriptDynamicArray_IScriptObj_To_FData : Integer;
    vmt_ScriptObjInstance_IScriptObj_To_FData : Integer;
+
+   vmt_ScriptDynamicFloatArray_IScriptDynArray_To_DataPointer : Integer;
+   vmt_ScriptDynamicIntegerArray_IScriptDynArray_To_DataPointer : Integer;
+   vmt_ScriptDynamicInterfaceArray_IScriptDynArray_To_DataPointer : Integer;
 
    fld_TdwsExecution_Status : Integer;
 
@@ -62,7 +66,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses Variants;
+uses Variants, dwsDynamicArrays;
 
 // PrepareVMTOffsets
 //
@@ -71,7 +75,6 @@ asm
    mov vmt_Prepared, True
    mov vmt_IDataContext_GetSelf, VMTOFFSET IDataContext.GetSelf
    mov vmt_IDataContext_AsPData, VMTOFFSET IDataContext.AsPData
-   mov vmt_IDataContext_AsPVariant, VMTOFFSET IDataContext.AsPVariant
    mov vmt_IScriptObj_ExternalObject, VMTOFFSET IScriptObj.GetExternalObject
    mov vmt_TExprBase_EvalNoResult, VMTOFFSET TExprBase.EvalNoResult
    mov vmt_TExprBase_EvalAsInteger, VMTOFFSET TExprBase.EvalAsInteger
@@ -83,6 +86,7 @@ asm
    mov vmt_TExprBase_EvalAsDynArray,  VMTOFFSET TExprBase.EvalAsScriptDynArray
    mov vmt_TExprBase_AssignValueAsFloat, VMTOFFSET TExprBase.AssignValueAsFloat
    mov vmt_TExprBase_AssignValueAsInteger, VMTOFFSET TExprBase.AssignValueAsInteger
+   mov vmt_TExprBase_AssignValueAsBoolean, VMTOFFSET TExprBase.AssignValueAsBoolean
 {$IF Defined(WIN32)}
    mov func_ustr_clear, offset System.@UStrClr
    mov func_intf_clear, offset System.@IntfClear
@@ -95,20 +99,18 @@ end;
 
 procedure PrepareDynArrayIDataContextToFDataOffset;
 var
-   sda : TScriptDynamicArray;
    soi : TScriptObjInstance;
-   ia : IScriptDynArray;
    io : IScriptObj;
 begin
-   sda:=TScriptDynamicArray.CreateNew(nil);
-   ia:=IScriptDynArray(sda);
-
-   vmt_ScriptDynamicArray_IScriptObj_To_FData:=NativeInt(ia.AsPData)-NativeInt(ia);
+   vmt_ScriptDynamicFloatArray_IScriptDynArray_To_DataPointer := TScriptDynamicNativeFloatArray.InterfaceToDataOffset;
+   vmt_ScriptDynamicIntegerArray_IScriptDynArray_To_DataPointer := TScriptDynamicNativeIntegerArray.InterfaceToDataOffset;
+   vmt_ScriptDynamicInterfaceArray_IScriptDynArray_To_DataPointer := TScriptDynamicNativeInterfaceArray.InterfaceToDataOffset;
 
    soi:=TScriptObjInstance.Create(nil);
    io:=IScriptObj(soi);
 
    vmt_ScriptObjInstance_IScriptObj_To_FData:=NativeInt(io.AsPData)-NativeInt(io);
+
 end;
 
 // ------------------------------------------------------------------

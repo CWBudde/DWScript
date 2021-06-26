@@ -5,7 +5,7 @@ unit dwsExternalFunctionJitx86;
 interface
 
 uses
-   dwsTokenizer,
+   dwsTokenTypes,
    dwsExternalFunctionJit, dwsExprs, dwsJITx86Intrinsics, dwsExprList, dwsCompilerContext;
 
 function JitFactory(conv: TTokenType; prog: TdwsProgram;
@@ -37,8 +37,8 @@ type
    private
       FProgram: TdwsProgram;
       FCompilerContext : TdwsCompilerContext;
-      FInitStream: Tx86WriteOnlyStream;
-      FStream: Tx86WriteOnlyStream;
+      FInitStream: Tx86_32_WriteOnlyStream;
+      FStream: Tx86_32_WriteOnlyStream;
       FReturnValue: TTypeSymbol;
       FParams: integer;
       FStackDepth: integer;
@@ -89,7 +89,7 @@ type
    end;
 
 
-function JitFactory(conv: dwsTokenizer.TTokenType; prog: TdwsProgram;
+function JitFactory(conv: dwsTokenTypes.TTokenType; prog: TdwsProgram;
   OnLookupType: TTypeLookupEvent): IExternalFunctionJit;
 begin
    if conv = ttREGISTER then
@@ -113,8 +113,8 @@ constructor Tx86RegisterJit.Create(prog: TdwsProgram; OnLookupType: TTypeLookupE
 begin
    FProgram := prog;
    FCompilerContext := prog.Root.CompilerContext;
-   FInitStream := Tx86WriteOnlyStream.Create;
-   FStream := Tx86WriteOnlyStream.Create;
+   FInitStream := Tx86_32_WriteOnlyStream.Create;
+   FStream := Tx86_32_WriteOnlyStream.Create;
    FOnLookupType := OnLookupType;
 end;
 

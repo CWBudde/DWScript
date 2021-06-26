@@ -108,6 +108,8 @@ type
          function EvalAsInteger(exec : TdwsExecution) : Int64; override;
          function EvalAsFloat(exec : TdwsExecution) : Double; override;
          property Value : Int64 read FValue write FValue;
+
+         function ValueIsInt32 : Boolean; inline;
    end;
 
    // TConstFloatExpr
@@ -199,7 +201,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsConvExprs, dwsSpecializationContext;
+uses dwsConvExprs, dwsSpecializationContext, dwsDynamicArrays;
 
 // ------------------
 // ------------------ TConstExpr ------------------
@@ -233,7 +235,8 @@ end;
 constructor TConstExpr.Create(aTyp: TTypeSymbol);
 begin
    inherited Create(aTyp);
-   SetLength(FData, aTyp.Size);
+   if aTyp <> nil then
+      SetLength(FData, aTyp.Size);
 end;
 
 // CreateRef
@@ -380,6 +383,7 @@ end;
 //
 constructor TConstNilExpr.Create(aTyp : TTypeSymbol);
 begin
+   inherited Create(typ);
    FTyp := aTyp;
    SetLength(FData, 1);
    TVarData(FData[0]).VType := varUnknown;
@@ -429,6 +433,7 @@ end;
 //
 constructor TConstBooleanExpr.Create(aTyp : TTypeSymbol; const aValue : Boolean);
 begin
+   inherited Create(typ);
    FTyp := aTyp;
    FValue := aValue;
    SetLength(FData, 1);
@@ -458,6 +463,7 @@ end;
 //
 constructor TConstIntExpr.Create(typ : TTypeSymbol; const aValue : Int64);
 begin
+   inherited Create(typ);
    FTyp := typ;
    FValue := aValue;
    SetLength(FData, 1);
@@ -490,6 +496,13 @@ begin
 {$ifend}
 end;
 
+// ValueIsInt32
+//
+function TConstIntExpr.ValueIsInt32 : Boolean;
+begin
+   Result := Int32(FValue) = FValue;
+end;
+
 // ------------------
 // ------------------ TConstFloatExpr ------------------
 // ------------------
@@ -498,6 +511,7 @@ end;
 //
 constructor TConstFloatExpr.Create(typ : TTypeSymbol; const aValue : Double);
 begin
+   inherited Create(typ);
    FTyp := typ;
    FValue := aValue;
    SetLength(FData, 1);
@@ -525,6 +539,7 @@ end;
 //
 constructor TConstStringExpr.Create(typ : TTypeSymbol; const aValue : String);
 begin
+   inherited Create(typ);
    FTyp := typ;
    FValue := aValue;
    SetLength(FData, 1);
@@ -725,7 +740,7 @@ begin
    EvalAsTData(exec, data);
    if Length(data)>0 then
       VarCopySafe(Result, data[0])
-   else VarCopySafe(Result, IScriptDynArray(TScriptDynamicArray.CreateNew(Typ)));
+   else VarCopySafe(Result, CreateNewDynamicArray(Typ));
 end;
 
 // EvalAsTData

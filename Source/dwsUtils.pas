@@ -19,6 +19,8 @@ unit dwsUtils;
 {$I dws.inc}
 {$R-}
 
+{.$define DOUBLE_FREE_PROTECTOR}
+
 interface
 
 uses
@@ -30,6 +32,8 @@ type
 
    TStringDynArray = array of String;
    TInt64DynArray = array of Int64;
+   TDoubleDynArray = array of Double;
+   TInterfaceDynArray = array of IUnknown;
 
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
@@ -48,9 +52,16 @@ type
          {$ifdef FPC}
          FRefCount : Integer;
          {$endif}
+         {$ifdef DOUBLE_FREE_PROTECTOR}
+         FDoubleFreeProtector : Int64;
+         {$endif}
          function  GetRefCount : Integer; inline;
          procedure SetRefCount(n : Integer); inline;
       public
+         {$ifdef DOUBLE_FREE_PROTECTOR}
+         constructor Create;
+         destructor Destroy; override;
+         {$endif}
          function  IncRefCount : Integer; inline;
          function  DecRefCount : Integer;
          property  RefCount : Integer read GetRefCount write SetRefCount;
@@ -176,6 +187,7 @@ type
       Make sure to Clear or Clean in the destructor of the Owner. }
    TTightListArray = array [0..MaxInt shr 4] of TRefCountedObject;
    PObjectTightList = ^TTightListArray;
+   TPointerComparer = function (a, b : Pointer) : Integer;
    TTightList = record
       private
          FList : PObjectTightList;
@@ -211,6 +223,8 @@ type
          function ItemsAllOfClass(aClass : TClass) : Boolean;
 
          function GetEnumerator : TTightListEnumerator;
+
+         procedure Sort(const comparer : TPointerComparer);
    end;
    PTightList = ^TTightList;
 
@@ -333,6 +347,7 @@ type
          procedure Clear;
          property Items[index : Integer] : T read GetItem write SetItem; default;
          property Count : Integer read FCount;
+         procedure Move(idx, idxNew, itemCount : Integer);
    end;
 
    // TSortedList
@@ -765,6 +780,7 @@ type
          procedure WriteBytes(const buffer : RawByteString); overload;
          procedure WriteInt32(const i : Integer); inline;
          procedure WriteDWord(const dw : DWORD); inline;
+         procedure WriteQWord(const qw : UInt64); inline;
 
          procedure WriteP(p : PWideChar; nbWideChars : Integer); inline;
 
@@ -783,6 +799,8 @@ type
          procedure WriteChar(utf16Char : WideChar); inline;
          procedure WriteDigits(value : Int64; digits : Integer); overload;
          procedure WriteDigits(value : Cardinal; digits : Integer); overload;
+
+         function TailWord : Word;
 
          function ToString : String; override; final;
          function ToUnicodeString : UnicodeString;
@@ -854,36 +872,11 @@ type
 
    TQuickSort = record
       public
-         CompareMethod : function (index1, index2 : Integer) : Integer of object;
-         SwapMethod : procedure (index1, index2 : Integer) of object;
+         CompareMethod : function (index1, index2 : NativeInt) : Integer of object;
+         SwapMethod : procedure (index1, index2 : NativeInt) of object;
 
-         procedure Sort(minIndex, maxIndex : Integer);
+         procedure Sort(minIndex, maxIndex : NativeInt);
    end;
-
-   TStringIterator = class
-      private
-         FStr : String;
-         FPStr : PChar;
-         FPosition : Integer;
-         FLength : Integer;
-
-      public
-         constructor Create(const s : String);
-
-         function Current : Char; inline;
-         function EOF : Boolean; inline;
-         procedure Next; inline;
-         procedure SkipWhiteSpace;
-
-         function CollectQuotedString : String;
-         function CollectAlphaNumeric : String;
-         function CollectInteger : Int64;
-
-         property Str : String read FStr;
-         property Length : Integer read FLength write FLength;
-   end;
-
-   EStringIterator = class (Exception) end;
 
    PFormatSettings = ^TFormatSettings;
 
@@ -1004,8 +997,6 @@ procedure RawByteStringToScriptString(const s : RawByteString; var result : Vari
 
 function ScriptStringToRawByteString(const s : UnicodeString) : RawByteString; overload; inline;
 procedure ScriptStringToRawByteString(const s : UnicodeString; var result : RawByteString); overload;
-
-procedure WordsToBytes(src : PWord; dest : PByte; nbWords : Integer);
 
 procedure StringBytesToWords(var buf : UnicodeString; swap : Boolean);
 procedure StringWordsToBytes(var buf : UnicodeString; swap : Boolean);
@@ -1215,6 +1206,7 @@ begin
       Result:=(Result xor p^)*16777619;
       Inc(p);
    end;
+   if Result = 0 then Result := 1;
 end;
 
 // SimpleIntegerHash
@@ -1225,6 +1217,7 @@ begin
    Result := x * $cc9e2d51;
    Result := (Result shl 15) or (Result shr 17);
    Result := Result * $1b873593 + $e6546b64;
+   if Result = 0 then Result := 1;
 end;
 
 // SimplePointerHash
@@ -1244,6 +1237,7 @@ begin
    mix := (mix xor (mix shr 15)) * Cardinal(3266489917);
    Result := (mix xor (mix shr 16));
    {$endif}
+   if Result = 0 then Result := 1;
 end;
 
 // SimpleInt64Hash
@@ -1260,6 +1254,7 @@ begin
    k := (x shr 32) * $cc9e2d51;
    k := (k shl 15) or (k shr 17);
    Result := k * $1b873593 xor Result;
+   if Result = 0 then Result := 1;
 end;
 
 // StringBytesToWords
@@ -2460,11 +2455,23 @@ function VarCompareSafe(const left, right : Variant) : TVariantRelationship;
    end;
 
 begin
-   if VarType(left) = varUnknown then
-      if VarType(right) = varUnknown then
-         Result := CompareUnknowns(IUnknown(TVarData(left).VUnknown), IUnknown(TVarData(right).VUnknown))
-      else Result := CompareUnknownToVar(IUnknown(TVarData(left).VUnknown), right)
-   else if VarType(right) = varUnknown then
+   case VarType(left) of
+      varUnknown : begin
+         if VarType(right) = varUnknown then
+            Result := CompareUnknowns(IUnknown(TVarData(left).VUnknown), IUnknown(TVarData(right).VUnknown))
+         else Result := CompareUnknownToVar(IUnknown(TVarData(left).VUnknown), right);
+         Exit;
+      end;
+      varEmpty : begin
+         case VarType(right) of
+            varInt64 : if TVarData(right).VInt64 = 0 then Exit(vrEqual) else Exit(vrNotEqual);
+            varUString : if TVarData(right).VUString = nil then Exit(vrEqual) else Exit(vrNotEqual);
+            varDouble : if TVarData(right).VDouble = 0 then Exit(vrEqual) else Exit(vrNotEqual);
+            varEmpty, varNull : Exit(vrEqual);
+         end;
+      end;
+   end;
+   if VarType(right) = varUnknown then
       Result := CompareVarToUnknown(left, IUnknown(TVarData(right).VUnknown))
    else Result := VarCompareValue(left, right);
 end;
@@ -2906,29 +2913,6 @@ begin
    end;
 end;
 
-// FastCompareFloat
-//
-function FastCompareFloat(d1, d2 : PDouble) : Integer;
-{$ifdef WIN32_ASM}
-asm
-   fld      qword ptr [edx]
-   fld      qword ptr [eax]
-   xor      eax, eax
-   fcomip   st, st(1)
-   setnbe   cl
-   setb     al
-   and      ecx, 1
-   neg      eax
-   or       eax, ecx
-   fstp     st(0)
-{$else}
-begin
-   if d1^<d2^ then
-      Result:=-1
-   else Result:=Ord(d1^>d2^);
-{$endif}
-end;
-
 // RawByteStringToScriptString
 //
 function RawByteStringToScriptString(const s : RawByteString) : UnicodeString;
@@ -2981,27 +2965,6 @@ begin
       n := Length(s);
       SetLength(Result, n);
       WordsToBytes(Pointer(s), Pointer(Result), n);
-   end;
-end;
-
-// WordsToBytes
-//
-procedure WordsToBytes(src : PWord; dest : PByte; nbWords : Integer);
-begin
-   while nbWords >= 4 do begin
-      Dec(nbWords, 4);
-      dest[0] := PWordArray(src)[0];
-      dest[1] := PWordArray(src)[1];
-      dest[2] := PWordArray(src)[2];
-      dest[3] := PWordArray(src)[3];
-      Inc(dest, 4);
-      Inc(src, 4);
-   end;
-   while nbWords > 0 do begin
-      Dec(nbWords);
-      dest[0] := PWordArray(src)[0];
-      Inc(dest);
-      Inc(src);
    end;
 end;
 
@@ -4239,6 +4202,41 @@ begin
    raise ETightListOutOfBound.Create('List index out of bounds');
 end;
 
+// Sort
+//
+procedure TTightList.Sort(const comparer : TPointerComparer);
+var
+   i, j : Integer;
+begin
+   case Count of
+      0, 1 : Exit;
+      2 : begin
+         if comparer(FList[0], FList[1]) > 0 then
+            Exchange(0, 1);
+      end;
+      3 : begin
+         if comparer(FList[0], FList[1]) > 0 then
+            Exchange(0, 1);
+         if comparer(FList[1], FList[2]) > 0 then begin
+            Exchange(1, 2);
+            if comparer(FList[0], FList[1]) > 0 then
+               Exchange(0, 1);
+         end;
+      end;
+   else
+      // use an insertion sort, tight list is for very small lists
+      i := 1;
+      while i < Count do begin
+         j := i;
+         while (j > 0) and (comparer(FList[j-1], FList[j]) > 0) do begin
+            Exchange(j, j-1);
+            Dec(j);
+         end;
+         Inc(i);
+      end;
+   end;
+end;
+
 // GetEnumerator
 //
 function TTightList.GetEnumerator : TTightListEnumerator;
@@ -4337,6 +4335,37 @@ begin
       System.Move(FItems[idx], FItems[idx+1], SizeOf(T)*(FCount-idx));
    FItems[idx] := anItem;
    Inc(FCount);
+end;
+
+// Move
+//
+procedure TObjectList<T>.Move(idx, idxNew, itemCount : Integer);
+var
+   saveItems : ArrayT;
+   moveByteCount, saveByteCount : NativeInt;
+   idxSave, idxRestore, saveItemCount : Integer;
+begin
+   Assert(itemCount >= 0 , 'Negative item count');
+   Assert(Cardinal(idx) <= Cardinal(FCount), 'Index out of range');
+   Assert(Cardinal(idx + itemCount - 1) <= Cardinal(FCount), 'Last item index out of range');
+   Assert(Cardinal(idxNew) <= Cardinal(FCount), 'New index out of range');
+   Assert(Cardinal(idxNew + itemCount - 1) <= Cardinal(FCount), 'New last item index out of range');
+   if idx > idxNew then begin
+      idxSave := idxNew;
+      saveItemCount := idx - idxNew;
+      idxRestore := idxNew + itemCount;
+   end else begin
+      idxSave := idx + itemCount;
+      saveItemCount := idxNew - idx;
+      idxRestore := idx;
+   end;
+   if saveItemCount > 0 then begin
+      SetLength(saveItems, saveItemCount);
+      saveByteCount := SizeOf(T) * saveItemCount;
+      System.Move(FItems[idxSave], saveItems[0], saveByteCount);
+      System.Move(FItems[idx], FItems[idxNew], SizeOf(T)*itemCount);
+      System.Move(saveItems[0], FItems[idxRestore], saveByteCount);
+   end;
 end;
 
 // Extract
@@ -4845,6 +4874,13 @@ begin
    WriteBuf(@dw, 4);
 end;
 
+// WriteQWord
+//
+procedure TWriteOnlyBlockStream.WriteQWord(const qw : UInt64);
+begin
+   WriteBuf(@qw, 8);
+end;
+
 // WriteP
 //
 procedure TWriteOnlyBlockStream.WriteP(p : PWideChar; nbWideChars : Integer);
@@ -4929,6 +4965,30 @@ begin
    end;
 
    WriteBuf(@buf[n], (Length(buf)-n)*SizeOf(WideChar));
+end;
+
+// TailWord
+//
+function TWriteOnlyBlockStream.TailWord : Word;
+var
+   n : Integer;
+   iter : PPointerArray;
+begin
+   if FTotalSize = 0 then Exit(0);
+
+   n := FBlockRemaining^;
+   if n > 1 then
+      Exit(PWord(@PByteArray(@FCurrentBlock[2])[n-2])^)
+   else begin
+      Result := 0;
+      iter := FFirstBlock;
+      while iter <> nil do begin
+         n := PInteger(@iter[1])^;
+         if n > 1 then
+            Result := PWord(@PByteArray(@iter[2])[n-2])^;
+         iter := iter[0];
+      end;
+   end;
 end;
 
 // WriteDigits
@@ -6017,6 +6077,21 @@ end;
 // ------------------ TRefCountedObject ------------------
 // ------------------
 
+{$ifdef DOUBLE_FREE_PROTECTOR}
+constructor TRefCountedObject.Create;
+begin
+   inherited;
+   FDoubleFreeProtector := $0102030405060708;
+end;
+
+destructor TRefCountedObject.Destroy;
+begin
+   Assert(FDoubleFreeProtector = $0102030405060708, ClassName);
+   FDoubleFreeProtector := $0807060504030201;
+   inherited;
+end;
+{$endif}
+
 // Free
 //
 procedure TRefCountedObject.Free;
@@ -6437,9 +6512,9 @@ end;
 
 // Sort
 //
-procedure TQuickSort.Sort(minIndex, maxIndex : Integer);
+procedure TQuickSort.Sort(minIndex, maxIndex : NativeInt);
 var
-   i, j, p, n : Integer;
+   i, j, p, n : NativeInt;
 begin
    n:=maxIndex-minIndex;
    case n of
@@ -6634,116 +6709,6 @@ begin
    end;
    FFirst:=nil;
    FLast:=nil;
-end;
-
-// ------------------
-// ------------------ TStringIterator ------------------
-// ------------------
-
-// Create
-//
-constructor TStringIterator.Create(const s : String);
-begin
-   FStr:=s;
-   FPStr:=PChar(Pointer(s));
-   FLength:=System.Length(s);
-   FPosition:=0;
-end;
-
-// Current
-//
-function TStringIterator.Current : Char;
-begin
-   if Cardinal(FPosition)<Cardinal(FLength) then
-      Result:=FPstr[FPosition]
-   else Result:=#0;
-end;
-
-// EOF
-//
-function TStringIterator.EOF : Boolean;
-begin
-   Result:=(FPosition>=FLength);
-end;
-
-// Next
-//
-procedure TStringIterator.Next;
-begin
-   Inc(FPosition);
-end;
-
-// SkipWhiteSpace
-//
-procedure TStringIterator.SkipWhiteSpace;
-begin
-   while (FPosition<FLength) and (Ord(FPStr[FPosition])<=Ord(' ')) do
-      Inc(FPosition);
-end;
-
-// CollectQuotedString
-//
-function TStringIterator.CollectQuotedString : String;
-var
-   quoteChar : Char;
-begin
-   quoteChar:=Current;
-   Inc(FPosition);
-   while not EOF do begin
-      if FPstr[FPosition]=quoteChar then begin
-         Inc(FPosition);
-         if EOF or (FPstr[FPosition]<>quoteChar) then Exit;
-         Result:=Result+quoteChar;
-      end else begin
-         Result:=Result+FPStr[FPosition];
-         Inc(FPosition);
-      end;
-   end;
-   raise EStringIterator.Create('Unfinished quoted string');
-end;
-
-// CollectAlphaNumeric
-//
-function TStringIterator.CollectAlphaNumeric : String;
-var
-   start : Integer;
-begin
-   start:=FPosition;
-   while FPosition<FLength do begin
-      case FPstr[FPosition] of
-         '0'..'9', 'a'..'z', 'A'..'Z' : Inc(FPosition);
-      else
-         break;
-      end;
-   end;
-   Result:=Copy(FStr, start+1, FPosition-start);
-end;
-
-// CollectInteger
-//
-function TStringIterator.CollectInteger : Int64;
-var
-   neg : Boolean;
-begin
-   if (FPosition<FLength) and (FPStr[FPosition]='-') then begin
-      neg:=True;
-      Inc(FPosition);
-   end else neg:=False;
-   if FPosition>=FLength then
-      EStringIterator.Create('Unfinished integer');
-   Result:=0;
-   while FPosition<FLength do begin
-      case FPstr[FPosition] of
-         '0'..'9' : begin
-            Result:=Result*10+Ord(FPstr[FPosition])-Ord('0');
-            Inc(FPosition);
-         end;
-      else
-         break;
-      end;
-   end;
-   if neg then
-      Result:=-Result;
 end;
 
 // ------------------

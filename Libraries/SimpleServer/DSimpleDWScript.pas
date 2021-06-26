@@ -39,8 +39,8 @@ uses
    dwsDataBase, dwsDataBaseLibModule, dwsWebServerInfo, dwsWebServerLibModule,
    dwsBackgroundWorkersLibModule, dwsSynapseLibModule, dwsCryptoLibModule,
    dwsEncodingLibModule, dwsComConnector, dwsXXHash, dwsHTTPSysServer,
-   dwsBigIntegerFunctions.GMP, dwsMPIR.Bundle, dwsCompilerContext, dwsFilter,
-   dwsByteBufferFunctions;
+   dwsBigIntegerFunctions.GMP, dwsMPIR.Bundle, dwsTurboJPEG.Bundle,
+   dwsCompilerContext, dwsFilter, dwsByteBufferFunctions;
 
 type
 
@@ -70,6 +70,8 @@ type
       Prev, Next : PExecutingScript;
    end;
 
+   TSimpleDWScriptLibraryBinder = reference to procedure (script : TDelphiWebScript);
+
    TSimpleDWScript = class(TDataModule)
       DelphiWebScript: TDelphiWebScript;
       dwsHtmlFilter: TdwsHtmlFilter;
@@ -77,6 +79,8 @@ type
       dwsCompileSystem: TdwsRestrictedFileSystem;
       dwsRuntimeFileSystem: TdwsRestrictedFileSystem;
       dwsComConnector: TdwsComConnector;
+      dwsDatabaseFileSystem: TdwsRestrictedFileSystem;
+
       procedure DataModuleCreate(Sender: TObject);
       procedure DataModuleDestroy(Sender: TObject);
 
@@ -198,6 +202,8 @@ type
       property ShutdownScriptName : String read FShutdownScriptName write FShutdownScriptName;
 
       property ErrorLogDirectory : String read FErrorLogDirectory write FErrorLogDirectory;
+
+      class procedure RegisterLibraryBinder(const binder : TSimpleDWScriptLibraryBinder);
   end;
 
 const
@@ -230,6 +236,9 @@ const
          +'"LibraryPaths": ["%www%\\.lib"],'
          // Paths which scripts are allowed to perform file operations on
          +'"WorkPaths": ["%www%"],'
+         // DB Paths which scripts are allowed to perform file operations on
+         // if undefined or not an array, assumed identical to WorkPaths
+         +'"DBPaths": null,'
          // Conditional Defines that should be preset
          +'"Conditionals": [],'
          // HTML Filter patterns
@@ -245,7 +254,20 @@ const
          // Turns on/off JIT compilation
          +'"JIT": true,'
          // Turns on/off COM support (breaks sandboxing!)
-         +'"COM": false'
+         +'"COM": false,'
+         // OP4JS Pascal to JavaScript options
+         +'"OP4JS": {'
+            +'"NoRangeChecks": true,'
+            +'"NoCheckInstantiated": true,'
+            +'"NoCheckLoopStep": true,'
+            +'"NoConditions": true,'
+            +'"NoSourceLocations": true,'
+            +'"Obfuscate": false,'
+            +'"OptimizeForSize": false,'
+            +'"SmartLink": true,'
+            +'"DeVirtualize": true,'
+            +'"NoRTTI": true'
+         +'}'
       +'}';
 
 // ------------------------------------------------------------------
@@ -256,10 +278,15 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
+uses TypInfo;
+
 {$R *.dfm}
 
 const
    cCheckDirectoryChangesInterval = 1000;
+
+var
+   vLibraryBinders : array of TSimpleDWScriptLibraryBinder;
 
 procedure TCompiledProgram.Flush;
 begin
@@ -269,6 +296,7 @@ end;
 
 procedure TSimpleDWScript.DataModuleCreate(Sender: TObject);
 var
+   i : Integer;
    cryptoLib : TdwsCryptoLib;
 begin
    // attempt to minimize probability of ID collisions between server restarts
@@ -279,9 +307,9 @@ begin
    FSystemInfo:=TdwsSystemInfoLibModule.Create(Self);
    FSystemInfo.Script:=DelphiWebScript;
 
-   FDataBase:=TdwsDatabaseLib.Create(Self);
-   FDataBase.dwsDatabase.Script:=DelphiWebScript;
-   TdwsDataBase.OnApplyPathVariables:=ApplyPathVariables;
+   FDataBase := TdwsDatabaseLib.Create(Self);
+   FDataBase.dwsDatabase.Script := DelphiWebScript;
+   TdwsDataBase.OnApplyPathVariables := ApplyPathVariables;
 
    FWebLib:=TdwsWebLib.Create(Self);
    FWebLib.dwsWeb.Script:=DelphiWebScript;
@@ -338,6 +366,9 @@ begin
 
    dwsCompileSystem.OnFileStreamOpened := DoSourceFileStreamOpened;
    FActiveCompileSystem := dwsCompileSystem;
+
+   for i := 0 to High(vLibraryBinders) do
+      vLibraryBinders[i](DelphiWebScript);
 end;
 
 procedure TSimpleDWScript.DataModuleDestroy(Sender: TObject);
@@ -689,6 +720,10 @@ procedure TSimpleDWScript.LoadDWScriptOptions(options : TdwsJSONValue);
 var
    dws : TdwsJSONValue;
    conditionals : TdwsJSONValue;
+   dwsCGOptions : TdwsJSONValue;
+   workPaths, dbPaths : TdwsJSONValue;
+   opt : TdwsCodeGenOption;
+   cgOptions : TdwsCodeGenOptions;
    i : Integer;
 begin
    dws:=TdwsJSONValue.ParseString(cDefaultDWScriptOptions);
@@ -707,8 +742,17 @@ begin
       dwsCompileSystem.Variables := FPathVariables;
 
       dwsRuntimeFileSystem.Paths.Clear;
-      ApplyPathsVariables(dws['WorkPaths'], dwsRuntimeFileSystem.Paths);
+      workPaths := dws['WorkPaths'];
+      ApplyPathsVariables(workPaths, dwsRuntimeFileSystem.Paths);
       dwsRuntimeFileSystem.Variables := FPathVariables;
+
+      dwsDatabaseFileSystem.Paths.Clear;
+      dbPaths := dws['DBPaths'];
+      if dbPaths.ValueType <> jvtArray then
+         dbPaths := workPaths;
+      ApplyPathsVariables(dbPaths, dwsDatabaseFileSystem.Paths);
+      dwsDatabaseFileSystem.Variables := FPathVariables;
+      FDataBase.FileSystem := dwsDatabaseFileSystem.AllocateFileSystem;
 
       conditionals := dws['Conditionals'];
       for i := 0 to conditionals.ElementCount-1 do
@@ -722,8 +766,17 @@ begin
 
       FEnableJIT:=dws['JIT'].AsBoolean;
 
-      FStartupScriptName:=ApplyPathVariables(dws['Startup'].AsString);
-      FShutdownScriptName:=ApplyPathVariables(dws['Shutdown'].AsString);
+
+      dwsCGOptions := dws['OP4JS'];
+      cgOptions := [];
+      for opt := Low(TdwsCodeGenOption) to High(TdwsCodeGenOption) do begin
+         if dwsCGOptions[Copy(GetEnumName(TypeInfo(TdwsCodeGenOption), Ord(opt)), 4)].AsBoolean then
+            Include(cgOptions, opt);
+      end;
+      FJSFilter.CodeGenOptions := cgOptions;
+
+      FStartupScriptName := ApplyPathVariables(dws['Startup'].AsString);
+      FShutdownScriptName := ApplyPathVariables(dws['Shutdown'].AsString);
 
       if dws['COM'].AsBoolean then
          dwsComConnector.Script:=DelphiWebScript;
@@ -839,6 +892,17 @@ begin
    else FActiveCompileSystem := sys;
    DelphiWebScript.Config.CompileFileSystem := FActiveCompileSystem;
    FJSCompiler.Config.CompileFileSystem := FActiveCompileSystem;
+end;
+
+// RegisterLibraryBinder
+//
+class procedure TSimpleDWScript.RegisterLibraryBinder(const binder : TSimpleDWScriptLibraryBinder);
+var
+   n : Integer;
+begin
+   n := Length(vLibraryBinders);
+   SetLength(vLibraryBinders, n+1);
+   vLibraryBinders[n] := binder;
 end;
 
 // LogCompileErrors

@@ -96,11 +96,12 @@ type
    end;
 
    // Static Array to Dynamic Array
-   TConvStaticArrayToDynamicExpr = class (TUnaryOpExpr)
+   TConvStaticArrayToDynamicExpr = class sealed (TUnaryOpExpr)
       public
          constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos;
                             expr : TArrayConstantExpr; toTyp : TDynamicArraySymbol); reintroduce;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+         function GetIsConstant : Boolean; override;
    end;
 
    // ExternalClass(x)
@@ -216,7 +217,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsCoreExprs;
+uses dwsCoreExprs, dwsConnectorSymbols, dwsDynamicArrays;
 
 // ------------------
 // ------------------ TConvExpr ------------------
@@ -303,6 +304,14 @@ begin
          Result:=TObjToClassTypeExpr.Create(context, scriptPos, expr);
          if toTyp.Typ<>expr.Typ then
             Result:=TClassAsClassExpr.Create(context, scriptPos, Result, toTyp);
+      end;
+
+   end else if toTyp.UnAliasedTypeIs(TConnectorSymbol) then begin
+
+      if expr.Typ.UnAliasedType <> toTyp.UnAliasedType then begin
+         Result := TConnectorSymbol(toTyp.UnAliasedType).CreateConvExpr(
+            context, scriptPos, expr
+         );
       end;
 
    end else begin
@@ -512,16 +521,23 @@ end;
 procedure TConvStaticArrayToDynamicExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
    arr : TArrayConstantExpr;
-   dynArray : TScriptDynamicArray;
+   dynArray : IScriptDynArray;
    data : TData;
 begin
    arr:=TArrayConstantExpr(Expr);
 
-   dynArray:=TScriptDynamicArray.CreateNew(TDynamicArraySymbol(Typ).Typ);
+   dynArray := CreateNewDynamicArray(TDynamicArraySymbol(Typ).Typ);
    arr.EvalAsTData(exec, data);
    dynArray.ReplaceData(data);
 
-   VarCopySafe(Result, IScriptDynArray(dynArray));
+   VarCopySafe(Result, dynArray);
+end;
+
+// GetIsConstant
+//
+function TConvStaticArrayToDynamicExpr.GetIsConstant : Boolean;
+begin
+   Result := False;
 end;
 
 // ------------------

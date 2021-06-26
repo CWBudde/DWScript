@@ -165,6 +165,31 @@ object dwsSystemInfoLibModule: TdwsSystemInfoLibModule
             Attributes = [maStatic]
             OnEval = dwsSystemInfoClassesApplicationInfoMethodsExeLinkTimeEval
             Kind = mkClassFunction
+          end
+          item
+            Name = 'IsDebuggerPresent'
+            ResultType = 'Boolean'
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesApplicationInfoMethods8Eval
+            Kind = mkClassFunction
+          end
+          item
+            Name = 'GetCurrentDirectory'
+            ResultType = 'String'
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesApplicationInfoMethodsGetCurrentDirectoryEval
+            Kind = mkClassFunction
+          end
+          item
+            Name = 'SetCurrentDirectory'
+            Parameters = <
+              item
+                Name = 'newDirectory'
+                DataType = 'String'
+              end>
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesApplicationInfoMethodsSetCurrentDirectoryEval
+            Kind = mkClassProcedure
           end>
         Properties = <
           item
@@ -177,6 +202,12 @@ object dwsSystemInfoLibModule: TdwsSystemInfoLibModule
                 Name = 'name'
                 DataType = 'String'
               end>
+          end
+          item
+            Name = 'CurrentDirectory'
+            DataType = 'String'
+            ReadAccess = 'GetCurrentDirectory'
+            WriteAccess = 'SetCurrentDirectory'
           end>
       end
       item
@@ -291,6 +322,32 @@ object dwsSystemInfoLibModule: TdwsSystemInfoLibModule
             Value = '0'
           end>
         OnCleanUp = dwsSystemInfoClassesPerformanceCounterCleanUp
+      end
+      item
+        Name = 'ThreadInfo'
+        IsStatic = True
+        Methods = <
+          item
+            Name = 'ID'
+            ResultType = 'Integer'
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesThreadInfoMethodsIDEval
+            Kind = mkClassFunction
+          end
+          item
+            Name = 'Priority'
+            ResultType = 'Integer'
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesThreadInfoMethodsPriorityEval
+            Kind = mkClassFunction
+          end
+          item
+            Name = 'IsDebugging'
+            ResultType = 'Boolean'
+            Attributes = [maStatic]
+            OnEval = dwsSystemInfoClassesThreadInfoMethodsIsDebuggingEval
+            Kind = mkClassFunction
+          end>
       end>
     Functions = <
       item

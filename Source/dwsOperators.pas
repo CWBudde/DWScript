@@ -20,7 +20,7 @@ unit dwsOperators;
 
 interface
 
-uses dwsSymbols, dwsTokenizer, dwsExprs, dwsCoreExprs;
+uses dwsSymbols, dwsTokenTypes, dwsExprs, dwsCoreExprs, dwsCompilerContext, dwsScriptSource;
 
 type
 
@@ -40,13 +40,20 @@ type
    end;
    PRegisteredCaster = ^TRegisteredCaster;
 
+   TAsCasterExprCreator = reference to function (
+      compilerContext : TdwsCompilerContext;
+      operand : TTypedExpr; castType : TTypeSymbol;
+      const scriptPos : TScriptPos
+      ) : TTypedExpr;
+
    // lists of  operators and their expression classes
    // used for operator overloading
    TOperators = class
       private
          FCount : Integer;
-         FOperators : array [TTokenType] of array of TRegisteredOperator;
+         FOperators : array [ TTokenType ] of array of TRegisteredOperator;
          FCasters : array [0..15] of array of TRegisteredCaster;
+         FAsCasters : array of TAsCasterExprCreator;
 
          function AddOperator(aToken : TTokenType; aLeftType, aRightType : TTypeSymbol) : PRegisteredOperator;
 
@@ -82,6 +89,12 @@ type
 
          function FindCaster(aCastType, aOperandType : TTypeSymbol) : TTypedExprClass;
          function FindImplicitCaster(aCastType, aOperandType : TTypeSymbol) : TTypedExprClass;
+
+         procedure RegisterAsCaster(const asCaster : TAsCasterExprCreator);
+
+         function CreateAsCastExpr(compilerContext : TdwsCompilerContext;
+                                   operand : TTypedExpr; castType : TTypeSymbol;
+                                   const scriptPos : TScriptPos) : TTypedExpr;
    end;
 
 
@@ -321,6 +334,28 @@ begin
       p := @FCasters[h][i];
       if p.Implicit and (p.CastType=aCastType) and (p.OperandType=aOperandType) then
          Exit(p.ExprClass);
+   end;
+   Result := nil;
+end;
+
+// RegisterAsCaster
+//
+procedure TOperators.RegisterAsCaster(const asCaster : TAsCasterExprCreator);
+begin
+   var n := Length(FAsCasters);
+   SetLength(FAsCasters, n+1);
+   FAsCasters[n] := asCaster;
+end;
+
+// CreateAsCastExpr
+//
+function TOperators.CreateAsCastExpr(
+   compilerContext : TdwsCompilerContext; operand : TTypedExpr; castType : TTypeSymbol;
+   const scriptPos : TScriptPos) : TTypedExpr;
+begin
+   for var i := 0 to High(FAsCasters) do begin
+      Result := FAsCasters[i](compilerContext, operand, castType, scriptPos);
+      if Result <> nil then Exit;
    end;
    Result := nil;
 end;

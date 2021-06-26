@@ -70,6 +70,8 @@ type
       ['{857F6EE6-347E-45FB-BC49-0557960F8381}']
       procedure FastRead(const exec : TdwsExecution; const base : TExprBase; var result : Variant);
       procedure FastWrite(const exec : TdwsExecution; const base, value : TExprBase);
+
+      function FastReadBoolean(const exec : TdwsExecution; const base : TExprBase) : Boolean;
    end;
 
    IConnectorEnumerator = interface (IGetSelf)
@@ -118,6 +120,8 @@ type
          function SpecializeConnector(table : TSymbolTable; const qualifier : String) : TConnectorSymbol; virtual;
          function CreateAssignExpr(context : TdwsCompilerContext; const aScriptPos: TScriptPos;
                                    left : TDataExpr; right : TTypedExpr) : TProgramExpr; virtual;
+         function CreateConvExpr(context : TdwsCompilerContext; const aScriptPos: TScriptPos;
+                                 expr : TTypedExpr) : TTypedExpr; virtual;
 
 
          property ConnectorType : IConnectorType read FConnectorType write FConnectorType;
@@ -127,6 +131,7 @@ type
       protected
          procedure FastRead(const exec : TdwsExecution; const base : TExprBase; var result : Variant); virtual;
          procedure FastWrite(const exec : TdwsExecution; const base, value : TExprBase); virtual;
+         function FastReadBoolean(const exec : TdwsExecution; const base : TExprBase) : Boolean; virtual;
    end;
 
 // ------------------------------------------------------------------
@@ -137,7 +142,9 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsCoreExprs;
+uses
+   System.Variants,
+   dwsCoreExprs, dwsStrings;
 
 // ------------------
 // ------------------ TConnectorSymbol ------------------
@@ -174,6 +181,22 @@ begin
    Result:=TAssignExpr.Create(context, aScriptPos, left, right);
 end;
 
+// CreateConvExpr
+//
+function TConnectorSymbol.CreateConvExpr(context : TdwsCompilerContext; const aScriptPos: TScriptPos;
+                                         expr : TTypedExpr) : TTypedExpr;
+var
+   exprTyp : TTypeSymbol;
+begin
+   Result := expr;
+   exprTyp := expr.Typ.UnAliasedType;
+   if exprTyp <> Self then begin
+      if not exprTyp.BaseType.InheritsFrom(TBaseSymbol) then
+         context.Msgs.AddCompilerErrorFmt(aScriptPos, CPE_IncompatibleTypes,
+                                          [ expr.Typ.Caption, Name ]);
+   end;
+end;
+
 // ------------------
 // ------------------ TConnectorFastMember ------------------
 // ------------------
@@ -190,6 +213,23 @@ end;
 procedure TConnectorFastMember.FastWrite(const exec : TdwsExecution; const base, value : TExprBase);
 begin
    raise Exception.Create('FastRead not supported by '+ClassName);
+end;
+
+// FastReadBoolean
+//
+function TConnectorFastMember.FastReadBoolean(const exec : TdwsExecution; const base : TExprBase) : Boolean;
+var
+   v : Variant;
+begin
+   FastRead(exec, base, v);
+   try
+      Result := VariantToBool(v);
+   except
+      // standardize RTL message
+      on E : EVariantError do begin
+         raise EVariantTypeCastError.CreateFmt(RTE_VariantVTCastFailed, [VarType(v), SYS_BOOLEAN]);
+      end else raise;
+   end;
 end;
 
 end.

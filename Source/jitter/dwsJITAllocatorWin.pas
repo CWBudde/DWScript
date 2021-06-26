@@ -26,17 +26,17 @@ const
    cJITSubAllocatorSize = 64*1024; // 64 kB
 
 type
-
-   TdwsJITCodeSubAllocator = class (TRefCountedObject)
+   TdwsJITCodeSubAllocator = class (TInterfacedObject, IdwsJITCodeSubAllocator)
       private
          FBlock : Pointer;
          FCurrent : PByte;
          FBlockSize : Integer;
          FRemaining : Integer;
-         FNext : TdwsJITCodeSubAllocator;
+         FNext : IdwsJITCodeSubAllocator;
 
       protected
-         property Next : TdwsJITCodeSubAllocator read FNext write FNext;
+         function GetNext : IdwsJITCodeSubAllocator;
+         procedure SetNext(const aNext : IdwsJITCodeSubAllocator);
 
       public
          constructor Create(aSize : Integer);
@@ -51,7 +51,7 @@ type
 
    TdwsJITAllocatorWin = class
       private
-         FSubAllocators : TdwsJITCodeSubAllocator;
+         FSubAllocators : IdwsJITCodeSubAllocator;
          FAllocatorSize : Integer;
 
       protected
@@ -60,7 +60,7 @@ type
          constructor Create;
          destructor Destroy; override;
 
-         function Allocate(const code : TBytes) : TdwsJITCodeBlock;
+         function Allocate(const code : TBytes; var aSubAllocator : IdwsJITCodeSubAllocator) : Pointer;
 
          procedure DetachSubAllocators;
 
@@ -101,6 +101,9 @@ end;
 //
 function TdwsJITCodeSubAllocator.Allocate(aSize : Integer) : Pointer;
 begin
+   // round up to multiple of 16
+   aSize := ((aSize + 15) shr 4) shl 4;
+
    if aSize>FRemaining then
       Exit(nil);
 
@@ -127,6 +130,20 @@ begin
    VirtualProtect(FBlock, FBlockSize, PAGE_EXECUTE_READWRITE, @oldProtect);
 end;
 
+// GetNext
+//
+function TdwsJITCodeSubAllocator.GetNext : IdwsJITCodeSubAllocator;
+begin
+   Result := FNext;
+end;
+
+// SetNext
+//
+procedure TdwsJITCodeSubAllocator.SetNext(const aNext : IdwsJITCodeSubAllocator);
+begin
+   FNext := aNext;
+end;
+
 // ------------------
 // ------------------ TdwsJITAllocatorWin ------------------
 // ------------------
@@ -149,9 +166,9 @@ end;
 
 // Allocate
 //
-function TdwsJITAllocatorWin.Allocate(const code : TBytes) : TdwsJITCodeBlock;
+function TdwsJITAllocatorWin.Allocate(const code : TBytes; var aSubAllocator : IdwsJITCodeSubAllocator) : Pointer;
 var
-   sub : TdwsJITCodeSubAllocator;
+   sub : IdwsJITCodeSubAllocator;
    n, s : Integer;
    p : Pointer;
 begin
@@ -167,32 +184,27 @@ begin
       if n>AllocatorSize then
          s:=n+16
       else s:=AllocatorSize;
-      sub:=TdwsJITCodeSubAllocator.Create(s);
-      sub.IncRefCount;
+      sub := TdwsJITCodeSubAllocator.Create(s);
       sub.Next:=FSubAllocators;
       FSubAllocators:=sub;
       p:=sub.Allocate(n);
    end;
 
-   Result.Code:=p;
-   Result.SubAllocator:=sub;
-   Result.Steppable:=False;
-   sub.IncRefCount;
    System.Move(code[0], p^, n);
+   Result := p;
+   aSubAllocator := sub;
 end;
 
 // DetachSubAllocators
 //
 procedure TdwsJITAllocatorWin.DetachSubAllocators;
 var
-   sub : TdwsJITCodeSubAllocator;
+   sub : IdwsJITCodeSubAllocator;
 begin
    while FSubAllocators<>nil do begin
-      sub:=FSubAllocators;
-      FSubAllocators:=sub.Next;
+      sub := FSubAllocators;
+      FSubAllocators := sub.Next;
       sub.Protect;
-      sub.DecRefCount;
-      sub.Free;
    end;
 end;
 

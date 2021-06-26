@@ -23,7 +23,7 @@ unit dwsContextMap;
 
 interface
 
-uses dwsUtils, dwsScriptSource, dwsSymbols, dwsTokenizer, dwsJSON, TypInfo;
+uses dwsUtils, dwsScriptSource, dwsSymbols, dwsTokenTypes, dwsJSON, TypInfo;
 
 type
 
@@ -133,6 +133,7 @@ implementation
 constructor TdwsSourceContext.Create(aParent : TdwsSourceContext; const aStartPos : TScriptPos;
                             aParentSymbol : TSymbol; aToken : TTokenType);
 begin
+   inherited Create;
    FParentContext := AParent;
    FParentSymbol  := AParentSymbol;
    FStartPos := AStartPos;

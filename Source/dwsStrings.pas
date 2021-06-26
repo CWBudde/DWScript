@@ -229,6 +229,7 @@ const
   CPE_ClassForwardAlreadyExists = 'There is already a forward declaration of the "%s" class';
   CPE_ClassAlreadyDefined = 'Class "%s" already defined';
   CPE_ClassWasNotPartial = 'Previous declaration of class was not "partial"';
+  CPH_ClassWasPartial = 'Previous declaration of class was "partial"';
   CPE_ClassPartialModifiersNotMatched = 'Modifiers do not match previous "partial" declaration of class';
   CPE_FuncForwardAlreadyExists = 'There is already a forward declaration of this function';
   CPE_ForwardNotImplemented = 'The function "%s" was forward declared but not implemented';
@@ -270,6 +271,8 @@ const
   CPE_AnonymousMethodsNotAllowedHere = 'Anonymous methods not allowed here';
   CPE_AnonymousClassesMustBeFullyDefined = 'Anonymous classes must be fully defined';
   CPE_AnonymousClassNotAllowed = 'Anonymous class not allowed by compiler options';
+  CPE_AsyncNotSupported = 'ASYNC is not supported';
+  CPE_AwaitNotSupported = 'AWAIT is not supported';
 
   CPE_AttributeConstructorExpected = 'Attribute constructor expected';
   CPE_DanglingAttribute = 'Dangling attribute declaration';
@@ -354,7 +357,8 @@ const
   CPE_OnlyVariablesAsVarParam = 'Only a variable can be be passed as Var-parameter';
   CPE_StrictParameterTypeCheckNotSupportedFor = 'Strict parameter typecheck is not support for "%s" parameters';
   CPE_MustExplicitOverloads = 'Overloaded procedure "%s" must be marked with the "overload" directive';
-  CPH_ShouldExplicitOverload = 'Overloaded method "%s" should be marked with the "overload" directive';
+  CPH_MustExplicitMethodOverload = 'Overloaded method "%s" must be marked with the "overload" directive';
+  CPH_ShouldExplicitMethodOverload = 'Overloaded method "%s" should be marked with the "overload" directive';
   CPE_NoMatchingOverloadDeclaration = 'There is no overloaded version of "%s" declared with these arguments';
   CPE_NoMatchingOverloadForCall = 'There is no overloaded version of "%s" that can be called with these arguments';
   CPE_MatchingOverload = 'Overload of "%s" will be ambiguous with a previously declared version';
@@ -369,6 +373,7 @@ const
   CPE_IncompatibleOperands = 'Incompatible operands';
 
   CPE_InvalidTypeCast = 'Invalid typecast';
+  CPE_CannotCastAs = 'Cannot cast "%s" as "%s"';
 
   CPE_FunctionOptimizationFailed = 'Evaluation of "%s" failed: %s %s';
 

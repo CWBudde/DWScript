@@ -26,7 +26,7 @@ interface
 uses
    Classes, SysUtils, TypInfo, Variants,
    dwsSymbols, dwsErrors, dwsUtils, dwsDataContext, dwsExprList,
-   dwsStrings, dwsStack, SyncObjs, dwsFileSystem, dwsTokenizer, dwsUnitSymbols,
+   dwsStrings, dwsStack, SyncObjs, dwsFileSystem, dwsTokenTypes, dwsUnitSymbols,
    dwsJSON, dwsXPlatform, dwsInfo, dwsScriptSource, dwsCustomData, dwsSymbolDictionary,
    dwsContextMap, dwsCompilerContext;
 
@@ -1126,7 +1126,8 @@ type
          function GetIsConstant : Boolean; override;
 
       public
-         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; codeExpr : TTypedExpr);
+         constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos;
+                            codeExpr : TTypedExpr);
          destructor Destroy; override;
 
          procedure EvalAsFuncPointer(exec : TdwsExecution; var result : IFuncPointer); inline;
@@ -1468,7 +1469,10 @@ type
          procedure SetResultAsBoolean(const value : Boolean);
          procedure SetResultAsFloat(const value : Double);
 
-         function GetParamAsPVariant(index : Integer) : PVariant;
+         function GetParamDataContext(index : Integer) : IDataContext;
+
+         function GetParamAsDataContext(index : Integer) : IDataContext;
+
          function GetParamAsVariant(index : Integer) : Variant;
          procedure SetParamAsVariant(index : Integer; const v : Variant);
          function GetParamAsInteger(index : Integer) : Int64;
@@ -1483,7 +1487,6 @@ type
          function GetParamAsObject(index : Integer) : TObject;
          function GetParamAsScriptObj(index : Integer) : IScriptObj;
          function GetParamAsScriptDynArray(index : Integer) : IScriptDynArray;
-         function GetParamAsDataContext(index : Integer) : IDataContext;
 
          function CreateUnitList : TUnitSymbolRefList;
          function FindSymbolInUnits(aUnitList: TUnitSymbolRefList; const aName: String) : TSymbol; overload;
@@ -1534,7 +1537,7 @@ type
          property ValueAsClassSymbol[const s : String] : TClassSymbol read GetValueAsClassSymbol;
          property ValueAsTStrings[const s : String] : TStrings read GetValueAsTStrings;
 
-         property ParamAsPVariant[index : Integer] : PVariant read GetParamAsPVariant;
+         //property ParamAsPVariant[index : Integer] : PVariant read GetParamAsPVariant;
          property ParamAsVariant[index : Integer] : Variant read GetParamAsVariant write SetParamAsVariant;
          property ParamAsInteger[index : Integer] : Int64 read GetParamAsInteger write SetParamAsInteger;
          property ParamAsString[index : Integer] : String read GetParamAsString write SetParamAsString;
@@ -1599,67 +1602,17 @@ type
 
          function FieldAddress(const fieldName : String) : Integer;
 
+         function FieldAsString(const fieldName : String) : String;
+         function FieldAsInteger(const fieldName : String) : Int64;
+         function FieldAsFloat(const fieldName : String) : Double;
+         function FieldAsBoolean(const fieldName : String) : Boolean;
+         function FieldAsScriptDynArray(const fieldName : String) : IScriptDynArray;
+
          property ClassSym : TClassSymbol read FClassSym;
          property ExecutionContext : TdwsProgramExecution read FExecutionContext write FExecutionContext;
          property OnObjectDestroy: TObjectDestroyEvent read FOnObjectDestroy write FOnObjectDestroy;
          property Destroyed : Boolean read FDestroyed write FDestroyed;
          property ExternalObject : TObject read FExternalObject write FExternalObject;
-   end;
-
-   TScriptDynamicArray = class abstract (TScriptObj, IScriptDynArray)
-      private
-         FElementTyp : TTypeSymbol;
-         FElementSize : Integer;
-         FArrayLength : Integer;
-
-      protected
-         function GetElementSize : Integer;
-         function GetElementType : TTypeSymbol;
-         procedure SetArrayLength(n : Integer);
-         function GetArrayLength : Integer;
-
-      public
-         class function CreateNew(elemTyp : TTypeSymbol) : TScriptDynamicArray; static;
-
-         procedure Delete(index, count : Integer);
-         procedure Insert(index : Integer);
-         procedure Swap(i1, i2 : Integer); virtual; abstract;
-         procedure Reverse;
-         procedure Copy(src : TScriptDynamicArray; index, count : Integer);
-         procedure Concat(src : TScriptDynamicArray);
-         procedure MoveItem(srcIndex, dstIndex : Integer);
-
-         function ToString : String; override;
-         function ToStringArray : TStringDynArray;
-         function ToInt64Array : TInt64DynArray;
-
-         procedure ReplaceData(const newData : TData); override;
-
-         function IndexOfFuncPtr(const item : Variant; fromIndex : Integer) : Integer;
-
-         property ElementTyp : TTypeSymbol read FElementTyp;
-         property ElementSize : Integer read FElementSize;
-         property ArrayLength : Integer read FArrayLength write SetArrayLength;
-   end;
-
-   TScriptDynamicDataArray = class (TScriptDynamicArray)
-      public
-         procedure Swap(i1, i2 : Integer); override;
-   end;
-
-   TScriptDynamicValueArray = class (TScriptDynamicArray)
-      public
-         procedure Swap(i1, i2 : Integer); override;
-
-         function CompareString(i1, i2 : Integer) : Integer;
-         function CompareInteger(i1, i2 : Integer) : Integer;
-         function CompareFloat(i1, i2 : Integer) : Integer;
-   end;
-
-   TScriptDynamicStringArray = class (TScriptDynamicValueArray)
-      public
-         procedure Add(const s : String);
-         procedure AddStrings(sl : TStrings);
    end;
 
    TScriptAssociativeArrayHashCodes = array of Cardinal;
@@ -1669,8 +1622,8 @@ type
          FElementTyp, FKeyTyp : TTypeSymbol;
          FElementSize, FKeySize : Integer;
 
-         FCount : Integer;
-         FCapacity, FGrowth : Integer;
+         FCount : NativeInt;
+         FCapacity, FGrowth : NativeInt;
          FHashCodes : TScriptAssociativeArrayHashCodes;
          FKeys : TData;
          FCreateKeyOnAccess : Boolean;
@@ -1709,8 +1662,8 @@ type
 
          function ReadBucket(index : Integer; var key : TData; var value : IDataContext) : Boolean;
 
-         function Count : Integer;
-         function Capacity : Integer;
+         function Count : NativeInt;
+         function Capacity : NativeInt;
 
          function CopyKeys : TData;
 
@@ -1751,7 +1704,14 @@ implementation
 
 uses dwsFunctions, dwsCoreExprs, dwsMagicExprs, dwsMethodExprs, dwsUnifiedConstants,
    dwsInfoClasses, dwsCompilerUtils, dwsConstExprs, dwsResultFunctions,
-   dwsSpecializationContext;
+   dwsSpecializationContext, dwsDynamicArrays, dwsArrayExprs;
+
+// TScriptDynamicArray_InitData
+//
+procedure TScriptDynamicArray_InitData(elemTyp : TTypeSymbol; var result : Variant);
+begin
+   result := CreateNewDynamicArray(elemTyp);
+end;
 
 { TScriptObjectWrapper }
 
@@ -1772,6 +1732,12 @@ type
 
       public
          constructor Create(scriptObj : TScriptObjInstance);
+
+         function FieldAsString(const fieldName : String) : String;
+         function FieldAsInteger(const fieldName : String) : Int64;
+         function FieldAsFloat(const fieldName : String) : Double;
+         function FieldAsBoolean(const fieldName : String) : Boolean;
+         function FieldAsScriptDynArray(const fieldName : String) : IScriptDynArray;
    end;
 
 // Create
@@ -1840,6 +1806,41 @@ end;
 procedure RaiseOnlyVarSymbols(sym : TSymbol);
 begin
    raise EdwsProgramInfoException.CreateFmt(RTE_OnlyVarSymbols, [sym.Caption]);
+end;
+
+// FieldAsString
+//
+function TScriptObjectWrapper.FieldAsString(const fieldName : String) : String;
+begin
+   Result := FScriptObj.FieldAsString(fieldName);
+end;
+
+// FieldAsInteger
+//
+function TScriptObjectWrapper.FieldAsInteger(const fieldName : String) : Int64;
+begin
+   Result := FScriptObj.FieldAsInteger(fieldName);
+end;
+
+// FieldAsFloat
+//
+function TScriptObjectWrapper.FieldAsFloat(const fieldName : String) : Double;
+begin
+   Result := FScriptObj.FieldAsFloat(fieldName);
+end;
+
+// FieldAsBoolean
+//
+function TScriptObjectWrapper.FieldAsBoolean(const fieldName : String) : Boolean;
+begin
+   Result := FScriptObj.FieldAsBoolean(fieldName);
+end;
+
+// FieldAsScriptDynArray
+//
+function TScriptObjectWrapper.FieldAsScriptDynArray(const fieldName : String) : IScriptDynArray;
+begin
+   Result := FScriptObj.FieldAsScriptDynArray(fieldName);
 end;
 
 // ------------------
@@ -2668,6 +2669,8 @@ end;
 //
 constructor TdwsProgram.Create(const systemTable : ISystemSymbolTable);
 begin
+   inherited Create;
+
    FCompileMsgs := TdwsCompileMessageList.Create;
 
    FAddrGenerator := TAddrGeneratorRec.CreatePositive(0);
@@ -2796,7 +2799,7 @@ var
    progIter : TdwsProgram;
 begin
    progIter:=Self;
-   while (progIter<>nil) and (progIter is TdwsProcedure) do begin
+   while (progIter<>nil) and (progIter.ClassType = TdwsProcedure) do begin
       if TdwsProcedure(progIter).Func is TMethodSymbol then begin
          Result:=TMethodSymbol(TdwsProcedure(progIter).Func);
          Exit;
@@ -3831,9 +3834,11 @@ end;
 // EvalAsScriptDynArray
 //
 procedure TProgramExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
+var
+   intf : IUnknown;
 begin
-   EvalAsInterface(exec, IUnknown(result));
-   Assert(result.GetSelf is TScriptDynamicArray);
+   EvalAsInterface(exec, intf);
+   Result := intf as IScriptDynArray;
 end;
 
 // EvalAsScriptAssociativeArray
@@ -4223,6 +4228,7 @@ end;
 //
 constructor TNoResultExpr.Create(const aPos: TScriptPos);
 begin
+   inherited Create;
    FScriptPos:=aPos;
 end;
 
@@ -4279,6 +4285,7 @@ end;
 //
 constructor TErrorValueExpr.Create(aTyp : TAnyTypeSymbol);
 begin
+   inherited Create;
    Typ := aTyp;
 end;
 
@@ -4415,6 +4422,7 @@ end;
 
 constructor TDataExpr.Create(aTyp: TTypeSymbol);
 begin
+   inherited Create;
    FTyp := aTyp;
 end;
 
@@ -4480,8 +4488,11 @@ end;
 // AssignExpr
 //
 procedure TDataExpr.AssignExpr(exec : TdwsExecution; Expr: TTypedExpr);
+var
+   buf : Variant;
 begin
-   Expr.EvalAsVariant(exec, DataPtr[exec].AsPVariant(0)^);
+   Expr.EvalAsVariant(exec, buf);
+   DataPtr[exec].AsVariant[0] := buf;
 end;
 
 procedure TDataExpr.AssignDataExpr(exec : TdwsExecution; DataExpr: TDataExpr);
@@ -5606,8 +5617,8 @@ end;
 //
 constructor TAnonymousFuncRefExpr.Create(context : TdwsCompilerContext; funcExpr : TFuncExprBase);
 begin
-   FFuncExpr:=funcExpr;
-   Typ:=funcExpr.FuncSym;
+   FFuncExpr := funcExpr;
+   inherited Create(funcExpr.FuncSym);
 end;
 
 // Destroy
@@ -5672,9 +5683,23 @@ end;
 
 // Create
 //
-constructor TFuncPtrExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos; codeExpr : TTypedExpr);
+constructor TFuncPtrExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos;
+                                codeExpr : TTypedExpr);
+var
+   funcSym : TFuncSymbol;
+   codeExprType : TTypeSymbol;
 begin
-   inherited Create(context, aScriptPos, (codeExpr.Typ.UnAliasedType as TFuncSymbol));
+   codeExprType := codeExpr.Typ.UnAliasedType;
+   if codeExprType is TFuncSymbol then
+      funcSym := TFuncSymbol(codeExprType)
+   else begin
+      funcSym := codeExprType.AsFuncSymbol;
+      if funcSym = nil then begin
+         Assert(codeExprType.CanExpectAnyFuncSymbol);
+         funcSym := context.TypAnyFunc
+      end;
+   end;
+   inherited Create(context, aScriptPos, funcSym);
    FCodeExpr:=codeExpr;
 end;
 
@@ -5848,6 +5873,7 @@ end;
 constructor TBinaryOpExpr.Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos;
                                  const anOp : TTokenType; aLeft, aRight : TTypedExpr);
 begin
+   inherited Create;
    FScriptPos := aScriptPos;
    FOp := anOp;
    FLeft := aLeft;
@@ -6802,7 +6828,7 @@ begin
    n := Length(a);
    result.ArrayLength := n;
    for i := 0 to n-1 do
-      result.AsString[i] := a[i];
+      result.SetAsString(i, a[i]);
 end;
 
 // SetResultAsStringArray
@@ -6816,21 +6842,12 @@ begin
    n := s.Count;
    result.ArrayLength := n;
    for i := 0 to n-1 do
-      result.AsString[i] := s[i];
+      result.SetAsString(i, s[i]);
 end;
 
-// GetParamAsPVariant
+// GetParamDataContext
 //
-function TProgramInfo.GetParamAsPVariant(index : Integer) : PVariant;
-
-   function GetVarParam(stackAddr : Integer) : PVariant;
-   var
-      vpd : IDataContext;
-   begin
-      vpd:=IDataContext(IUnknown(Execution.Stack.Data[stackAddr]));
-      Result:=vpd.AsPVariant(0);
-   end;
-
+function TProgramInfo.GetParamDataContext(index : Integer) : IDataContext;
 var
    ip : TSymbolTable;
    sym : TDataSymbol;
@@ -6848,9 +6865,9 @@ begin
       if sym.Level=FLevel then
          stackAddr:=sym.StackAddr+exec.Stack.BasePointer
       else stackAddr:=sym.StackAddr+exec.Stack.GetSavedBp(Level);
-      if sym.InheritsFrom(TByRefParamSymbol) then
-         Result:=GetVarParam(stackAddr)
-      else Result:=@exec.Stack.Data[stackAddr];
+      if sym.InheritsFrom(TByRefParamSymbol) then begin
+         Result := IDataContext(IUnknown(Execution.Stack.Data[stackAddr]))
+      end else Result := exec.Stack.CreateDataContext(exec.Stack.Data, stackAddr);
    end;
 end;
 
@@ -6858,65 +6875,42 @@ end;
 //
 function TProgramInfo.GetParamAsVariant(index : Integer) : Variant;
 begin
-   Result:=GetParamAsPVariant(index)^;
+   GetParamDataContext(index).EvalAsVariant(0, Result);
 end;
 
 // SetParamAsVariant
 //
 procedure TProgramInfo.SetParamAsVariant(index : Integer; const v : Variant);
-var
-   p : PVariant;
 begin
-   p:=GetParamAsPVariant(index);
-   p^:=v;
+   GetParamDataContext(index).AsVariant[0] := v;
 end;
 
 // GetParamAsInteger
 //
 function TProgramInfo.GetParamAsInteger(index : Integer) : Int64;
-var
-   p : PVarData;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   if p^.VType=varInt64 then
-      Result:=p.VInt64
-   else Result:=PVariant(p)^;
+   Result := GetParamDataContext(index).AsInteger[0];
 end;
 
 // SetParamAsInteger
 //
 procedure TProgramInfo.SetParamAsInteger(index : Integer; const v : Int64);
-var
-   p : PVarData;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   if p^.VType=varInt64 then
-      p.VInt64:=v
-   else PVariant(p)^:=v;
+   GetParamDataContext(index).AsInteger[0] := v;
 end;
 
 // GetParamAsString
 //
 function TProgramInfo.GetParamAsString(index : Integer) : String;
-var
-   p : PVarData;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   {$ifdef FPC}
-   if p^.VType=varString then
-      Result:=String(p.VString)
-   {$else}
-   if p^.VType=varUString then
-      Result:=String(p.VUString)
-   {$endif}
-   else VariantToString(PVariant(p)^, Result);
+   GetParamDataContext(index).EvalAsString(0, Result);
 end;
 
 // SetParamAsString
 //
 procedure TProgramInfo.SetParamAsString(index : Integer; const v : String);
 begin
-   GetParamAsPVariant(index)^:=v;
+   GetParamDataContext(index).AsString[0] := v;
 end;
 
 // GetParamAsDataString
@@ -6930,90 +6924,76 @@ end;
 //
 procedure TProgramInfo.SetParamAsDataString(index : Integer; const v : RawByteString);
 begin
-   GetParamAsPVariant(index)^:=RawByteStringToScriptString(v);
+   GetParamDataContext(index).AsString[0] := RawByteStringToScriptString(v);
 end;
 
 // GetParamAsFileName
 //
 function TProgramInfo.GetParamAsFileName(index : Integer) : String;
 begin
-   Result:=Execution.ValidateFileName(GetParamAsString(index));
+   Result := Execution.ValidateFileName(GetParamAsString(index));
 end;
 
 // GetParamAsFloat
 //
 function TProgramInfo.GetParamAsFloat(index : Integer) : Double;
-var
-   p : PVarData;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   if p^.VType=varDouble then
-      Result:=p.VDouble
-   else Result:=PVariant(p)^;
+   Result := GetParamDataContext(index).AsFloat[0];
 end;
 
 // GetParamAsBoolean
 //
 function TProgramInfo.GetParamAsBoolean(index : Integer) : Boolean;
-var
-   p : PVarData;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   if p^.VType=varBoolean then
-      Result:=p.VBoolean
-   else Result:=PVariant(p)^;
+   Result := GetParamDataContext(index).AsBoolean[0];
 end;
 
 // GetParamAsObject
 //
 function TProgramInfo.GetParamAsObject(index : Integer) : TObject;
 var
-   p : PVarData;
+   intf : IUnknown;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   Assert(p.VType=varUnknown);
-   if p.VUnknown<>nil then
-      Result:=(IUnknown(p.VUnknown) as IScriptObj).ExternalObject
-   else Result:=nil;
+   GetParamDataContext(index).EvalAsInterface(0, intf);
+   if intf <> nil then
+      Result := (intf as IScriptObj).ExternalObject
+   else Result := nil;
 end;
 
 // GetParamAsScriptObj
 //
 function TProgramInfo.GetParamAsScriptObj(index : Integer) : IScriptObj;
 var
-   p : PVarData;
+   intf : IUnknown;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   Assert(p.VType=varUnknown);
-   if p.VUnknown<>nil then
-      Result:=IUnknown(p.VUnknown) as IScriptObj
-   else Result:=nil;
+   GetParamDataContext(index).EvalAsInterface(0, intf);
+   if intf <> nil then
+      Result := intf as IScriptObj
+   else Result := nil;
 end;
 
 // GetParamAsScriptDynArray
 //
 function TProgramInfo.GetParamAsScriptDynArray(index : Integer) : IScriptDynArray;
 var
-   p : PVarData;
+   intf : IUnknown;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   Assert(p.VType=varUnknown);
-   if p.VUnknown<>nil then
-      Result:=IUnknown(p.VUnknown) as IScriptDynArray
-   else Result:=nil;
+   GetParamDataContext(index).EvalAsInterface(0, intf);
+   if intf <> nil then
+      Result := intf as IScriptDynArray
+   else Result := nil;
 end;
 
 // GetParamAsDataContext
 //
 function TProgramInfo.GetParamAsDataContext(index : Integer) : IDataContext;
 var
-   p : PVarData;
+   intf : IUnknown;
 begin
-   p:=PVarData(GetParamAsPVariant(index));
-   Assert(p.VType=varUnknown);
-   if p.VUnknown<>nil then
-      Result:=IUnknown(p.VUnknown) as IDataContext
-   else Result:=nil;
+   GetParamDataContext(index).EvalAsInterface(index, intf);
+   if intf <> nil then
+      Result := intf as IDataContext
+   else Result := nil;
 end;
 
 function TProgramInfo.FindClassMatch(AObject: TObject; ExactMatch: Boolean): TClassSymbol;
@@ -7303,12 +7283,56 @@ end;
 //
 function TScriptObjInstance.FieldAddress(const fieldName : String) : Integer;
 var
+   clsSym : TClassSymbol;
    field : TFieldSymbol;
 begin
-   field := TFieldSymbol(FClassSym.Members.FindLocal(fieldName, TFieldSymbol));
+   clsSym := FClassSym;
+   repeat
+      field := TFieldSymbol(clsSym.Members.FindLocal(fieldName, TFieldSymbol));
+      if field <> nil then break;
+      clsSym := clsSym.Parent;
+   until clsSym = nil;
    if field = nil then
       raise Exception.CreateFmt(RTE_FieldNotFoundInClass, [fieldName, FClassSym.Name]);
    Result := field.Offset;
+end;
+
+// FieldAsString
+//
+function TScriptObjInstance.FieldAsString(const fieldName : String) : String;
+begin
+   Result := AsString[FieldAddress(fieldName)];
+end;
+
+// FieldAsInteger
+//
+function TScriptObjInstance.FieldAsInteger(const fieldName : String) : Int64;
+begin
+   Result := AsInteger[FieldAddress(fieldName)];
+end;
+
+// FieldAsFloat
+//
+function TScriptObjInstance.FieldAsFloat(const fieldName : String) : Double;
+begin
+   Result := AsFloat[FieldAddress(fieldName)];
+end;
+
+// FieldAsBoolean
+//
+function TScriptObjInstance.FieldAsBoolean(const fieldName : String) : Boolean;
+begin
+   Result := AsBoolean[FieldAddress(fieldName)];
+end;
+
+// FieldAsScriptDynArray
+//
+function TScriptObjInstance.FieldAsScriptDynArray(const fieldName : String) : IScriptDynArray;
+var
+   intf : IUnknown;
+begin
+   EvalAsInterface(FieldAddress(fieldName), intf);
+   Result := intf as IScriptDynArray;
 end;
 
 // GetClassSym
@@ -7356,339 +7380,6 @@ end;
 procedure TScriptObjInstance.SetExecutionContext(exec : TdwsProgramExecution);
 begin
    FExecutionContext:=exec;
-end;
-
-// ------------------
-// ------------------ TScriptDynamicArray ------------------
-// ------------------
-
-// CreateNew
-//
-class function TScriptDynamicArray.CreateNew(elemTyp : TTypeSymbol) : TScriptDynamicArray;
-var
-   size : Integer;
-begin
-   if elemTyp<>nil then
-      size:=elemTyp.Size
-   else size:=0;
-   if size=1 then
-      if elemTyp.ClassType=TBaseStringSymbol then
-         Result:=TScriptDynamicStringArray.Create
-      else Result:=TScriptDynamicValueArray.Create
-   else Result:=TScriptDynamicDataArray.Create;
-   Result.FElementTyp:=elemTyp;
-   Result.FElementSize:=size;
-end;
-
-// TScriptDynamicArray_InitData
-//
-procedure TScriptDynamicArray_InitData(elemTyp : TTypeSymbol; var result : Variant);
-begin
-   result:=IScriptDynArray(TScriptDynamicArray.CreateNew(elemTyp));
-end;
-
-// SetArrayLength
-//
-procedure TScriptDynamicArray.SetArrayLength(n : Integer);
-var
-   i : Integer;
-   p : PData;
-begin
-   SetDataLength(n*ElementSize);
-   p:=AsPData;
-   for i:=FArrayLength to n-1 do
-      FElementTyp.InitData(p^, i*ElementSize);
-   FArrayLength:=n;
-end;
-
-// GetArrayLength
-//
-function TScriptDynamicArray.GetArrayLength : Integer;
-begin
-   Result:=FArrayLength;
-end;
-
-// ReplaceData
-//
-procedure TScriptDynamicArray.ReplaceData(const newData : TData);
-begin
-   inherited;
-   FArrayLength:=System.Length(newData) div ElementSize;
-end;
-
-// IndexOfFuncPtr
-//
-function TScriptDynamicArray.IndexOfFuncPtr(const item : Variant; fromIndex : Integer) : Integer;
-var
-   i : Integer;
-   itemFunc : IFuncPointer;
-   p : PVarData;
-begin
-   itemFunc:=IFuncPointer(IUnknown(item));
-   if itemFunc=nil then begin
-      for i:=fromIndex to ArrayLength-1 do begin
-         p:=PVarData(AsPVariant(i));
-         if (p.VType=varUnknown) and (p.VUnknown=nil) then
-            Exit(i);
-      end;
-   end else begin
-      for i:=fromIndex to ArrayLength-1 do
-         if itemFunc.SameFunc(AsPVariant(i)^) then
-            Exit(i);
-   end;
-   Result:=-1;
-end;
-
-// Insert
-//
-procedure TScriptDynamicArray.Insert(index : Integer);
-var
-   n : Integer;
-   p : PData;
-begin
-   Inc(FArrayLength);
-   SetDataLength(FArrayLength*ElementSize);
-   n:=(FArrayLength-index-1)*ElementSize*SizeOf(Variant);
-   p := AsPData;
-   if n>0 then
-      Move(p^[index*ElementSize], p^[(index+1)*ElementSize], n);
-   FillChar(p^[index*ElementSize], ElementSize*SizeOf(Variant), 0);
-   FElementTyp.InitData(p^, index*ElementSize);
-end;
-
-// Delete
-//
-procedure TScriptDynamicArray.Delete(index, count : Integer);
-var
-   i, d : Integer;
-   p : PData;
-begin
-   if count<=0 then Exit;
-   Dec(FArrayLength, count);
-   index:=index*ElementSize;
-   count:=count*ElementSize;
-   for i:=index to index+count-1 do
-      VarClearSafe(AsPVariant(i)^);
-   d:=(FArrayLength-1)*ElementSize+count-index;
-   p := AsPData;
-   if d>0 then
-      System.Move(p^[index+count], p^[index], d*SizeOf(Variant));
-   System.FillChar(p^[FArrayLength*ElementSize], count*SizeOf(Variant), 0);
-   SetDataLength(FArrayLength*ElementSize);
-end;
-
-// Reverse
-//
-procedure TScriptDynamicArray.Reverse;
-var
-   t, b : Integer;
-begin
-   t:=ArrayLength-1;
-   b:=0;
-   while t>b do begin
-      Swap(t, b);
-      Dec(t);
-      Inc(b);
-   end;
-end;
-
-// Copy
-//
-procedure TScriptDynamicArray.Copy(src : TScriptDynamicArray; index, count : Integer);
-begin
-   ArrayLength := count;
-   WriteData(src, index*ElementSize, count*ElementSize);
-end;
-
-// Concat
-//
-procedure TScriptDynamicArray.Concat(src : TScriptDynamicArray);
-var
-   n, nSrc : Integer;
-begin
-   if src.ArrayLength > 0 then begin
-      n := ArrayLength;
-      nSrc := src.ArrayLength;
-      FArrayLength := n + nSrc;
-      SetDataLength(FArrayLength*ElementSize);
-      WriteData(n*ElementSize, src, nSrc*ElementSize);
-   end;
-end;
-
-// MoveItem
-//
-procedure TScriptDynamicArray.MoveItem(srcIndex, dstIndex : Integer);
-begin
-   MoveData(srcIndex*ElementSize, dstIndex*ElementSize, ElementSize);
-end;
-
-// ToString
-//
-function TScriptDynamicArray.ToString : String;
-begin
-   Result := SYS_ARRAY_OF + ' ' + FElementTyp.Name;
-end;
-
-// ToStringArray
-//
-function TScriptDynamicArray.ToStringArray : TStringDynArray;
-var
-   i : Integer;
-begin
-   Assert(FElementTyp.BaseType.ClassType=TBaseStringSymbol);
-
-   System.SetLength(Result, ArrayLength);
-   for i:=0 to ArrayLength-1 do
-      EvalAsString(i, Result[i]);
-end;
-
-// ToInt64Array
-//
-function TScriptDynamicArray.ToInt64Array : TInt64DynArray;
-var
-   i : Integer;
-begin
-   Assert(FElementTyp.BaseType.ClassType=TBaseIntegerSymbol);
-
-   System.SetLength(Result, ArrayLength);
-   for i:=0 to ArrayLength-1 do
-      Result[i]:=AsInteger[i];
-end;
-
-// GetElementSize
-//
-function TScriptDynamicArray.GetElementSize : Integer;
-begin
-   Result:=FElementSize;
-end;
-
-// GetElementType
-//
-function TScriptDynamicArray.GetElementType : TTypeSymbol;
-begin
-   Result := FElementTyp;
-end;
-
-// ------------------
-// ------------------ TScriptDynamicValueArray ------------------
-// ------------------
-
-// Swap
-//
-procedure TScriptDynamicValueArray.Swap(i1, i2 : Integer);
-var
-   elem1, elem2 : PVarData;
-   buf : TVarData;
-begin
-   elem1:=@DirectData[i1];
-   elem2:=@DirectData[i2];
-   buf.VType:=elem1^.VType;
-   buf.VInt64:=elem1^.VInt64;
-   elem1^.VType:=elem2^.VType;
-   elem1^.VInt64:=elem2^.VInt64;
-   elem2^.VType:=buf.VType;
-   elem2^.VInt64:=buf.VInt64;
-end;
-
-// CompareString
-//
-function TScriptDynamicValueArray.CompareString(i1, i2 : Integer) : Integer;
-var
-   p : PVarDataArray;
-   v1, v2 : PVarData;
-begin
-   p:=@DirectData[0];
-   v1:=@p[i1];
-   v2:=@p[i2];
-   {$ifdef FPC}
-   Assert((v1.VType=varString) and (v2.VType=varString));
-   Result:=UnicodeCompareStr(String(v1.VString), String(v2.VString));
-   {$else}
-   Assert((v1.VType=varUString) and (v2.VType=varUString));
-   Result:=UnicodeCompareStr(String(v1.VUString), String(v2.VUString));
-   {$endif}
-end;
-
-// CompareInteger
-//
-function TScriptDynamicValueArray.CompareInteger(i1, i2 : Integer) : Integer;
-var
-   p : PVarDataArray;
-   v1, v2 : PVarData;
-begin
-   p:=@DirectData[0];
-   v1:=@p[i1];
-   v2:=@p[i2];
-   if (v1.VType=varInt64) and (v2.VType=varInt64) then begin
-   end else
-      Assert((v1.VType=varInt64) and (v2.VType=varInt64));
-   if v1.VInt64<v2.VInt64 then
-      Result:=-1
-   else Result:=Ord(v1.VInt64>v2.VInt64);
-end;
-
-// CompareFloat
-//
-function TScriptDynamicValueArray.CompareFloat(i1, i2 : Integer) : Integer;
-var
-   p : PVarDataArray;
-   v1, v2 : PVarData;
-begin
-   p:=@DirectData[0];
-   v1:=@p[i1];
-   v2:=@p[i2];
-   Assert((v1.VType=varDouble) and (v2.VType=varDouble));
-   if v1.VDouble<v2.VDouble then
-      Result:=-1
-   else Result:=Ord(v1.VDouble>v2.VDouble);
-end;
-
-// ------------------
-// ------------------ TScriptDynamicStringArray ------------------
-// ------------------
-
-// Add
-//
-procedure TScriptDynamicStringArray.Add(const s : String);
-begin
-   ArrayLength:=ArrayLength+1;
-   if s<>'' then
-      AsString[ArrayLength-1]:=s;
-end;
-
-// AddStrings
-//
-procedure TScriptDynamicStringArray.AddStrings(sl : TStrings);
-var
-   i, n : Integer;
-begin
-   n := ArrayLength;
-   ArrayLength := n+sl.Count;
-   for i := 0 to sl.Count-1 do
-      AsString[n+i] := sl[i];
-end;
-
-// ------------------
-// ------------------ TScriptDynamicDataArray ------------------
-// ------------------
-
-// Swap
-//
-procedure TScriptDynamicDataArray.Swap(i1, i2 : Integer);
-var
-   i : Integer;
-   elem1, elem2 : PVarData;
-   buf : TVarData;
-begin
-   elem1:=@DirectData[i1*ElementSize];
-   elem2:=@DirectData[i2*ElementSize];
-   for i:=1 to ElementSize do begin
-      buf:=elem1^;
-      elem1^:=elem2^;
-      elem2^:=buf;
-      Inc(elem1);
-      Inc(elem2);
-   end;
 end;
 
 // ------------------
@@ -7824,6 +7515,12 @@ end;
 // ReplaceValue
 //
 procedure TScriptAssociativeArray.ReplaceValue(exec : TdwsExecution; index, value : TTypedExpr);
+
+   procedure WriteDataExpr(index : Integer);
+   begin
+      WriteData(index*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), FElementSize)
+   end;
+
 var
    i : Integer;
    hashCode : Cardinal;
@@ -7839,8 +7536,8 @@ begin
       Inc(FCount);
    end;
    if FElementSize > 1 then
-      WriteData(i*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), FElementSize)
-   else value.EvalAsVariant(exec, AsPVariant(i)^);
+      WriteDataExpr(i)
+   else value.EvalAsVariant(exec, DirectData[Addr + i]);
 end;
 
 // ReplaceValue
@@ -7869,6 +7566,7 @@ var
    i : Integer;
    hashCode : Cardinal;
    key : IDataContext;
+   buf : Variant;
 begin
    if FCreateKeyOnAccess then
       if FCount >= FGrowth then Grow;
@@ -7890,7 +7588,8 @@ begin
       FHashCodes[i] := hashCode;
       key.CopyData(FKeys, i*FKeySize, FKeySize);
       Inc(FCount);
-      result.EvalAsVariant(0, AsPVariant(i)^);
+      result.EvalAsVariant(0, buf);
+      AsVariant[i] := buf;
    end;
 end;
 
@@ -8118,14 +7817,14 @@ end;
 
 // Count
 //
-function TScriptAssociativeArray.Count : Integer;
+function TScriptAssociativeArray.Count : NativeInt;
 begin
-   Result:=FCount;
+   Result := FCount;
 end;
 
 // Capacity
 //
-function TScriptAssociativeArray.Capacity : Integer;
+function TScriptAssociativeArray.Capacity : NativeInt;
 begin
    Result := FCapacity;
 end;

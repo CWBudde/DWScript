@@ -21,14 +21,24 @@ unit dwsSystemOperators;
 interface
 
 uses
-   dwsSymbols, dwsTokenizer, dwsExprs, dwsCoreExprs, dwsRelExprs,
-   dwsOperators, dwsUnitSymbols, dwsConvExprs;
+   dwsSymbols, dwsTokenTypes, dwsExprs, dwsCoreExprs, dwsRelExprs,
+   dwsOperators, dwsUnitSymbols, dwsConvExprs, dwsCompilerContext,
+   dwsScriptSource;
 
 type
 
    TSystemOperators = class (TOperators)
       public
          constructor Create(systemTable : TSystemSymbolTable);
+
+         function AsCastInterfaceSymbol(compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol; const scriptPos : TScriptPos) : TTypedExpr;
+         function AsCastInstanceSymbol(compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol; const scriptPos : TScriptPos) : TTypedExpr;
+         function AsCastClassOfSymbol(compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol; const scriptPos : TScriptPos) : TTypedExpr;
+         function AsCastVariantSymbol(compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol; const scriptPos : TScriptPos) : TTypedExpr;
    end;
 
 // ------------------------------------------------------------------
@@ -38,6 +48,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses dwsStrings;
 
 // ------------------
 // ------------------ TSystemOperators ------------------
@@ -281,6 +293,93 @@ begin
    RegisterOperator(ttDIVIDE_ASSIGN, TDivideAssignExpr,     typVariant,     typFloat);
    RegisterOperator(ttDIVIDE_ASSIGN, TDivideAssignExpr,     typVariant,     typVariant);
    RegisterOperator(ttDIVIDE_ASSIGN, TDivideAssignExpr,     typVariant,     typInteger);
+
+   RegisterOperator(ttIS,            TRelEqualBoolExpr,     typBoolean,     typBoolean);
+   RegisterOperator(ttIS,            TRelEqualBoolExpr,     typVariant,     typBoolean);
+
+   RegisterAsCaster(AsCastInterfaceSymbol);
+   RegisterAsCaster(AsCastInstanceSymbol);
+   RegisterAsCaster(AsCastClassOfSymbol);
+   RegisterAsCaster(AsCastVariantSymbol);
+end;
+
+// AsCastInterfaceSymbol
+//
+function TSystemOperators.AsCastInterfaceSymbol(
+   compilerContext : TdwsCompilerContext;
+   operand : TTypedExpr; castType : TTypeSymbol;
+   const scriptPos : TScriptPos) : TTypedExpr;
+begin
+   if operand.Typ is TInterfaceSymbol then begin
+      if castType is TInterfaceSymbol then begin
+         Result := TIntfAsIntfExpr.Create(compilerContext, scriptPos, operand, TInterfaceSymbol(castType));
+      end else begin
+         if not (castType is TClassOfSymbol) then begin
+            compilerContext.Msgs.AddCompilerError(scriptPos, CPE_ClassRefExpected);
+            castType := compilerContext.TypTObject.MetaSymbol;
+         end;
+         Result := TIntfAsClassExpr.Create(compilerContext, scriptPos, operand, TClassOfSymbol(castType).Typ);
+      end;
+   end else Result := nil;
+end;
+
+// AsCastInstanceSymbol
+//
+function TSystemOperators.AsCastInstanceSymbol(
+            compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol;
+            const scriptPos : TScriptPos
+            ) : TTypedExpr;
+begin
+   if operand.Typ is TClassSymbol then begin
+      if castType is TInterfaceSymbol then
+         Result := TObjAsIntfExpr.Create(compilerContext, scriptPos, operand, TInterfaceSymbol(castType))
+      else begin
+         if not (castType is TClassOfSymbol) then begin
+            compilerContext.Msgs.AddCompilerError(scriptPos, CPE_ClassRefExpected);
+            castType := compilerContext.TypTObject.MetaSymbol;
+         end;
+         Result := TObjAsClassExpr.Create(compilerContext, scriptPos, operand, TClassOfSymbol(castType).Typ);
+      end;
+   end else Result := nil;
+end;
+
+// AsCastClassOfSymbol
+//
+function TSystemOperators.AsCastClassOfSymbol(
+            compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol;
+            const scriptPos : TScriptPos
+            ) : TTypedExpr;
+begin
+   if operand.Typ is TClassOfSymbol then begin
+      if not (castType is TClassOfSymbol) then begin
+         compilerContext.Msgs.AddCompilerStop(scriptPos, CPE_ClassRefExpected);
+         castType := compilerContext.TypTObject.MetaSymbol;
+      end;
+      Result := TClassAsClassExpr.Create(compilerContext, scriptPos, operand, TClassOfSymbol(castType));
+   end else Result := nil;
+end;
+
+// AsCastVariantSymbol
+//
+function TSystemOperators.AsCastVariantSymbol(
+            compilerContext : TdwsCompilerContext;
+            operand : TTypedExpr; castType : TTypeSymbol;
+            const scriptPos : TScriptPos
+            ) : TTypedExpr;
+begin
+   Result := nil;
+   if operand.Typ = compilerContext.TypVariant then begin
+      if castType = compilerContext.TypInteger then
+         Result := TConvVarToIntegerExpr.Create(compilerContext, scriptPos, operand)
+      else if castType = compilerContext.TypFloat then
+         Result := TConvVarToFloatExpr.Create(compilerContext, scriptPos, operand)
+      else if castType = compilerContext.TypString then
+         Result := TConvVarToStringExpr.Create(compilerContext, scriptPos, operand)
+      else if castType = compilerContext.TypBoolean then
+         Result := TConvVarToBoolExpr.Create(compilerContext, scriptPos, operand);
+   end;
 end;
 
 end.

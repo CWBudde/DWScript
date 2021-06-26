@@ -5,10 +5,14 @@ interface
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   Dialogs, ExtCtrls, StdCtrls,
-  {$ifndef WIN64}
+  {$ifdef WIN32}
   dwsJIT, dwsJITx86,
   {$endif}
-  dwsComp, dwsExprs, dwsFunctions, dwsSymbols, dwsMagicExprs, dwsExprList;
+  {$ifdef WIN64}
+  dwsJIT, dwsJITx86_64,
+  {$endif}
+  dwsComp, dwsExprs, dwsFunctions, dwsSymbols, dwsMagicExprs, dwsExprList,
+  dwsErrors, dwsUtils;
 
 type
   TMainForm = class(TForm)
@@ -133,33 +137,42 @@ procedure TMainForm.Benchmark;
 const
    cNB_LOOPS = 10;
 var
-   tStart, tStop, tFreq : Int64;
+   tStart, tStop, tFreq, tBest : Int64;
    i : Integer;
 begin
    QueryPerformanceFrequency(tFreq);
 
    PrepareBitmap;
-   QueryPerformanceCounter(tStart);
+   tBest := MaxInt;
 
-   for i:=1 to cNB_LOOPS do
+   for i:=1 to cNB_LOOPS do begin
+      QueryPerformanceCounter(tStart);
       PaintBitmapDelphi;
+      QueryPerformanceCounter(tStop);
+      if tStop-tStart < tBest then
+         tBest := tStop-tStart;
+   end;
 
-   QueryPerformanceCounter(tStop);
    IMDelphi.Picture.Assign(FBitmap);
    FBitmap.Free;
    LADelphi.Caption:=Format('Delphi: %0.1f ms', [1000*(tStop-tStart)/tFreq]);
 
    PrepareBitmap;
-   QueryPerformanceCounter(tStart);
+   tBest := MaxInt;
 
-   for i:=1 to cNB_LOOPS do
+   for i:=1 to cNB_LOOPS do begin
+      QueryPerformanceCounter(tStart);
       PaintBitmapDWSscript;
 //   PaintBitmapLaPe;
+      QueryPerformanceCounter(tStop);
+      if tStop-tStart < tBest then
+         tBest := tStop-tStart;
+   end;
 
    QueryPerformanceCounter(tStop);
    IMDWScript.Picture.Assign(FBitmap);
    FBitmap.Free;
-   LADWScript.Caption:=Format('DWScript: %0.1f ms (incl. compilation)', [1000*(tStop-tStart)/tFreq]);
+   LADWScript.Caption:=Format('DWScript: %0.1f ms (incl. compilation)', [1000*tBest/tFreq]);
 end;
 
 // PrepareBitmap
@@ -170,8 +183,8 @@ var
 begin
    FBitmap:=TBitmap.Create;
    FBitmap.PixelFormat:=pf32bit;
-   FBitmap.Width:=500;
-   FBitmap.Height:=500;
+   FBitmap.Width:=1000;
+   FBitmap.Height:=1000;
 
    SetLength(FScanLines, FBitmap.Height);
 
@@ -198,7 +211,7 @@ end;
 //
 procedure TMainForm.PaintBitmapDelphi;
 const
-   cSize = 500;
+   cSize = 1000;
 var
    i, j, newColor : Integer;
    u, v, x, y, z : Double;
@@ -226,7 +239,7 @@ end;
 procedure TMainForm.PaintBitmapDWSscript;
 const
    cSource = ''
-      +'const cSize = 500;'#13#10
+      +'const cSize = 1000;'#13#10
       +'var i, j, newColor : Integer;'#13#10
       +'var u, v, x, y, z : Float;'#13#10
       +#13#10
@@ -247,21 +260,18 @@ const
       +'   end;'#13#10
       +'end;'
    ;
-
+type
+   TJitter = {$ifdef WIN32}TdwsJITx86{$endif}{$ifdef WIN64}TdwsJITx86_64{$endif};
 var
    prog : IdwsProgram;
-   {$ifndef WIN64}
-   jitter : TdwsJITx86;
-   {$endif}
+   jitter : TJitter;
 begin
    prog:=DelphiWebScript.Compile(cSource);
 
-   {$ifndef WIN64}
-   jitter:=TdwsJITx86.Create;
-   jitter.Options:=jitter.Options-[jitoNoBranchAlignment];
+   jitter := TJitter.Create;
+   jitter.Options := jitter.Options-[jitoNoBranchAlignment];
    jitter.GreedyJIT(prog.ProgramObject);
    jitter.Free;
-   {$endif}
 
    if prog.Msgs.Count=0 then
       prog.Execute

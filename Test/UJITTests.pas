@@ -2,13 +2,11 @@ unit UJITTests;
 
 interface
 
-{$IF Defined(WIN32)}
-
 uses
    Classes, SysUtils, Variants,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsXPlatform,
    dwsTokenizer, dwsErrors, dwsUtils, dwsSymbols, dwsFunctions, dwsUnitSymbols,
-   dwsJITFixups, dwsJITx86, dwsJITx86Intrinsics, dwsCompilerContext;
+   dwsJITFixups, dwsJITx86, dwsJITx86_64, dwsJITx86Intrinsics, dwsCompilerContext;
 
 type
 
@@ -16,7 +14,7 @@ type
       private
          FTests : TStringList;
          FCompiler : TDelphiWebScript;
-         FStream : TWriteOnlyBlockStream;
+         FStream : Tx86BaseWriteOnlyStream;
          FFixups : TFixupLogic;
 
       protected
@@ -92,7 +90,7 @@ begin
    FCompiler.OnNeedUnit:=DoNeedUnit;
    FCompiler.Config.HintsLevel:=hlPedantic;
 
-   FStream:=TWriteOnlyBlockStream.Create;
+   FStream:=Tx86_Platform_WriteOnlyStream.Create;
    FFixups:=TFixupLogic.Create;
    FFixups.OnNeedLocation:=GetStreamPosition;
 end;
@@ -179,7 +177,7 @@ var
    exec : IdwsProgramExecution;
    output, expectedResult : String;
    diagnostic : TStringList;
-   jit : TdwsJITx86;
+   jit : {$ifdef WIN32} TdwsJITx86 {$endif}{$ifdef WIN64} TdwsJITx86_64 {$endif};
 begin
    ignored:=0;
    diagnostic:=TStringList.Create;
@@ -210,7 +208,7 @@ begin
          OutputDebugString(FTests[i]);
 
          try
-            jit:=TdwsJITx86.Create;
+            jit:={$ifdef WIN32} TdwsJITx86 {$endif}{$ifdef WIN64} TdwsJITx86_64 {$endif}.Create;
             try
                jit.GreedyJIT(prog.ProgramObject);
             finally
@@ -269,6 +267,7 @@ begin
    FStream.WriteByte(Ord('c'));
 
    FFixups.FlushFixups(FStream.ToBytes, FStream);
+   FFixups.ClearFixups;
    outBuf:=FStream.ToBytes;
 
    CheckEquals(4, Length(outbuf));
@@ -300,6 +299,7 @@ begin
    FFixups.AddFixup(jump);
 
    FFixups.FlushFixups(FStream.ToBytes, FStream);
+   FFixups.ClearFixups;
    outbuf:=FStream.ToBytes;
 
    CheckEquals(5, Length(outbuf));
@@ -333,6 +333,7 @@ begin
    jump1.Target:=target;
 
    FFixups.FlushFixups(FStream.ToBytes, FStream);
+   FFixups.ClearFixups;
    outbuf:=FStream.ToBytes;
 
    CheckEquals(5, Length(outbuf));
@@ -370,6 +371,7 @@ begin
    FStream.WriteByte($22);
 
    FFixups.FlushFixups(FStream.ToBytes, FStream);
+   FFixups.ClearFixups;
    outbuf:=FStream.ToBytes;
 
    CheckEquals(7, Length(outbuf));
@@ -399,9 +401,5 @@ initialization
 // ------------------------------------------------------------------
 
    RegisterTest('jitTests', TJITTests);
-
-{$else}
-implementation
-{$ifend}
 
 end.

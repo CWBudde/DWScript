@@ -380,7 +380,7 @@ type
          procedure SetCapacity(newCapacity : Integer);
          procedure DetachChild(child : TdwsJSONValue); override;
          procedure DeleteIndex(idx : Integer);
-         procedure SwapNoRangeCheck(index1, index2 : Integer);
+         procedure SwapNoRangeCheck(index1, index2 : NativeInt);
 
          function GetValueType : TdwsJSONValueType; override;
          function DoGetName(index : Integer) : UnicodeString; override;
@@ -461,6 +461,7 @@ type
 
          class function ParseString(const json : UnicodeString) : TdwsJSONImmediate; static;
          class function FromVariant(const v : Variant) : TdwsJSONImmediate; static;
+         class function CreateNull : TdwsJSONImmediate; static;
 
          function Clone : TdwsJSONImmediate;
 
@@ -2108,9 +2109,9 @@ type
    TCompareAdapter = class
       ValueArray : PdwsJSONValueArray;
       CompareMethod : TdwsJSONValueCompareMethod;
-      function Compare(index1, index2 : Integer) : Integer;
+      function Compare(index1, index2 : NativeInt) : Integer;
    end;
-   function TCompareAdapter.Compare(index1, index2 : Integer) : Integer;
+   function TCompareAdapter.Compare(index1, index2 : NativeInt) : Integer;
    begin
       Result:=CompareMethod(ValueArray[index1], ValueArray[Index2]);
    end;
@@ -2135,7 +2136,7 @@ end;
 
 // SwapNoRangeCheck
 //
-procedure TdwsJSONArray.SwapNoRangeCheck(index1, index2 : Integer);
+procedure TdwsJSONArray.SwapNoRangeCheck(index1, index2 : NativeInt);
 var
    temp : TdwsJSONValue;
 begin
@@ -2549,6 +2550,14 @@ begin
    Result.AsVariant:=v;
 end;
 
+// CreateNull
+//
+class function TdwsJSONImmediate.CreateNull : TdwsJSONImmediate;
+begin
+   Result := TdwsJSONImmediate.Create;
+   Result.FType := jvtNull;
+end;
+
 // DoSetItem
 //
 procedure TdwsJSONImmediate.DoSetItem(const name : UnicodeString; const value : TdwsJSONValue);
@@ -2605,14 +2614,15 @@ procedure TdwsJSONImmediate.SetAsVariant(const val : Variant);
 begin
    case VariantType(val) of
       varEmpty : Clear;
-      varNull : IsNull:=True;
+      varNull : IsNull := True;
+      varInt64 : AsInteger := val;
       {$ifdef FPC}
-      varString : AsString:=val;
+      varString : AsString := val;
       {$else}
-      varUString : AsString:=val;
+      varUString : AsString := val;
       {$endif}
-      varDouble : AsNumber:=val;
-      varBoolean : AsBoolean:=val;
+      varDouble : AsNumber := val;
+      varBoolean : AsBoolean := val;
    else
       if VariantIsString(val) then
          AsString := VariantToUnicodeString(val)
@@ -2798,9 +2808,15 @@ end;
 // WriteNumber
 //
 procedure TdwsJSONWriter.WriteNumber(const n : Double);
+var
+   buffer : array [0..63] of WideChar;
+   nc : Integer;
+   nExt : Extended;
 begin
    BeforeWriteImmediate;
-   FStream.WriteString(UnicodeString(FloatToStr(n, vJSONFormatSettings)));
+   nExt := n;
+   nc := FloatToText(buffer, nExt, fvExtended, ffGeneral, 15, 0, vJSONFormatSettings);
+   FStream.Write(buffer, nc*SizeOf(WideChar));
    AfterWriteImmediate;
 end;
 

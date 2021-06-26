@@ -25,53 +25,10 @@ interface
 
 uses
   SysUtils, Classes, TypInfo,
-  dwsScriptSource, dwsErrors, {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
-  dwsXPlatform, dwsUtils, dwsXXHash
+  dwsTokenTypes, dwsScriptSource, dwsErrors, dwsStrings, dwsXPlatform, dwsUtils, dwsXXHash
   {$ifdef FPC},lazutf8{$endif};
 
 type
-
-   TTokenType =
-     (
-     ttNone, ttStrVal, ttIntVal, ttFloatVal, ttNAME, ttSWITCH,
-     ttLAZY, ttVAR, ttCONST, ttRESOURCESTRING,
-     ttTYPE, ttRECORD, ttARRAY, ttSET, ttDOT, ttDOTDOT, ttOF, ttENUM, ttFLAGS,
-     ttTRY, ttEXCEPT, ttRAISE, ttFINALLY, ttON,
-     ttREAD, ttWRITE, ttPROPERTY, ttDESCRIPTION,
-     ttFUNCTION, ttPROCEDURE, ttCONSTRUCTOR, ttDESTRUCTOR, ttMETHOD, ttLAMBDA, ttOPERATOR,
-     ttCLASS, ttNIL, ttIS, ttAS, ttIMPLEMENTS, ttINDEX, ttOBJECT,
-     ttVIRTUAL, ttOVERRIDE, ttREINTRODUCE, ttINHERITED, ttFINAL, ttNEW,
-     ttABSTRACT, ttSEALED, ttSTATIC, ttPARTIAL, ttDEPRECATED, ttOVERLOAD,
-     ttEXTERNAL, ttEXPORT, ttFORWARD, ttINLINE, ttEMPTY, ttIN,
-     ttENSURE, ttREQUIRE, ttINVARIANTS, ttOLD,
-     ttINTERFACE, ttIMPLEMENTATION, ttINITIALIZATION, ttFINALIZATION,
-     ttHELPER, ttSTRICT,
-     ttASM, ttBEGIN, ttEND, ttBREAK, ttCONTINUE, ttEXIT,
-     ttIF, ttTHEN, ttELSE, ttWITH, ttWHILE, ttREPEAT, ttUNTIL, ttFOR, ttTO, ttDOWNTO, ttDO,
-     ttCASE,
-     ttTRUE, ttFALSE,
-     ttAND, ttOR, ttXOR, ttDIV, ttMOD, ttNOT, ttSHL, ttSHR, ttSAR,
-     ttPLUS, ttMINUS, ttIMPLIES, ttIMPLICIT,
-     ttTIMES, ttDIVIDE, ttPERCENT, ttCARET, ttAT, ttTILDE,
-     ttDOLLAR, ttEXCLAMATION, ttEXCL_EQ,
-     ttQUESTION, ttQUESTION_QUESTION, ttQUESTION_DOT,
-     ttEQ, ttNOT_EQ, ttGTR, ttGTR_EQ, ttLESS, ttLESS_EQ, ttEQ_GTR, ttEQ_EQ, ttEQ_EQ_EQ,
-     ttLESS_LESS, ttGTR_GTR, ttPIPE, ttPIPE_PIPE, ttAMP, ttAMP_AMP,
-     ttSEMI, ttCOMMA, ttCOLON,
-     ttASSIGN, ttPLUS_ASSIGN, ttMINUS_ASSIGN, ttTIMES_ASSIGN, ttDIVIDE_ASSIGN,
-     ttPERCENT_ASSIGN, ttCARET_ASSIGN, ttAT_ASSIGN, ttTILDE_ASSIGN,
-     ttPLUS_PLUS, ttMINUS_MINUS, ttTIMES_TIMES,
-     ttBLEFT, ttBRIGHT, ttALEFT, ttARIGHT, ttCLEFT, ttCRIGHT,
-     ttDEFAULT,
-     ttUSES, ttUNIT, ttNAMESPACE,
-     ttPRIVATE, ttPROTECTED, ttPUBLIC, ttPUBLISHED,
-     ttPROGRAM, ttLIBRARY,
-
-     // Tokens for compatibility to Delphi
-     ttREGISTER, ttPASCAL, ttCDECL, ttSAFECALL, ttSTDCALL, ttFASTCALL, ttREFERENCE
-     );
-
-   TTokenTypes = set of TTokenType;
 
    TTokenizerCaseSensitivity = (
       tcsCaseInsensitive,        // tokenizer alpha token are case insensitive
@@ -134,11 +91,12 @@ type
 
    TCharsType = set of AnsiChar;
    TTransition = class;
+   TTransitionArray = array [#0..#127] of TTransition;
 
    TState = class (TRefCountedObject)
       private
          FOwnedTransitions : TTightList;
-         FTransitions : array [#0..#127] of TTransition;
+         FTransitions : TTransitionArray;
 
       public
          destructor Destroy; override;
@@ -165,9 +123,10 @@ type
          IsError : Boolean;
          Consume : Boolean;
          Seek : Boolean;
+         Galop : Boolean;
 
       public
-         constructor Create(nstate: TState; opts: TTransitionOptions; actn: TConvertAction);
+         constructor Create(aNextState: TState; opts: TTransitionOptions; actn: TConvertAction);
    end;
 
    TElseTransition = class(TTransition)
@@ -187,6 +146,9 @@ type
       constructor Create(nstate: TState; opts: TTransitionOptions; actn: TConvertAction);
    end;
    TConsumeTransition = class (TSeekTransition) // Transition, consume Char, next Char
+      constructor Create(nstate: TState; opts: TTransitionOptions; actn: TConvertAction);
+   end;
+   TGalopTransition = class (TSeekTransition) // Eat characters
       constructor Create(nstate: TState; opts: TTransitionOptions; actn: TConvertAction);
    end;
 
@@ -320,45 +282,6 @@ type
          property OnEndSourceFile : TTokenizerEndSourceFileEvent read FOnEndSourceFile write FOnEndSourceFile;
    end;
 
-const
-   cTokenStrings : array [TTokenType] of String = (
-     '', 'UnicodeString Literal', 'Integer Literal', 'Float Literal', 'name', 'switch',
-     'lazy', 'var', 'const', 'resourcestring',
-     'type', 'record', 'array', 'set', '.', '..', 'of', 'enum', 'flags',
-     'try', 'except', 'raise', 'finally', 'on',
-     'read', 'write', 'property', 'description',
-     'function', 'procedure', 'constructor', 'destructor', 'method', 'lambda', 'operator',
-     'class', 'nil', 'is', 'as', 'implements', 'index', 'object',
-     'virtual', 'override', 'reintroduce', 'inherited', 'final', 'new',
-     'abstract', 'sealed', 'static', 'partial', 'deprecated', 'overload',
-     'external', 'export', 'forward', 'inline', 'empty', 'in',
-     'ensure', 'require', 'invariants', 'old',
-     'interface', 'implementation', 'initialization', 'finalization',
-     'helper', 'strict',
-     'asm', 'begin', 'end', 'break', 'continue', 'exit',
-     'if', 'then', 'else', 'with', 'while', 'repeat', 'until', 'for', 'to', 'downto', 'do',
-     'case',
-     'True', 'False',
-     'and', 'or', 'xor', 'div', 'mod', 'not', 'shl', 'shr', 'sar',
-     '+', '-', 'implies', 'implicit',
-     '*', '/', '%', '^', '@', '~',
-     '$', '!', '!=',
-     '?', '??', '?.',
-     '=', '<>', '>', '>=', '<', '<=', '=>', '==', '===',
-     '<<', '>>', '|', '||', '&', '&&',
-     ';', ',', ':',
-     ':=', '+=', '-=', '*=', '/=',
-     '%=', '^=', '@=', '~=',
-     '++', '--', '**',
-     '(', ')', '[', ']', '{', '}',
-     'default', 'uses', 'unit', 'namespace',
-     'private', 'protected', 'public', 'published',
-     'program', 'library',
-     'register', 'pascal', 'cdecl', 'safecall', 'stdcall', 'fastcall', 'reference'
-     );
-
-function TokenTypesToString(const tt : TTokenTypes) : String;
-
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -369,24 +292,6 @@ implementation
 
 const
    cFormatSettings : TFormatSettings = ( DecimalSeparator : {%H-}'.' );
-
-// TokenTypesToString
-//
-function TokenTypesToString(const tt : TTokenTypes) : String;
-var
-   t : TTokenType;
-begin
-   for t in tt do begin
-      if Result<>'' then
-         Result:=Result+' or ';
-      case t of
-         ttIntVal, ttStrVal, ttFloatVal :
-            Result:=Result+cTokenStrings[t];
-      else
-         Result:=Result+'"'+cTokenStrings[t]+'"';
-      end;
-   end;
-end;
 
 // EmptyString
 //
@@ -802,7 +707,7 @@ end;
 //
 const
    cAlphaTypeTokens : TTokenTypes = [
-      ttAND, ttARRAY, ttABSTRACT, ttAS, ttASM,
+      ttAND, ttARRAY, ttABSTRACT, ttAS, ttASM, ttASYNC, ttAWAIT,
       ttBEGIN, ttBREAK,
       ttCONST, ttCLASS, ttCONSTRUCTOR, ttCASE, ttCDECL, ttCONTINUE,
       ttDO, ttDOWNTO, ttDIV, ttDEFAULT, ttDESCRIPTION, ttDESTRUCTOR, ttDEPRECATED,
@@ -1059,7 +964,8 @@ end;
 //
 constructor TTransition.Create;
 begin
-   NextState:=nstate;
+   inherited Create;
+   NextState := aNextState;
    Start:=toStart in opts;
    Final:=toFinal in opts;
    Action:=actn;
@@ -1073,9 +979,7 @@ end;
 //
 constructor TElseTransition.Create(actn: TConvertAction);
 begin
-   NextState:=nil;
-   Start:=False;
-   Action:=actn;
+   inherited Create(nil, [], actn);
 end;
 
 // ------------------
@@ -1084,8 +988,9 @@ end;
 
 constructor TErrorTransition.Create(const msg : String);
 begin
-   IsError:=True;
-   ErrorMessage:=msg;
+   inherited Create(nil, [], caNone);
+   IsError := True;
+   ErrorMessage := msg;
 end;
 
 // ------------------
@@ -1113,6 +1018,18 @@ begin
 end;
 
 // ------------------
+// ------------------ TGalopTransition ------------------
+// ------------------
+
+// Create
+//
+constructor TGalopTransition.Create(nstate: TState; opts: TTransitionOptions; actn: TConvertAction);
+begin
+   inherited;
+   Galop := True;
+end;
+
+// ------------------
 // ------------------ TTokenizer ------------------
 // ------------------
 
@@ -1121,6 +1038,7 @@ end;
 constructor TTokenizer.Create(rules : TTokenizerRules; msgs : TdwsCompileMessageList;
                               unifier : TStringUnifier = nil);
 begin
+   inherited Create;
    FMsgs := Msgs;
    FTokenBuf.Grow;
    FRules := rules;
@@ -1667,18 +1585,27 @@ begin
       if trns.Start and (FToken.FScriptPos.Col=0) then
          FToken.FScriptPos:=CurrentPos;
 
-      // Add actual character to s
-      if trns.Consume then
-         FTokenBuf.AppendChar(pch^);
-
       // Proceed to the next character
       if trns.Seek then begin
-         Inc(FSource.FPosPtr);
-         if pch^=#10 then begin
-            Inc(FSource.FCurPos.Line);
-            FSource.FCurPos.Col:=1;
-         end else Inc(FSource.FCurPos.Col);
-         Inc(pch);
+
+         // Add actual character to s
+         if trns.Consume then
+            FTokenBuf.AppendChar(pch^);
+
+         if trns.Galop then begin
+            repeat
+               Inc(pch);
+               Inc(FSource.FPosPtr);
+               Inc(FSource.FCurPos.Col);
+            until pch^ <> ch;
+         end else begin
+            Inc(FSource.FPosPtr);
+            if ch = #10 then begin
+               Inc(FSource.FCurPos.Line);
+               FSource.FCurPos.Col:=1;
+            end else Inc(FSource.FCurPos.Col);
+            Inc(pch);
+         end;
       end;
 
       // The characters in 's' have to be converted

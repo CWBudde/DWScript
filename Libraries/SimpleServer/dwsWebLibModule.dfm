@@ -223,6 +223,13 @@ object dwsWebLib: TdwsWebLib
             Attributes = [maStatic]
             OnFastEvalString = dwsWebClassesWebRequestMethodsIfNoneMatchFastEvalString
             Kind = mkClassFunction
+          end
+          item
+            Name = 'ContentFieldNames'
+            ResultType = 'array of String'
+            Attributes = [maStatic]
+            OnEval = dwsWebClassesWebRequestMethodsContentFieldsEval
+            Kind = mkClassFunction
           end>
         Properties = <
           item
@@ -1121,6 +1128,20 @@ object dwsWebLib: TdwsWebLib
           end>
         ResultType = 'String'
         OnEval = dwsWebFunctionsGetHostByNameEval
+      end
+      item
+        Name = 'PingIPv4'
+        Parameters = <
+          item
+            Name = 'hostName'
+            DataType = 'String'
+          end
+          item
+            Name = 'timeOutMSec'
+            DataType = 'Integer'
+          end>
+        ResultType = 'Integer'
+        OnFastEval = dwsWebFunctionsPingIPv4FastEval
       end>
     UnitName = 'System.Net'
     StaticSymbols = True

@@ -303,7 +303,7 @@ end;
 
 // ProfilerTimeCallBack
 //
-procedure ProfilerTimeCallBack(TimerID, Msg: Uint; dwUser, dw1, dw2: DWORD); pascal;
+procedure ProfilerTimeCallBack(uTimerID, uMessage: UINT; dwUser, dw1, dw2: DWORD_PTR); stdcall;
 begin
    TdwsSamplingDebugger(dwUser).CollectSample;
 end;
@@ -316,10 +316,11 @@ begin
    FSamplingFuncStack.Clear;
    FSamplingFuncStack.Push(nil);
    FSamplingPos:=cNullPos;
-   if FSamplingInterval<1 then
-      FSamplingInterval:=1;
-   FTimerID:=timeSetEvent(FSamplingInterval, 0, @ProfilerTimeCallBack,
-                          Cardinal(Self), TIME_PERIODIC);
+   if FSamplingInterval < 1 then
+      FSamplingInterval := 1;
+
+   FTimerID := timeSetEvent(FSamplingInterval, 0, @ProfilerTimeCallBack,
+                            IntPtr(Self), TIME_PERIODIC);
    inherited;
 end;
 
@@ -340,7 +341,7 @@ end;
 procedure TdwsSamplingDebugger.StopDebug(exec : TdwsExecution);
 begin
    if FTimerID>0 then begin
-      TimeKillEvent(FTimerID);
+      timeKillEvent(FTimerID);
       FTimerID:=0;
    end;
    inherited;

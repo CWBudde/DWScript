@@ -47,6 +47,8 @@ type
 
       function Copy(offset, size : NativeInt) : IdwsByteBuffer;
 
+      function DataPtr : Pointer;
+
       function GetByteP : Byte;
       function GetWordP : Word;
       function GetInt16P : Int16;
@@ -90,6 +92,9 @@ type
       procedure SetDoubleA(index : NativeInt; v : Double);
       procedure SetExtendedA(index : NativeInt; v : Double);
       procedure SetDataStringA(index : NativeInt; const v : String);
+
+      function GetMeta(const index : Integer) : Int64;
+      procedure SetMeta(const index : Integer; const val : Int64);
    end;
 
    TdwsByteBuffer = class (TInterfacedObject, IdwsByteBuffer, IGetSelf, IJSONWriteAble)
@@ -98,6 +103,7 @@ type
          FCount : NativeInt;
          FPosition : NativeInt;
          FReadOnly : Boolean;
+         FMetaData : TInt64DynArray;
 
       protected
          procedure RangeCheck(index, size : Integer); inline;
@@ -110,11 +116,16 @@ type
          function GetPosition : NativeInt;
          procedure SetPosition(n : NativeInt);
 
+         procedure SetMetaData(const data : TInt64DynArray);
+         function GetMeta(const index : Integer) : Int64;
+         procedure SetMeta(const index : Integer; const val : Int64);
+
       public
          function ToString : String; override;
          procedure WriteToJSON(writer : TdwsJSONWriter);
 
          procedure Assign(const buffer : IdwsByteBuffer);
+         procedure AssignRaw(const p : PByte; size : Integer);
          procedure AssignDataString(const s : String);
          procedure AssignJSON(const s : String);
          procedure AssignBase64(const s : String);
@@ -126,6 +137,8 @@ type
          procedure ToHexString(var s : String);
 
          function Copy(offset, size : NativeInt) : IdwsByteBuffer;
+
+         function DataPtr : Pointer;
 
          function GetByteP : Byte;
          function GetWordP : Word;
@@ -174,6 +187,9 @@ type
          property Count : NativeInt read FCount write SetCount;
          property Position : NativeInt read FPosition write SetPosition;
          property ReadOnly : Boolean read FReadOnly write FReadOnly;
+
+         property MetaData : TInt64DynArray read FMetaData write SetMetaData;
+         property Meta[const index : Integer] : Int64 read GetMeta write SetMeta;
    end;
 
    EdwsByteBuffer = class (Exception);
@@ -247,6 +263,40 @@ begin
    FPosition := n;
 end;
 
+// SetMetaData
+//
+procedure TdwsByteBuffer.SetMetaData(const data : TInt64DynArray);
+begin
+   var n := Length(data);
+   SetLength(FMetaData, n);
+   if n > 0 then
+      System.Move(data[0], FMetaData[0], n*SizeOf(Int64));
+end;
+
+// GetMeta
+//
+function TdwsByteBuffer.GetMeta(const index : Integer) : Int64;
+begin
+   if index < 0 then
+      raise EdwsByteBuffer.CreateFmt('Invalid Meta index (%d)', [ index ]);
+   if index < Length(FMetaData) then
+      Result := FMetaData[index]
+   else Result := 0;
+end;
+
+// SetMeta
+//
+procedure TdwsByteBuffer.SetMeta(const index : Integer; const val : Int64);
+begin
+   if index < 0 then
+      raise EdwsByteBuffer.CreateFmt('Invalid Meta index (%d)', [ index ]);
+   if index >= Length(FMetaData) then begin
+      if val = 0 then Exit;
+      SetLength(FMetaData, index+1);
+   end;
+   FMetaData[index] := val;
+end;
+
 // ToString
 //
 function TdwsByteBuffer.ToString : String;
@@ -285,6 +335,22 @@ begin
    Count := bb.Count;
    if Count > 0 then
       System.Move(bb.FData[0], FData[0], Count);
+end;
+
+// AssignRaw
+//
+procedure TdwsByteBuffer.AssignRaw(const p : PByte; size : Integer);
+begin
+   if size <= 0 then begin
+      SetCount(0);
+      Exit;
+   end;
+
+   System.SetLength(FData, size);
+   FCount := size;
+   if FPosition >= size then
+      FPosition := size-1;
+   System.Move(p^, FData[0], size);
 end;
 
 // AssignDataString
@@ -341,7 +407,7 @@ end;
 //
 procedure TdwsByteBuffer.ToDataString(var s : String);
 begin
-   BytesToScriptString(PByte(FData), Count, s);
+   BytesToScriptString(PByteArray(FData), Count, s);
 end;
 
 // ToJSON
@@ -391,6 +457,13 @@ begin
       newBuffer.SetCount(size);
       System.Move(FData[offset], newBuffer.FData[0], size);
    end;
+end;
+
+// DataPtr
+//
+function TdwsByteBuffer.DataPtr : Pointer;
+begin
+   Result := Pointer(FData);
 end;
 
 // GetByteP

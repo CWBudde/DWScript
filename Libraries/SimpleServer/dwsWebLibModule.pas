@@ -19,7 +19,9 @@ unit dwsWebLibModule;
 interface
 
 uses
-   Variants, SysUtils, Classes, StrUtils,
+   Windows, WinInet, Variants,
+   SysUtils, Classes, StrUtils,
+   SynZip, SynCrtSock, SynCommons, SynWinSock,
    dwsUtils, dwsComp, dwsExprs, dwsWebEnvironment, dwsExprList, dwsSymbols,
    dwsJSONConnector, dwsCryptoXPlatform, dwsHTTPSysServerEvents, dwsWebServerInfo,
    dwsXPlatform, dwsCustomData, dwsDataContext;
@@ -188,6 +190,10 @@ type
       baseExpr: TTypedExpr; const args: TExprBaseListExec);
     procedure dwsWebClassesHttpRequestMethodsContentSubDataEval(
       Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesWebRequestMethodsContentFieldsEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    function dwsWebFunctionsPingIPv4FastEval(
+      const args: TExprBaseListExec): Variant;
   private
     { Private declarations }
     FServer :  IWebServerInfo;
@@ -200,15 +206,14 @@ implementation
 
 {$R *.dfm}
 
-uses
-   WinInet, SynZip, SynCrtSock, SynCommons, SynWinSock, dwsWinHTTP;
+uses dwsWinHTTP, dwsDynamicArrays, dwsICMP;
 
 // WebServerSentEventToRawData
 //
 function WebServerSentEventToRawData(const obj : TScriptObjInstance) : RawByteString;
 var
    i : Integer;
-   dyn : TScriptDynamicStringArray;
+   dyn : IScriptDynArray;
    buf : String;
 begin
    buf := obj.AsString[obj.FieldAddress('ID')];
@@ -220,9 +225,11 @@ begin
    i := obj.AsInteger[obj.FieldAddress('Retry')];
    if i > 0 then
       Result := Result + 'retry: ' + ScriptStringToRawByteString(IntToStr(i)) + #10;
-   dyn := (obj.AsInterface[obj.FieldAddress('Data')] as IScriptDynArray).GetSelf as TScriptDynamicStringArray;
-   for i := 0 to dyn.ArrayLength-1 do
-      Result := Result + 'data: ' + StringToUTF8(dyn.AsString[i]) + #10;
+   dyn := (obj.AsInterface[obj.FieldAddress('Data')] as IScriptDynArray);
+   for i := 0 to dyn.ArrayLength-1 do begin
+      dyn.EvalAsString(i, buf);
+      Result := Result + 'data: ' + StringToUTF8(buf) + #10;
+   end;
    Result := Result + #10;
 end;
 
@@ -360,7 +367,7 @@ type
       RawResponseHeaders : SockString;
       FResponseHeaders : TStrings;
       CustomStates : TdwsCustomStates;
-      CurrentSize, ContentLength : Cardinal;
+      CurrentSize, ContentLength : DWORD;
       StatusCode : Integer;
       Error : String;
       Completed, Released : Boolean;
@@ -374,7 +381,7 @@ type
       procedure Execute; override;
       procedure Release;
       function Wait : THttpRequestThread;
-      procedure DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: Cardinal);
+      procedure DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
    end;
 
 // CreateQuery
@@ -493,7 +500,7 @@ end;
 
 // DoProgress
 //
-procedure THttpRequestThread.DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: Cardinal);
+procedure THttpRequestThread.DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
 begin
    Self.CurrentSize := CurrentSize;
    Self.ContentLength := ContentLength;
@@ -639,15 +646,13 @@ procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetCustomHeadersEval(
 var
    dyn : IScriptDynArray;
    headers : TdwsCustomHeaders;
-   i, n : Integer;
+   n : Integer;
 begin
    dyn := Info.ParamAsScriptDynArray[0];
    n := dyn.ArrayLength;
    if n > 0 then begin
       headers := TdwsCustomHeaders.Create;
-      SetLength(headers.Headers, n);
-      for i := 0 to n-1 do
-         headers.Headers[i] := dyn.AsString[i];
+      headers.Headers := dyn.ToStringArray;
       Info.Execution.CustomStates[cWinHttpCustomHeaders] := headers as IGetSelf;
    end else Info.Execution.CustomStates[cWinHttpCustomHeaders] := Unassigned;
 end;
@@ -697,6 +702,20 @@ procedure TdwsWebLib.dwsWebClassesWebRequestMethodsContentDataFastEvalString(
   baseExpr: TTypedExpr; const args: TExprBaseListExec; var result: string);
 begin
    RawByteStringToScriptString(args.WebRequest.ContentData, result);
+end;
+
+procedure TdwsWebLib.dwsWebClassesWebRequestMethodsContentFieldsEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   names : TStringDynArray;
+   fields : TStrings;
+   i : Integer;
+begin
+   fields := Info.WebRequest.ContentFields;
+   SetLength(names, fields.Count);
+   for i := 0 to fields.Count-1 do
+      names[i] := fields.Names[i];
+   Info.ResultAsStringArray := names;
 end;
 
 function TdwsWebLib.dwsWebClassesWebRequestMethodsContentLengthFastEvalInteger(
@@ -1156,6 +1175,12 @@ begin
    if host = 'localhost' then
       info.ResultAsString := '127.0.0.1'
    else info.ResultAsDataString := ResolveName(host);
+end;
+
+function TdwsWebLib.dwsWebFunctionsPingIPv4FastEval(
+  const args: TExprBaseListExec): Variant;
+begin
+   Result := PingIPv4(args.AsString[0], args.AsInteger[1]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestCleanUp(ExternalObject: TObject);

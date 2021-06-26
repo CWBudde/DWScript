@@ -27,7 +27,7 @@ interface
 uses
    Classes, SysUtils,
    SynSQLite3, SynCommons,
-   dwsUtils, dwsExprs, dwsDatabase, dwsXPlatform, dwsXXHash,
+   dwsUtils, dwsExprs, dwsDatabase, dwsXPlatform, dwsXXHash, dwsFileSystem,
    dwsDataContext, dwsStack, dwsSymbols;
 
 type
@@ -40,13 +40,14 @@ type
          FExecRequest : TSQLRequest;
          FExecSQL : String;
          FModules : TNameObjectHash;
+         FFileSystem : IdwsFileSystem;
 
       protected
          function GetModule(const name : String) : TObject;
          procedure SetModule(const name : String; aModule : TObject);
 
       public
-         constructor Create(const parameters : array of String);
+         constructor Create(const parameters : array of String; const fileSystem : IdwsFileSystem);
          destructor Destroy; override;
 
          procedure BeginTransaction;
@@ -55,8 +56,8 @@ type
          function InTransaction : Boolean;
          function CanReleaseToPool : String;
 
-         procedure Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
-         function Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
+         procedure Exec(const sql : String; const parameters : IScriptDynArray; context : TExprBase);
+         function Query(const sql : String; const parameters : IScriptDynArray; context : TExprBase) : IdwsDataSet;
 
          function VersionInfoText : String;
 
@@ -79,7 +80,7 @@ type
          procedure DoPrepareFields; override;
 
       public
-         constructor Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IDataContext);
+         constructor Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IScriptDynArray);
          destructor Destroy; override;
 
          function Eof : Boolean; override;
@@ -118,6 +119,7 @@ type
    TdwsSynSQLiteDataBaseFactory = class (TdwsDataBaseFactory)
       public
          function CreateDataBase(const parameters : TStringDynArray) : IdwsDataBase; override;
+         function CreateDataBase(const parameters : TStringDynArray; const fileSystem : IdwsFileSystem) : IdwsDataBase; override;
    end;
 
 var
@@ -169,7 +171,7 @@ end;
 
 // SQLAssignParameters
 //
-procedure SQLAssignParameters(var rq : TSQLRequest; const params : IDataContext);
+procedure SQLAssignParameters(var rq : TSQLRequest; const params : IScriptDynArray);
 
    procedure BindDateTime(var rq : TSQLRequest; i : Integer; p : PVarData);
    var
@@ -182,9 +184,11 @@ procedure SQLAssignParameters(var rq : TSQLRequest; const params : IDataContext)
 var
    i : Integer;
    p : PVarData;
+   v : Variant;
 begin
-   for i:=1 to params.DataLength do begin
-      p:=PVarData(params.AsPVariant(i-1));
+   for i:=1 to params.ArrayLength do begin
+      params.EvalAsVariant(i-1, v);
+      p := PVarData(@v);
       case p.VType of
          varInt64 : rq.Bind(i, p.VInt64);
          varDouble : rq.Bind(i, p.VDouble);
@@ -198,6 +202,32 @@ begin
       else
          raise EDWSDataBase.CreateFmt('Unsupported parameter type (VarType %d) at index %d', [p.VType, i]);
       end;
+   end;
+end;
+
+// SQLiteAuthorizer
+//
+function SQLiteAuthorizer(pUserData: Pointer; code: Integer; const zTab, zCol, zDb, zAuthContext: PAnsiChar): Integer; cdecl;
+
+   function ValidateFileName(db : TdwsSynSQLiteDataBase; p : PAnsiChar) : Integer;
+   var
+      buf : String;
+   begin
+      if db.FFileSystem <> nil then begin
+         buf := UTF8ToString(p);
+         buf := db.FFileSystem.ValidateFileName(buf);
+         if buf = '' then
+            Result := SQLITE_DENY
+         else Result := SQLITE_OK;
+      end else Result := SQLITE_OK;
+   end;
+
+begin
+   case code of
+      SQLITE_ATTACH :
+         Result := ValidateFileName(TdwsSynSQLiteDataBase(pUserData), zTab);
+   else
+      Result := SQLITE_OK;
    end;
 end;
 
@@ -222,6 +252,7 @@ begin
       sqlite3.create_function(DB, 'BIT_OR', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, nil, SQLiteFunc_BitOrStep, SQLiteFunc_BitFinal);
       sqlite3.create_function(DB, 'BIT_POPCOUNT', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, SQLiteFunc_BitPopCount, nil, nil);
       sqlite3.create_function(DB, 'HAMMING_DISTANCE', 2, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, SQLiteFunc_HammingDistance, nil, nil);
+      sqlite3.create_function(DB, 'BASE64', 1, SQLITE_ANY or SQLITE_DETERMINISTIC, nil, SQLiteFunc_Base64, nil, nil);
    end;
 end;
 
@@ -232,13 +263,20 @@ end;
 // CreateDataBase
 //
 function TdwsSynSQLiteDataBaseFactory.CreateDataBase(const parameters : TStringDynArray) : IdwsDataBase;
+begin
+   Result := CreateDataBase(parameters, nil);
+end;
+
+// CreateDataBase
+//
+function TdwsSynSQLiteDataBaseFactory.CreateDataBase(const parameters : TStringDynArray; const fileSystem : IdwsFileSystem) : IdwsDataBase;
 var
    db : TdwsSynSQLiteDataBase;
 begin
    if sqlite3=nil then
       InitializeSQLite3Dynamic;
-   db:=TdwsSynSQLiteDataBase.Create(parameters);
-   Result:=db;
+   db := TdwsSynSQLiteDataBase.Create(parameters, fileSystem);
+   Result := db;
 end;
 
 // ------------------
@@ -247,14 +285,22 @@ end;
 
 // Create
 //
-constructor TdwsSynSQLiteDataBase.Create(const parameters : array of String);
+constructor TdwsSynSQLiteDataBase.Create(const parameters : array of String; const fileSystem : IdwsFileSystem);
 var
-   dbName : String;
+   dbName, validatedDBName : String;
    i, flags : Integer;
 begin
-   if Length(parameters)>0 then
-      dbName:=TdwsDataBase.ApplyPathVariables(parameters[0])
-   else dbName:=':memory:';
+   inherited Create;
+   FFileSystem := fileSystem;
+   if Length(parameters) > 0 then begin
+      dbName := TdwsDataBase.ApplyPathVariables(parameters[0]);
+      if (dbName <> ':memory:') and Assigned(fileSystem) then begin
+         validatedDBName := fileSystem.ValidateFileName(dbName);
+         if validatedDBName = '' then
+            raise ESQLite3Exception.CreateFmt('Database location not allowed "%s"', [ dbName ])
+         else dbName := validatedDBName;
+      end;
+   end else dbName := ':memory:';
 
    flags:=SQLITE_OPEN_READWRITE or SQLITE_OPEN_CREATE;
    for i:=1 to High(parameters) do begin
@@ -269,6 +315,8 @@ begin
    try
       FDB := TdwsSQLDatabase.Create(dbName, '', flags);
       FDB.BusyTimeout := 1500;
+      if fileSystem <> nil then
+         sqlite3.set_authorizer(FDB.DB, SQLiteAuthorizer, Self);
    except
       RefCount:=0;
       raise;
@@ -329,7 +377,7 @@ end;
 
 // Exec
 //
-procedure TdwsSynSQLiteDataBase.Exec(const sql : String; const parameters : IDataContext; context : TExprBase);
+procedure TdwsSynSQLiteDataBase.Exec(const sql : String; const parameters : IScriptDynArray; context : TExprBase);
 var
    err : Integer;
 begin
@@ -358,7 +406,7 @@ end;
 
 // Query
 //
-function TdwsSynSQLiteDataBase.Query(const sql : String; const parameters : IDataContext; context : TExprBase) : IdwsDataSet;
+function TdwsSynSQLiteDataBase.Query(const sql : String; const parameters : IScriptDynArray; context : TExprBase) : IdwsDataSet;
 var
    ds : TdwsSynSQLiteDataSet;
 begin
@@ -437,7 +485,7 @@ end;
 
 // Create
 //
-constructor TdwsSynSQLiteDataSet.Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IDataContext);
+constructor TdwsSynSQLiteDataSet.Create(db : TdwsSynSQLiteDataBase; const sql : String; const parameters : IScriptDynArray);
 begin
    FSQL := sql;
    FDB := db;
@@ -643,7 +691,7 @@ initialization
 
    TdwsDatabase.RegisterDriver('SQLite', TdwsSynSQLiteDataBaseFactory.Create);
 
-   vSQLite3DynamicMRSW:=TMultiReadSingleWrite.Create;
+   vSQLite3DynamicMRSW := TMultiReadSingleWrite.Create;
 
    vFloatFormatSettings := FormatSettings;
    vFloatFormatSettings.DecimalSeparator := '.';

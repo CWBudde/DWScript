@@ -17,7 +17,7 @@ unit UdwsUtilsTests;
 
 interface
 
-uses Classes, SysUtils, Math, Variants, Types, SynCommons, Graphics,
+uses Classes, SysUtils, Math, Variants, Types, Graphics,
    dwsXPlatformTests, dwsUtils,
    dwsXPlatform, dwsWebUtils, dwsTokenStore, dwsCryptoXPlatform,
    dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext,
@@ -51,8 +51,10 @@ type
          procedure WOBSBigFirstTest;
          procedure WOBSBigSecondTest;
          procedure WOBSToStream;
+         procedure WOBSTailByte;
          procedure TightListTest;
          procedure TightListEnumerator;
+         procedure TightListSort;
          procedure LookupTest;
          procedure SortedListExtract;
          procedure SimpleListOfInterfaces;
@@ -102,6 +104,11 @@ type
 
          procedure BytesWords;
 
+         procedure BytesToWordsTest;
+         procedure WordsToBytesTest;
+
+         procedure SwapPrimitives;
+
          procedure DataContextCasts;
 
          procedure VariantPersist;
@@ -120,6 +127,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses dwsRandom;
 
 var
    vGlobals : TGlobalVars;
@@ -378,6 +387,32 @@ begin
    end;
 end;
 
+// WOBSTailByte
+//
+procedure TdwsUtilsTests.WOBSTailByte;
+var
+   wobs : TWriteOnlyBlockStream;
+begin
+   wobs := TWriteOnlyBlockStream.Create;
+   try
+      CheckEquals(0, wobs.TailWord);
+      wobs.WriteChar(Chr(1));
+      CheckEquals(1, wobs.TailWord);
+      wobs.WriteDWord($02030405);
+      CheckEquals($0203, wobs.TailWord);
+      wobs.WriteString(StringOfChar(Chr(127), cWriteOnlyBlockStreamBlockSize));
+      CheckEquals(Ord(Chr(127)), wobs.TailWord);
+      wobs.WriteChar(Chr(255));
+      CheckEquals(255, wobs.TailWord);
+      wobs.WriteString(StringOfChar(Chr(254), cWriteOnlyBlockStreamBlockSize));
+      CheckEquals(Ord(Chr(254)), wobs.TailWord);
+      wobs.WriteString('hello');
+      CheckEquals(Ord('o'), wobs.TailWord);
+   finally
+      wobs.Free;
+   end;
+end;
+
 // TightListOutOfBoundsDelete
 //
 procedure TdwsUtilsTests.TightListOutOfBoundsDelete;
@@ -509,6 +544,36 @@ begin
    CheckEquals(2, n);
 
    FTightList.Clear;
+end;
+
+// TightListSort
+//
+function TestComparer(a, b : Pointer) : Integer;
+begin
+   Result := Integer(a) - Integer(b);
+end;
+procedure TdwsUtilsTests.TightListSort;
+var
+   i, j, k : Integer;
+   list : TTightList;
+   rnd : TXoroShiro128Plus;
+begin
+   rnd.SetSeed64(123456);
+   for i := 0 to 10 do begin
+      list.Initialize;
+      for j := 1 to 20 do begin
+
+         for k := 1 to i do begin
+            list.Add(TRefCountedObject(rnd.Next and $FFFF));
+         end;
+         list.Sort(TestComparer);
+         for k := 0 to i-2 do
+            Check(Integer(list.List[k]) < Integer(list.List[k+1]),
+                  'Size ' + IntToStr(i) + ' round ' + IntToStr(k));
+         list.Clear;
+
+      end;
+   end;
 end;
 
 // LookupTest
@@ -790,14 +855,14 @@ end;
 type
    TSortable = class
       Items : array of Integer;
-      function Compare(i1, i2 : Integer) : Integer;
-      procedure Swap(i1, i2 : Integer);
+      function Compare(i1, i2 : NativeInt) : Integer;
+      procedure Swap(i1, i2 : NativeInt);
    end;
-function TSortable.Compare(i1, i2 : Integer) : Integer;
+function TSortable.Compare(i1, i2 : NativeInt) : Integer;
 begin
    Result:=Items[i1]-Items[i2];
 end;
-procedure TSortable.Swap(i1, i2 : Integer);
+procedure TSortable.Swap(i1, i2 : NativeInt);
 var
    t : Integer;
 begin
@@ -989,22 +1054,22 @@ var
    i, j : Integer;
    h : Cardinal;
 begin
-   FillZero(buckets[0], Length(buckets)*SizeOf(Integer));
+   FillChar(buckets[0], Length(buckets)*SizeOf(Integer), 0);
    for i := 1 to cNbItems do
       Inc(buckets[DWSHashCode(i) and cBucketHigh]);
    CheckBucketRatios('Integers');
 
-   FillZero(buckets[0], Length(buckets)*SizeOf(Integer));
+   FillChar(buckets[0], Length(buckets)*SizeOf(Integer), 0);
    for i := 1 to cNbItems do
       Inc(buckets[DWSHashCode(IntToStr(i*883)) and cBucketHigh]);
    CheckBucketRatios('Integer strings');
 
-   FillZero(buckets[0], Length(buckets)*SizeOf(Integer));
+   FillChar(buckets[0], Length(buckets)*SizeOf(Integer), 0);
    for i := 1 to cNbItems do
       Inc(buckets[DWSHashCode(i*PI) and cBucketHigh]);
    CheckBucketRatios('Doubles');
 
-   FillZero(buckets[0], Length(buckets)*SizeOf(Integer));
+   FillChar(buckets[0], Length(buckets)*SizeOf(Integer), 0);
    for i := 1 to cNbItems do begin
       h := i;
       for j := 1 to 10 do
@@ -1350,11 +1415,45 @@ end;
 // ObjectListTest
 //
 procedure TdwsUtilsTests.ObjectListTest;
+   procedure InitRefList(refList : TObjectList<TRefCountedObject>; itemCount : Integer);
+   begin
+      for var i:=1 to itemCount do begin
+         var obj := TRefCountedObject.Create;
+         reflist.Add(obj);
+      end;
+   end;
+
+   procedure InitMoveList(refList,movelist : TObjectList<TRefCountedObject>);
+   begin
+      for var i:=0 to refList.Count -1 do begin
+         if i < movelist.Count  then begin
+            movelist[i]:=reflist.Items[i];
+         end else begin
+            movelist.Add(reflist.Items[i]);
+         end;
+      end;
+   end;
+
+   procedure CheckMove(refList,movelist : TObjectList<TRefCountedObject>; itemNewOrder : TArray<Integer>; errorPrefix : String);
+   begin
+      CheckEquals(refList.Count,moveList.Count,errorPrefix + ' : items count not equal');
+      for var i:=0 to moveList.Count - 1 do begin
+         Check(
+            moveList.Items[i] = refList.Items[itemNewOrder[i]],
+            errorPrefix + 'Moved item initial position '  + IntToStr(itemNewOrder[i]) + ' not in new position ' + IntToStr(i)
+         );
+      end;
+   end;
+
 var
-   list : TObjectList<TRefCountedObject>;
+   list, refList,moveList : TObjectList<TRefCountedObject>;
    obj1, obj2 : TRefCountedObject;
+   newItemOrder : TArray<Integer>;
+   errorPrefix : String ;
 begin
    list := TObjectList<TRefCountedObject>.Create;
+   refList := TObjectList<TRefCountedObject>.Create;
+   moveList := TObjectList<TRefCountedObject>.Create;
    try
       CheckEquals(0, list.Count);
       list.Add(nil);
@@ -1377,8 +1476,86 @@ begin
       Check(list[0] = obj1);
       list.Extract(0).Free;
       CheckEquals(0, list.Count);
+
+      // Init moves data
+      InitRefList(refList,10);
+      // Move items after index
+      InitMoveList(refList,moveList);
+      moveList.Move(3,6,2);
+      newItemOrder := [ 0,1,2,5,6,7,3,4,8,9 ];
+      CheckMove(refList, moveList, newItemOrder, 'Move after :');
+      // Move items before index
+      InitMoveList(refList,moveList);
+      moveList.Move(4,1,3);
+      newItemOrder := [ 0,4,5,6,1,2,3,7,8,9 ];
+      CheckMove(refList, moveList, newItemOrder, 'Move before :');
+      // Move end to begin
+      InitMoveList(refList, moveList);
+      moveList.Move(5,0,5);
+      newItemOrder := TArray<Integer>.Create(5,6,7,8,9,0,1,2,3,4);
+      CheckMove(refList, moveList, newItemOrder, 'Move end to begin :');
+      // Move begin to end
+      InitMoveList(refList, moveList);
+      moveList.Move(0,5,5);
+      newItemOrder := TArray<Integer>.Create(5,6,7,8,9,0,1,2,3,4);
+      CheckMove(refList, moveList, newItemOrder,'Move begin to end :');
+      // Move with no move
+      InitMoveList(refList, moveList);
+      moveList.Move(4,4,3);
+      newItemOrder := TArray<Integer>.Create(0,1,2,3,4,5,6,7,8,9);
+      CheckMove(refList, moveList, newItemOrder,'Move with no move');
+      // Move 0 item
+      InitMoveList(refList,moveList);
+      moveList.Move(4,1,0);
+      newItemOrder := TArray<Integer>.Create(0,1,2,3,4,5,6,7,8,9);
+      CheckMove(refList, moveList, newItemOrder,'Move with no move');
+      // Try Move with negative item count
+      errorPrefix := 'Move with negative item count : ';
+      try
+         InitMoveList(refList, moveList);
+         moveList.Move(4,1,-1);
+         Check(False, errorPrefix + 'No raise error');
+      except
+         on e : EAssertionFailed do begin
+            Check(
+               StrBeginsWith(e.Message,'Negative item count'),
+               errorPrefix + 'Unexpected error message :' + e.Message
+            );
+         end;
+      end;
+      // Try Move with too much items
+      errorPrefix := 'Move with too much items : ';
+      try
+         InitMoveList(refList, moveList);
+         moveList.Move(4,8,4);
+         Check(False, errorPrefix + 'No raise error');
+      except
+         on e : EAssertionFailed do begin
+            Check(
+               StrBeginsWith(e.Message,'New last item index out of range'),
+               errorPrefix + 'Unexpected error message :' + e.Message
+            );
+         end;
+      end;
+      // Try Move with new index out of range
+      errorPrefix := 'Move with new index out of range : ';
+      try
+         InitMoveList(refList,moveList);
+         moveList.Move(4,11,3);
+         Check(False, errorPrefix + 'No raise error');
+      except
+         on e : EAssertionFailed do begin
+            Check(
+               StrBeginsWith(e.Message,'New index out of range'),
+               errorPrefix + 'Unexpected error message :' + e.Message
+            );
+         end;
+      end;
    finally
       list.Free;
+      refList.Free;
+      moveList.ExtractAll();
+      moveList.Free;
    end;
 end;
 
@@ -1532,6 +1709,61 @@ begin
    CheckEquals('Example', buf, 'words to bytes with swap');
 end;
 
+// BytesToWordsTest
+//
+procedure TdwsUtilsTests.BytesToWordsTest;
+const cNB = 70;
+var
+   buf1 : array of Byte;
+   buf2 : array of Word;
+begin
+   SetLength(buf1, cNB + 16);
+   SetLength(buf2, cNB + 16);
+   for var i := 0 to cNB-1 do begin
+      for var k := 0 to i do
+         buf1[k] := k + 10 + (i and 3);
+      for var k := 0 to High(buf2) do
+         buf2[k] := $abcd;
+      BytesToWords(PByteArray(@buf1[0]), PWordArray(@buf2[0]), i);
+      CheckEquals($abcd, buf2[i], 'write beyond buffer end at ' + IntToStr(i));
+      for var k := 0 to i-1 do
+         CheckEquals(k + 10 + (i and 3), buf2[k]);
+   end;
+end;
+
+// WordsToBytesTest
+//
+procedure TdwsUtilsTests.WordsToBytesTest;
+const cNB = 70;
+var
+   buf1 : array of Word;
+   buf2 : array of Byte;
+begin
+   SetLength(buf1, cNB + 16);
+   SetLength(buf2, cNB + 16);
+   for var i := 0 to cNB-1 do begin
+      for var k := 0 to i do
+         buf1[k] := k + 10 + (i and 3);
+      for var k := 0 to High(buf1) do
+         buf2[k] := $cd;
+      WordsToBytes(PWordArray(@buf1[0]), PByteArray(@buf2[0]), i);
+      CheckEquals($cd, buf2[i], 'write beyond buffer end at ' + IntToStr(i));
+      for var k := 0 to i-1 do
+         CheckEquals(k + 10 + (i and 3), buf2[k]);
+   end;
+end;
+
+// SwapPrimitives
+//
+procedure TdwsUtilsTests.SwapPrimitives;
+begin
+   var a64, b64 : Int64;
+   a64 := $0102030405060708;
+   b64 := a64 shl 1;
+   SwapInt64(@a64, @b64);
+   CheckEquals($0807060504030201, b64, 'SwapInt64');
+end;
+
 // DataContextCasts
 //
 procedure TdwsUtilsTests.DataContextCasts;
@@ -1660,7 +1892,7 @@ procedure TdwsUtilsTests.xxHashTest;
    procedure CheckFull(const data : RawByteString; expected : Cardinal; seed : Cardinal = 0);
    begin
       CheckEquals(expected, xxHash32.Full(Pointer(data), Length(data), seed),
-                  'for ' + UTF8DecodeToUnicodeString(data));
+                  'for ' + UTF8ToString(data));
    end;
 
 var

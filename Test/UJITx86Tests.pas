@@ -13,7 +13,7 @@ type
 
    TJITx86Tests = class (TTestCase)
       private
-         FStream : Tx86WriteOnlyStream;
+         FStream : Tx86_32_WriteOnlyStream;
 
       protected
          function DisasmStream : String;
@@ -81,7 +81,7 @@ implementation
 //
 procedure TJITx86Tests.SetUp;
 begin
-   FStream:=Tx86WriteOnlyStream.Create;
+   FStream:=Tx86_32_WriteOnlyStream.Create;
 end;
 
 // TearDown
@@ -891,6 +891,7 @@ begin
    end;
 
    buf:=DisasmStream;
+   buf:=StringReplace(buf, 'nop dword ptr [eax]'#13#10, 'n', [rfReplaceAll]);
    buf:=StringReplace(buf, 'nop '#13#10, 'n', [rfReplaceAll]);
    buf:=StringReplace(buf, 'ret '#13#10, 'r', [rfReplaceAll]);
 

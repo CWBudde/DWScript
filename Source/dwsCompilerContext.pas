@@ -20,7 +20,7 @@ interface
 
 uses
    dwsUtils, dwsSymbols, dwsErrors, dwsScriptSource, dwsXPlatform,
-   dwsUnitSymbols, dwsStrings, dwsTokenizer, dwsCustomData;
+   dwsUnitSymbols, dwsStrings, dwsTokenizer, dwsCustomData, dwsSpecialKeywords;
 
 type
    TCompilerOption = (
@@ -35,9 +35,13 @@ type
                               // (for CodeGen that does not support passing record fields or array elements)
       coAllowClosures,        // allow closures, ie. capture of local procedures as function pointers
                               // (not suppported yet by script engine, may be supported by CodeGen)
+      coAllowAsyncAwait,      // allow for assync/await keywords (only supported by JS-codegen)
       coDelphiDialect,        // do not warn or hint about Delphi language idioms
-      coHintKeywordCaseMismatch // when set, if pedantic hints are active, hints will be
-                                // created for all case-mismatching keywords
+      coHintKeywordCaseMismatch, // when set, if pedantic hints are active, hints will be
+                                 // created for all case-mismatching keywords
+      coMissingOverloadedAsErrors // when set missing "overloaded" are treated as errors
+                                  // when not set, they are just reported as hints
+
       );
    TCompilerOptions = set of TCompilerOption;
 
@@ -50,6 +54,7 @@ type
          FOrphanedObjects : TSimpleStack<TRefCountedObject>;
          FUnitList : TIdwsUnitList;
          FHelperMemberNames : TSimpleStringHash;
+         FSpecialSymbols : array [TSpecialKeywordKind] of TSymbol;
 
          FTypDefaultConstructor : TMethodSymbol;
          FTypDefaultDestructor : TMethodSymbol;
@@ -64,6 +69,7 @@ type
 
       protected
          procedure SetSystemTable(const val : TSystemSymbolTable);
+         procedure SetProg(aProg : TObject);
 
       public
          constructor Create;
@@ -80,13 +86,15 @@ type
          function WrapWithImplicitCast(toTyp : TTypeSymbol; const scriptPos : TScriptPos; var expr) : Boolean;
          function FindType(const typName : String) : TTypeSymbol; override;
 
+         function SpecialSymbol(sk : TSpecialKeywordKind) : TSymbol;
+
          function Optimize : Boolean;
 
          property StringsUnifier : TStringUnifier read FStringsUnifier;
 
          property Msgs : TdwsCompileMessageList read FMsgs write FMsgs;
          property SystemTable : TSystemSymbolTable read FSystemTable write SetSystemTable;
-         property Prog : TObject read FProg write FProg;
+         property Prog : TObject read FProg write SetProg;
          property UnifiedConstants : TObject read FUnifiedConstants write FUnifiedConstants;
          property UnitList : TIdwsUnitList read FUnitList write FUnitList;
          property HelperMemberNames : TSimpleStringHash read FHelperMemberNames;
@@ -112,7 +120,19 @@ implementation
 
 uses Variants,
    dwsExprs, dwsUnifiedConstants, dwsConstExprs, dwsOperators, dwsCompilerUtils,
-   dwsSpecialKeywords;
+   dwsConvExprs, dwsDynamicArrays;
+
+type
+   TdwsCompilerContextHelper = class helper for TdwsCompilerContext
+      function GetProgram : TdwsProgram; inline;
+   end;
+
+// GetProgram
+//
+function TdwsCompilerContextHelper.GetProgram : TdwsProgram;
+begin
+   Result := TdwsProgram(FProg);
+end;
 
 // ------------------
 // ------------------ TdwsCompilerContext ------------------
@@ -134,6 +154,7 @@ end;
 destructor TdwsCompilerContext.Destroy;
 var
    obj : TRefCountedObject;
+   sk : TSpecialKeywordKind;
 begin
    // stack behavior is required to allow objects to orphan others while being cleaned up
    while FOrphanedObjects.Count > 0 do begin
@@ -150,6 +171,9 @@ begin
    FCustomStatesMRSW.Free;
    FCustomStates.Free;
 
+   for sk := Low(FSpecialSymbols) to High(FSpecialSymbols) do
+      FSpecialSymbols[sk].Free;
+
    inherited;
 end;
 
@@ -165,21 +189,21 @@ end;
 //
 function TdwsCompilerContext.GetTempAddr(DataSize: Integer = -1): Integer;
 begin
-   Result := (FProg as TdwsProgram).GetTempAddr(DataSize);
+   Result := GetProgram.GetTempAddr(DataSize);
 end;
 
 // Level
 //
 function TdwsCompilerContext.Level : Integer;
 begin
-   Result := (FProg as TdwsProgram).Level;
+   Result := GetProgram.Level;
 end;
 
 // Table
 //
 function TdwsCompilerContext.Table : TSymbolTable;
 begin
-   Result := (FProg as TdwsProgram).Table;
+   Result := GetProgram.Table;
 end;
 
 // CreateConstExpr
@@ -193,7 +217,7 @@ function TdwsCompilerContext.CreateConstExpr(typ : TTypeSymbol; const value : Va
       val := IUnknown(value) as IScriptDynArray;
       if val <> nil then
          Result := TConstExpr.Create(typ, val)
-      else Result := TConstExpr.Create(typ, TScriptDynamicArray.CreateNew(typ.Typ) as IScriptDynArray);
+      else Result := TConstExpr.Create(typ, CreateNewDynamicArray(typ.Typ) as IScriptDynArray);
    end;
 
    function CreateAssociativeArrayValue(typ : TAssociativeArraySymbol) : TConstExpr;
@@ -239,7 +263,7 @@ begin
    typedExpr := TObject(expr) as TTypedExpr;
    if typedExpr.Typ = nil then Exit(False);
 
-   prog := FProg as TdwsProgram;
+   prog := GetProgram;
    opSym := prog.Table.FindImplicitCastOperatorFor(typedExpr.Typ, toTyp);
    if opSym <> nil then begin
       funcExpr := CreateSimpleFuncExpr(Self, scriptPos, opSym.UsesSym);
@@ -266,6 +290,14 @@ begin
          TObject(expr) := typedExpr;
          if Optimize then
             TObject(expr) := typedExpr.OptimizeToTypedExpr(Self, scriptPos);
+      end else if     toTyp.UnAliasedTypeIs(TDynamicArraySymbol) and (typedExpr is TArrayConstantExpr)
+                  and toTyp.UnAliasedType.Typ.SameType(typedExpr.Typ.UnaliasedType.Typ) then begin
+         Result := True;
+         typedExpr := TConvStaticArrayToDynamicExpr.Create(
+            Self, scriptPos,
+            TArrayConstantExpr(typedExpr), TDynamicArraySymbol(toTyp.UnAliasedType)
+         );
+         TObject(expr) := typedExpr;
       end;
    end;
 end;
@@ -275,6 +307,29 @@ end;
 function TdwsCompilerContext.FindType(const typName : String) : TTypeSymbol;
 begin
    Result := SystemTable.FindTypeLocal(typName)
+end;
+
+// SpecialSymbol
+//
+function TdwsCompilerContext.SpecialSymbol(sk : TSpecialKeywordKind) : TSymbol;
+
+   function InitializeSymbol(sk : TSpecialKeywordKind) : TSymbol;
+   begin
+      Result := TPseudoMethodSymbol.Create(nil, cSpecialKeywords[sk], fkFunction, 0);
+      case sk of
+         skAssigned, skDefined, skDeclared, skConditionalDefined :
+            Result.Typ := TypBoolean;
+         skHigh, skLength, skLow, skOrd, skSizeOf, skInc, skDec :
+            Result.Typ := TypInteger;
+      end;
+   end;
+
+begin
+   Result := FSpecialSymbols[sk];
+   if Result = nil then begin
+      Result := InitializeSymbol(sk);
+      FSpecialSymbols[sk] := Result;
+   end;
 end;
 
 // Optimize
@@ -293,6 +348,13 @@ begin
 
    FTypDefaultConstructor := TypTObject.Members.FindSymbol(SYS_TOBJECT_CREATE, cvPublic) as TMethodSymbol;
    FTypDefaultDestructor := TypTObject.Members.FindSymbol(SYS_TOBJECT_DESTROY, cvPublic) as TMethodSymbol;
+end;
+
+// SetProg
+//
+procedure TdwsCompilerContext.SetProg(aProg : TObject);
+begin
+   FProg := aProg as TdwsProgram;
 end;
 
 // CustomStateGet

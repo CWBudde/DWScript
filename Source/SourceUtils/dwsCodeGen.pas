@@ -128,6 +128,12 @@ type
 
    TdwsCustomCodeGenEvent = function (expr : TExprBase) : TdwsExprCodeGen of object;
 
+   TdwsOutputStackItem = record
+      Stream : TWriteOnlyBlockStream;
+      Line : Integer;
+   end;
+   TdwsOutputStack = TSimpleStack<TdwsOutputStackItem>;
+
    TdwsCodeGen = class
       private
          FCodeGenList : TdwsRegisteredCodeGenList;
@@ -172,7 +178,11 @@ type
 
          FOnCustomCodeGen : TdwsCustomCodeGenEvent;
 
+         FOutputStack : TdwsOutputStack;
+
       protected
+         property Output : TWriteOnlyBlockStream read FOutput;
+
          property SymbolDictionary : TdwsSymbolDictionary read FSymbolDictionary;
 
          procedure EnterContext(proc : TdwsProgram); virtual;
@@ -186,6 +196,9 @@ type
 //         function  EnterStructScope(struct : TCompositeTypeSymbol) : Integer;
 //         procedure LeaveScopes(n : Integer);
 //         function  IsScopeLevel(symbol : TSymbol) : Boolean;
+
+         procedure EnterOutput(destStream : TWriteOnlyBlockStream);
+         procedure LeaveOutput;
 
          procedure RaiseUnknowExpression(expr : TExprBase);
 
@@ -275,9 +288,11 @@ type
          procedure WriteBlockBegin(const prefix : String); virtual;
          procedure WriteBlockEnd; virtual;
          procedure WriteBlockEndLn;
+         procedure WriteBoolean(v : Boolean); virtual; abstract;
          procedure WriteLiteralString(const s : String); virtual; abstract;
          procedure WriteFloat(const v : Double; const fmt : TFormatSettings); virtual; abstract;
-         procedure WriteInteger(v : Int64);
+         procedure WriteInteger(v : Int64); virtual;
+         procedure WriteVariant(typ : TTypeSymbol; const v : Variant); virtual; abstract;
 
          procedure WriteSymbolName(sym : TSymbol; scope : TdwsCodeGenSymbolScope = cgssGlobal);
 
@@ -310,7 +325,6 @@ type
          property SymbolMap : TdwsCodeGenSymbolMap read FSymbolMap;
          property OutputLineOffset : Integer read FOutputLineOffset write FOutputLineOffset;
          property OutputLine : Integer read FOutputLine;
-         property Output : TWriteOnlyBlockStream read FOutput;
 
          property IndentChar : Char read FIndentChar write FIndentChar;
          property IndentSize : Integer read FIndentSize write FIndentSize;
@@ -417,6 +431,11 @@ end;
 //
 destructor TdwsCodeGen.Destroy;
 begin
+   if FOutputStack <> nil then begin
+      Assert(FOutputStack.Count = 0);
+      FOutputStack.Free;
+   end;
+
    Clear;
    FRootSymbolMap.Free;
    FTempReg.Free;
@@ -588,6 +607,37 @@ procedure TdwsCodeGen.ClearOutput;
 begin
    FOutputLine:=1;
    FOutput.Clear;
+end;
+
+// EnterOutput
+//
+procedure TdwsCodeGen.EnterOutput(destStream : TWriteOnlyBlockStream);
+var
+   item : TdwsOutputStackItem;
+begin
+   if FOutputStack = nil then
+      FOutputStack := TdwsOutputStack.Create;
+   item.Stream := FOutput;
+   item.Line := FOutputLine;
+   FOutputStack.Push(item);
+   if FOutput <> destStream then
+      FOutputLine := 1;
+   FOutput := destStream;
+end;
+
+// LeaveOutput
+//
+procedure TdwsCodeGen.LeaveOutput;
+var
+   item : TdwsOutputStackItem;
+begin
+   Assert(FOutputStack <> nil);
+   Assert(FOutputStack.Count > 0);
+   item := FOutputStack.Peek;
+   FOutputStack.Pop;
+   if FOutput <> item.Stream then
+      FOutputLine := item.Line;
+   FOutput := item.Stream;
 end;
 
 // CreateDataContext
@@ -870,8 +920,8 @@ var
    i : Integer;
    changed : Boolean;
 begin
-   Assert(FRootSymbolMap = nil);
-   FRootSymbolMap := CreateSymbolMap(nil, nil);
+   if FRootSymbolMap = nil then
+      FRootSymbolMap := CreateSymbolMap(nil, nil);
    FSymbolMap := FRootSymbolMap;
 
    ReserveSymbolNames;
@@ -1192,7 +1242,8 @@ end;
 //
 procedure TdwsCodeGen.WriteIndent;
 begin
-   FOutput.WriteString(FIndentString);
+   if not (cgoOptimizeForSize in Options) then
+      FOutput.WriteString(FIndentString);
 end;
 
 // WriteIndentIfNeeded
@@ -1265,8 +1316,8 @@ end;
 procedure TdwsCodeGen.WriteLineEnd;
 begin
    Inc(FOutputLine);
-   FOutput.WriteString(#13#10);
-   FNeedIndent:=True;
+   FOutput.WriteString(#10);
+   FNeedIndent := True;
 end;
 
 // WriteStatementEnd
@@ -1969,8 +2020,7 @@ end;
 //
 function TdwsMappedSymbolHash.GetItemHashCode(const item1 : TdwsMappedSymbol) : Cardinal;
 begin
-   Result:=NativeInt(item1.Symbol) shr 3;
-   Result:=Result xor (Result shr 15);
+   Result := SimplePointerHash(item1.Symbol);
 end;
 
 // ------------------

@@ -338,7 +338,7 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsCoreExprs;
+uses dwsCoreExprs, dwsArrayElementContext;
 
 // CreateInfoOnSymbol
 //
@@ -666,50 +666,28 @@ end;
 // GetValueAsString
 //
 function TInfoData.GetValueAsString : String;
-var
-   varData : PVarData;
 begin
-   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then begin
-      varData:=PVarData(FDataPtr.AsPVariant(0));
-      {$ifdef FPC}
-      if varData.VType=varString then begin
-         Result:=String(varData.VString);
-      {$else}
-      if varData.VType=varUString then begin
-         Result:=String(varData.VUString);
-      {$endif}
-         Exit;
-      end;
-   end;
-   Result:=inherited GetValueAsString;
+   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then
+      FDataPtr.EvalAsString(0, Result)
+   else Result := inherited GetValueAsString;
 end;
 
 // GetValueAsInteger
 //
 function TInfoData.GetValueAsInteger : Int64;
-var
-   varData : PVarData;
 begin
-   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then begin
-      varData:=PVarData(FDataPtr.AsPVariant(0));
-      if varData.VType=varInt64 then
-         Result:=varData.VInt64
-      else Result:=PVariant(varData)^;
-   end else Result:=inherited GetValueAsInteger;
+   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then
+      Result := FDataPtr.AsInteger[0]
+   else Result := inherited GetValueAsInteger;
 end;
 
 // GetValueAsFloat
 //
 function TInfoData.GetValueAsFloat : Double;
-var
-   varData : PVarData;
 begin
-   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then begin
-      varData:=PVarData(FDataPtr.AsPVariant(0));
-      if varData.VType=varDouble then
-         Result:=varData.VDouble
-      else Result:=PVariant(varData)^;
-   end else Result:=inherited GetValueAsFloat;
+   if (FDataMaster=nil) and (FTypeSym<>nil) and (FTypeSym.Size=1) then
+      Result := FDataPtr.AsFloat[0]
+   else Result := inherited GetValueAsFloat;
 end;
 
 procedure TInfoData.SetData(const Value: TData);
@@ -834,15 +812,9 @@ end;
 
 constructor TInfoClassObj.Create(ProgramInfo: TProgramInfo; TypeSym: TSymbol;
   const DataPtr: IDataContext; const DataMaster: IDataMaster);
-var
-   p : PVariant;
 begin
-  inherited;
-  p:=DataPtr.AsPVariant(0);
-  if VariantType(p^) = varUnknown then
-    FScriptObj := IScriptObj(IUnknown(p^))
-  else
-    FScriptObj := nil;
+   inherited;
+   DataPtr.EvalAsInterface(0, IUnknown(FScriptObj));
 end;
 
 destructor TInfoClassObj.Destroy;
@@ -962,16 +934,8 @@ end;
 // GetValueIsEmpty
 //
 function TInfoFunc.GetValueIsEmpty : Boolean;
-var
-   p : PVarData;
 begin
-   if FDataPtr.DataLength = 0 then Exit(True);
-   p := PVarData(FDataPtr.AsPVariant(0));
-   Result :=    (p.VType = varEmpty)
-             or (
-                     (p.VType = varUnknown)
-                 and (p.VUnknown = nil)
-                );
+   Result := (FDataPtr.DataLength = 0) or FDataPtr.IsEmpty(0);
 end;
 
 // Call
@@ -1377,15 +1341,15 @@ function TInfoDynamicArray.Element(const indices : array of Integer): IInfo;
 var
    x : Integer;
    elemTyp : TSymbol;
-   elemOff : Integer;
+   elemOff, elemIndex : Integer;
    dynArray : IScriptDynArray;
-   p : PVarData;
    locData : IDataContext;
+   intf : IUnknown;
 begin
    dynArray:=SelfDynArray;
 
    elemTyp:=FTypeSym;
-   elemOff:=0;
+   elemIndex:=0;
    if Length(indices)=0 then
       raise Exception.Create(RTE_TooFewIndices);
 
@@ -1400,17 +1364,19 @@ begin
          else raise Exception.CreateFmt(RTE_ArrayUpperBoundExceeded, [x]);
       end;
 
-      elemOff:=indices[x]*dynArray.ElementSize;
+      elemIndex := indices[x];
+      elemOff := elemIndex*dynArray.ElementSize;
 
       if x<High(indices) then begin
-         p:=PVarData(dynArray.AsPVariant(elemOff));
-         if p.VType<>varUnknown then
+         if dynArray.VarType(elemOff) <> varUnknown then
             raise Exception.Create(RTE_TooManyIndices);
-         dynArray:=IScriptDynArray(p.VUnknown);
+         dynArray.EvalAsInterface(elemOff, intf);
+         dynArray := intf as IScriptDynArray;
       end;
    end;
 
-   FProgramInfo.Execution.DataContext_CreateOffset(dynArray, elemOff, locData);
+   locData :=  TArrayElementDataContext.Create(dynArray, elemIndex);
+
    SetChild(Result, FProgramInfo, elemTyp, locData, FDataMaster);
 end;
 
@@ -1438,7 +1404,7 @@ end;
 //
 function TInfoDynamicArray.GetData : TData;
 begin
-   Result := SelfDynArray.AsPData^;
+   Result := SelfDynArray.ToData;
 end;
 
 // SetData
@@ -1640,7 +1606,7 @@ end;
 
 function TInfoProperty.GetValue: Variant;
 begin
-  result := IInfo(Self).Data[0];
+  result := GetData[0]; //IInfo(Self).Data[0];
 end;
 
 procedure TInfoProperty.AssignIndices(const Func: IInfo; FuncParams: TSymbolTable);
@@ -1718,7 +1684,7 @@ var dat: TData;
 begin
   SetLength(dat,1);
   dat[0] := Value;
-  IInfo(Self).Data := dat;
+  SetData(dat);
 end;
 
 { TInfoConnector }

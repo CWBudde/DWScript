@@ -5,7 +5,7 @@ interface
 uses
    Windows, Classes, SysUtils,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsDataContext, dwsInfo,
-   dwsTokenizer, dwsXPlatform, dwsFileSystem, dwsErrors, dwsUtils, Variants,
+   dwsTokenTypes, dwsXPlatform, dwsFileSystem, dwsErrors, dwsUtils, Variants,
    dwsSymbols, dwsPascalTokenizer, dwsStrings, dwsJSON, dwsFunctions,
    dwsFilter, dwsScriptSource, dwsSymbolDictionary, dwsContextMap,
    dwsCompilerContext, dwsUnitSymbols;
@@ -61,6 +61,7 @@ type
          procedure RecompileInContext2;
          procedure RecompileInContext3;
          procedure RecompileInContext4;
+//         procedure RecompileInContextVarArray;
          procedure ScriptPos;
          procedure MonkeyTest;
          procedure SameVariantTest;
@@ -84,6 +85,7 @@ type
          procedure MultiRunProtection;
          procedure MultipleHostExceptions;
          procedure OverloadOverrideIndwsUnit;
+         procedure OverloadMissing;
          procedure PartialClassParent;
          procedure ConstantAliasing;
          procedure ExternalVariables;
@@ -109,6 +111,7 @@ type
          procedure UnitNameTest;
          procedure ExceptionWithinMagic;
          procedure DiscardEmptyElse;
+         procedure AnonymousRecordWithConstArrayField;
 
          procedure DelphiDialectProcedureTypes;
 
@@ -1025,7 +1028,34 @@ begin
       exec.EndProgram;
    end;
 end;
+(*
+procedure TCornerCasesTests.RecompileInContextVarArray;
+var
+   prog : IdwsProgram;
+   exec : IdwsProgramExecution;
 
+   procedure Run(Line, Check: string);
+   begin
+      FCompiler.RecompileInContext(prog, Line);
+      exec.RunProgram(0);
+      CheckEquals(Check, exec.Result.ToString, 're compile line: "' + Line + '"');
+   end;
+
+begin
+   prog:=FCompiler.Compile('Print("Recompile Array of Integer");'#10
+                         + 'var j : array of integer;');
+
+   exec:=prog.BeginNewExecution;
+   try
+//      Run('j.add(56);', '');
+      Run('var i : array of integer;', '');
+      Run('i.add(78);', '');
+      Run('Print(i[0]);', '78');
+   finally
+      exec.EndProgram;
+   end;
+end;
+*)
 // ScriptPos
 //
 procedure TCornerCasesTests.ScriptPos;
@@ -1581,6 +1611,44 @@ begin
    end;
 end;
 
+// OverloadMissing
+//
+procedure TCornerCasesTests.OverloadMissing;
+const
+   cCase1 =  'type TTest = class'#10
+              + 'procedure Hello;'#10
+              + 'procedure Hello(i : Integer); overload; begin end;'#10
+           + 'end;'#10
+           + 'procedure TTest.Hello; begin end;';
+   cCase2 =  'type TTest = class'#10
+              + 'procedure Hello(i : Integer); overload; begin end;'#10
+              + 'procedure Hello;'#10
+           + 'end;'#10
+           + 'procedure TTest.Hello; begin end;';
+var
+   prog : IdwsProgram;
+   opts : TCompilerOptions;
+begin
+   opts := FCompiler.Config.CompilerOptions;
+   try
+      FCompiler.Config.CompilerOptions := opts - [ coMissingOverloadedAsErrors ];
+
+      prog := FCompiler.Compile(cCase1);
+      CheckEquals('Hint: Overloaded method "Hello" should be marked with the "overload" directive [line: 2, column: 11]', Trim(prog.Msgs.AsInfo));
+      prog := FCompiler.Compile(cCase2);
+      CheckEquals('Hint: Overloaded method "Hello" should be marked with the "overload" directive [line: 3, column: 11]', Trim(prog.Msgs.AsInfo));
+
+      FCompiler.Config.CompilerOptions := opts + [ coMissingOverloadedAsErrors ];
+
+      prog := FCompiler.Compile(cCase1);
+      CheckEquals('Syntax Error: Overloaded method "Hello" must be marked with the "overload" directive [line: 2, column: 11]', Trim(prog.Msgs.AsInfo));
+      prog := FCompiler.Compile(cCase2);
+      CheckEquals('Syntax Error: Overloaded method "Hello" must be marked with the "overload" directive [line: 3, column: 11]', Trim(prog.Msgs.AsInfo));
+   finally
+      FCompiler.Config.CompilerOptions := opts;
+   end;
+end;
+
 // PartialClassParent
 //
 procedure TCornerCasesTests.PartialClassParent;
@@ -2121,6 +2189,26 @@ begin
    prog := FCompiler.Compile('procedure Test(a : Boolean); begin if a then else Print(a); end;');
    e := prog.Table.FindSymbol('Test', cvMagic).AsFuncSymbol.SubExpr[1];
    CheckEquals('TIfThenExpr', e.ClassName, 'empty then');
+end;
+
+// AnonymousRecordWithConstArrayField
+//
+procedure TCornerCasesTests.AnonymousRecordWithConstArrayField;
+var
+   prog : IdwsProgram;
+   code : String;
+begin
+   code := 'const cC : array [0..0] of record i : Integer end = [ ( i : 123 ) ];'#10
+         + 'var b := record'#10
+            + 'f := cC;'#10
+         + 'end;';
+
+   prog := FCompiler.Compile(code);
+   CheckEquals(0, prog.Msgs.Count, 'first');
+   prog := nil;
+   prog := FCompiler.Compile(code);
+   CheckEquals(0, prog.Msgs.Count, 'second');
+   prog := nil;
 end;
 
 // DelphiDialectProcedureTypes
