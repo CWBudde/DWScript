@@ -75,6 +75,7 @@ type
       ['{77D8EA0B-311C-422B-B8DE-AA5BDE726E41}']
       function GetSelf : TObject;
       function ToString : String;
+      function ScriptTypeName : String;
    end;
 
    // TInterfacedSelfObject
@@ -90,6 +91,7 @@ type
          class function NewInstance: TObject; override;
          procedure AfterConstruction; override;
          procedure BeforeDestruction; override;
+         function ScriptTypeName : String; virtual;
    end;
 
    // IAutoStrings
@@ -114,7 +116,7 @@ type
 
    // TAutoStrings
    //
-   TAutoStrings = class(TInterfacedSelfObject, IAutoStrings)
+   TAutoStrings = class(TInterfacedObject, IAutoStrings)
       private
          FValue : TStringList;
       protected
@@ -5603,6 +5605,13 @@ end;
 procedure TInterfacedSelfObject.BeforeDestruction;
 begin
    Assert(RefCount=0);
+end;
+
+// ScriptTypeName
+//
+function TInterfacedSelfObject.ScriptTypeName : String;
+begin
+   Result := ClassName;
 end;
 
 // ------------------

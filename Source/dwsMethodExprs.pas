@@ -179,7 +179,7 @@ type
    end;
 
    // Instantiates an anonymous class
-   TConstructorAnonymousExpr = class(TPosDataExpr)
+   TConstructorAnonymousExpr = class(TDataExpr)
       public
          constructor Create(const aScriptPos: TScriptPos; aClass : TClassSymbol);
 
