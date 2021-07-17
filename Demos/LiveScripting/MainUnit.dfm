@@ -102,10 +102,6 @@ object FrmBasic: TFrmBasic
     object TabSheetOutput: TTabSheet
       Caption = '&Output'
       ImageIndex = 1
-      ExplicitLeft = 0
-      ExplicitTop = 0
-      ExplicitWidth = 0
-      ExplicitHeight = 0
       object ListBoxOutput: TListBox
         Left = 0
         Top = 0

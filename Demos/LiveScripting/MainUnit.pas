@@ -25,7 +25,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
-  ExtCtrls, StdCtrls, Menus, StdActns, ActnList, ExtDlgs, ComCtrls,
+  ExtCtrls, StdCtrls, Menus, StdActns, ActnList, ExtDlgs, ComCtrls, ImageList,
   Types, SyncObjs, ImgList, Actions, dwsComp, dwsExprs, dwsSymbols, dwsErrors,
   dwsSuggestions, dwsRTTIConnector, dwsVCLGUIFunctions, dwsStrings,
   dwsJSONConnector,
@@ -34,6 +34,7 @@ uses
   {$IFDEF JS}dwsJSCodeGen, dwsJSLibModule, {$ENDIF}
   SynEdit, SynEditHighlighter,
   SynHighlighterDWS, SynCompletionProposal, SynEditMiscClasses, SynEditSearch,
+  SynMacroRecorder, SynEditOptionsDialog, SynEditPlugins, SynEditCodeFolding;
 
 type
   TRescanThread = class(TThread)
@@ -111,7 +112,6 @@ type
     SynParameters: TSynCompletionProposal;
     TabSheetCompiler: TTabSheet;
     TabSheetOutput: TTabSheet;
-    dwsJSONLibModule1: TdwsJSONLibModule;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormShow(Sender: TObject);

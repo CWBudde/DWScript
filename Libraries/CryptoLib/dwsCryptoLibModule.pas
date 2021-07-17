@@ -19,8 +19,8 @@ unit dwsCryptoLibModule;
 interface
 
 uses
-   dwsComp, dwsExprs, dwsUtils, dwsXPlatform, dwsTokenStore, dwsCryptoXPlatform,
-   dwsXXHash, dwsExprList, dwsSymbols;
+   Classes, SysUtils, Variants, dwsComp, dwsExprs, dwsUtils, dwsXPlatform,
+   dwsTokenStore, dwsCryptoXPlatform, dwsXXHash, dwsExprList, dwsSymbols;
 
 type
   TdwsCryptoLib = class(TDataModule)
