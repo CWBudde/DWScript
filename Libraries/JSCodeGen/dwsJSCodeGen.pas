@@ -2783,53 +2783,56 @@ begin
             WriteString(#10);
       end;
 
-   case IncludeRtlLevel of
-     ilAlways:
-       destStream.WriteString(dwsJSRTL.All_RTL_JS);
-     ilNever:;
-   else
-     processedDependencies:=TStringList.Create;
-     processedDependencies.Sorted:=True;
-     try
-        // expand dependencies
-        repeat
-           n:=Dependencies.List.Count;
-           for i:=0 to Dependencies.List.Count-1 do begin
-              jsRTL:=FindJSRTLDependency(Dependencies.List[i]);
-              if jsRTL<>nil then begin
-                 if jsRTL.Dependency<>'' then
-                    Dependencies.Add(jsRTL.Dependency);
-                 if jsRTL.Dependency2<>'' then
-                    Dependencies.Add(jsRTL.Dependency2);
+      case IncludeRtlLevel of
+        ilAlways:
+          destStream.WriteString(dwsJSRTL.All_RTL_JS);
+        ilNever:;
+      else
+        processedDependencies:=TStringList.Create;
+        processedDependencies.Sorted:=True;
+        try
+           // expand dependencies
+           repeat
+              n:=Dependencies.List.Count;
+              for i:=0 to Dependencies.List.Count-1 do begin
+                 jsRTL:=FindJSRTLDependency(Dependencies.List[i]);
+                 if jsRTL<>nil then begin
+                    if jsRTL.Dependency<>'' then
+                       Dependencies.Add(jsRTL.Dependency);
+                    if jsRTL.Dependency2<>'' then
+                       Dependencies.Add(jsRTL.Dependency2);
+                 end;
+              end;
+           until Dependencies.List.Count=n;
+           // special handling for repeatable random
+           if not ForceRepeatableRandom then begin
+              if not Dependencies.Contains('SetRandSeed') then begin
+                 if Dependencies.Remove('Random') then
+                    destStream.WriteString('var Random = Math.random;'#13#10);
               end;
            end;
-        until Dependencies.List.Count=n;
-        // special handling for repeatable random
-        if not ForceRepeatableRandom then begin
-           if not Dependencies.Contains('SetRandSeed') then begin
-              if Dependencies.Remove('Random') then
-                 destStream.WriteString('var Random = Math.random;'#13#10);
+           // stream dependencies
+           for i:=Dependencies.List.Count-1 downto 0 do begin
+              dependency:=Dependencies.List[i];
+              if FlushedDependencies.IndexOf(dependency)>=0 then
+                 continue;
+              jsRTL:=FindJSRTLDependency(dependency);
+              processedDependencies.Add(dependency);
+              if jsRTL<>nil then
+                 InsertDependency(jsRTL)
+              else if dependency='$ConditionalDefines' then begin
+                 destStream.WriteString('var $ConditionalDefines=');
+                 WriteStringArray((prog as TdwsProgram).Root.ConditionalDefines.Value);
+                 destStream.WriteString(';'#13#10);
+              end;
+              Dependencies.List.Delete(i);
            end;
+        finally
+           processedDependencies.Free;
         end;
-        // stream dependencies
-        for i:=Dependencies.List.Count-1 downto 0 do begin
-           dependency:=Dependencies.List[i];
-           if FlushedDependencies.IndexOf(dependency)>=0 then
-              continue;
-           jsRTL:=FindJSRTLDependency(dependency);
-           processedDependencies.Add(dependency);
-           if jsRTL<>nil then
-              InsertDependency(jsRTL)
-           else if dependency='$ConditionalDefines' then begin
-              destStream.WriteString('var $ConditionalDefines=');
-              WriteStringArray(destStream, (prog as TdwsProgram).Root.ConditionalDefines.Value);
-              destStream.WriteString(';'#13#10);
-           end;
-           Dependencies.List.Delete(i);
-        end;
-     finally
-        processedDependencies.Free;
-     end;
+      end;
+   finally
+      LeaveOutput;
    end;
 end;
 

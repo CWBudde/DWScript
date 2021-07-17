@@ -21,7 +21,7 @@ unit dwsCssTokenizer;
 interface
 
 uses
-  dwsTokenizer, dwsStrings;
+  dwsTokenizer, dwsStrings, dwsTokenTypes;
 
 type
    TCssTokenizerStateRules = class(TTokenizerRules)
