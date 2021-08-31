@@ -38,6 +38,12 @@ type
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
 
+   TDoubleArray = array [0..High(MaxInt) shr 4] of Double;
+   PDoubleArray = ^TDoubleArray;
+
+   TStaticStringArray = array [0..High(MaxInt) shr 4] of String;
+   PStringArray = ^TStaticStringArray;
+
    TInt64DynArrayHelper = record helper for TInt64DynArray
       function High : Integer; inline;
       function Length : Integer; inline;
@@ -667,6 +673,7 @@ type
          procedure UnifyAssignP(p : PChar; size : Integer; var unifiedString : String);
 
          property Count : Integer read FCount;
+         function DistinctStrings : TStringDynArray;
          procedure Clear;
 
          property Tag : Integer read FTag write FTag;
@@ -2252,7 +2259,7 @@ function VariantToFloat(const v : Variant) : Double;
          Result := 0
       else if unknown.QueryInterface(IToNumeric, intf)=0 then
          Result := intf.ToFloat
-      else raise EVariantTypeCastError.CreateFmt(RTE_VariantCastFailed, [ 'IUnknown', SYS_FLOAT]);
+      else Result := Variant(unknown);// raise EVariantTypeCastError.CreateFmt(RTE_VariantCastFailed, [ 'IUnknown', SYS_FLOAT]);
    end;
 
 begin
@@ -3051,6 +3058,24 @@ begin
       end;
       i := (i+1) and FMask;
    until False;
+end;
+
+// DistinctStrings
+//
+function TStringUnifier.DistinctStrings : TStringDynArray;
+var
+   n, i : Integer;
+   bucket : PStringUnifierBucket;
+begin
+   SetLength(Result, FCount);
+   n := 0;
+   for i := 0 to FCapacity-1 do begin
+      bucket := @FBuckets[i];
+      if bucket.Hash <> 0 then begin
+         Result[n] := bucket.Str;
+         Inc(n);
+      end;
+   end;
 end;
 
 // Clear
