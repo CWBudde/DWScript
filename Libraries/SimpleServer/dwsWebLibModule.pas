@@ -260,6 +260,15 @@ end;
 // DeflateDecompress
 //
 procedure DeflateDecompress(var data : RawByteString);
+const
+   cDeflateErrors : array [-6 .. -1] of String = (
+      'incompatible version', // Z_VERSION_ERROR (-6)
+      'buffer error',         // Z_BUF_ERROR     (-5)
+      'insufficient memory',  // Z_MEM_ERROR     (-4)
+      'data error',           // Z_DATA_ERROR    (-3)
+      'stream error',         // Z_STREAM_ERROR  (-2)
+      'file error'            // Z_ERRNO         (-1)
+   );
 var
    strm : TZStream;
    code, len : integer;
@@ -268,22 +277,32 @@ begin
    StreamInit(strm);
    strm.next_in := Pointer(data);
    strm.avail_in := Length(data);
+//   len := strm.avail_in * 3; // initial chunk size = 3x comp size
    len := (strm.avail_in*20) shr 3; // initial chunk size = comp. ratio of 60%
-   SetString(tmp,nil,len);
+   SetString(tmp, nil, len);
    strm.next_out := Pointer(tmp);
    strm.avail_out := len;
-   if inflateInit2_(strm, -MAX_WBITS, ZLIB_VERSION, SizeOf(strm))<0 then
+   if inflateInit2_(strm, -MAX_WBITS, ZLIB_VERSION, SizeOf(strm)) < 0 then
       raise Exception.Create('inflateInit2_ failed');
    try
-      repeat
-         code := Check(inflate(strm, Z_FINISH),[Z_OK,Z_STREAM_END,Z_BUF_ERROR]);
-         if strm.avail_out=0 then begin
-            // need to increase buffer by chunk
-            SetLength(tmp,length(tmp)+len);
-            strm.next_out := PAnsiChar(pointer(tmp))+length(tmp)-len;
-            strm.avail_out := len;
+      while True do begin
+         code := inflate(strm, Z_FINISH);
+         case code of
+            Z_OK : ; // continue
+            Z_STREAM_END : Break;
+            Z_BUF_ERROR :
+               if strm.avail_out = 0 then begin
+                  // need to increase buffer by chunk
+                  SetLength(tmp, Length(tmp) + len);
+                  strm.next_out := PAnsiChar(Pointer(tmp)) + Length(tmp) - len;
+                  strm.avail_out := len;
+               end else raise Exception.Create('Deflate: corrupt compressed data');
+         else
+            if (code >= Low(cDeflateErrors)) and (code <= High(cDeflateErrors)) then
+               raise Exception.CreateFmt('Deflate: %s (%d)', [ cDeflateErrors[code], code ])
+            else raise Exception.CreateFmt('Deflate: error %d', [ code ]);
          end;
-      until code=Z_STREAM_END;
+      end;
    finally
       inflateEnd(strm);
    end;
@@ -951,7 +970,7 @@ end;
 procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetContentFileFastEvalNoResult(
   baseExpr: TTypedExpr; const args: TExprBaseListExec);
 var
-   fileName, contenType : String;
+   fileName, contentType : String;
    wr : TWebResponse;
 begin
    wr := args.WebResponse;
@@ -959,9 +978,9 @@ begin
       fileName := (args.Exec as TdwsProgramExecution).FileSystem.ValidateFileName(args.AsString[0]);
       if fileName = '' then
          raise Exception.Create('SetContentFile failed: file does not exists or access denied');
-      args.EvalAsString(1, contenType);
-      if contenType <> '' then
-         fileName := fileName + #0 + contenType;
+      args.EvalAsString(1, contentType);
+      if contentType <> '' then
+         fileName := fileName + #0 + contentType;
       wr.ContentData := StringToUTF8(fileName);
       wr.ContentType := HTTP_RESP_STATICFILE;
    end;
@@ -1151,10 +1170,18 @@ function TdwsWebLib.dwsWebFunctionsDeflateDecompressionFastEval(
   const args: TExprBaseListExec): Variant;
 var
    data : RawByteString;
+   buf : String;
 begin
-   data:=args.AsDataString[0];
-   DeflateDecompress(data);
-   Result:=RawByteStringToScriptString(data);
+   args.EvalAsString(0, buf);
+   ScriptStringToRawByteString(buf, data);
+   try
+      DeflateDecompress(data);
+   except
+      on E: Exception do
+         raise Exception.CreateFmt('Deflate %s', [ E.Message ]);
+   end;
+   RawByteStringToScriptString(data, buf);
+   VarCopySafe(Result, buf);
 end;
 
 procedure TdwsWebLib.dwsWebFunctionsGetHostByAddrEval(info: TProgramInfo);

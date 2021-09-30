@@ -1005,6 +1005,7 @@ type
          FCallerID : TFuncExpr;
          FPushExprsCount : SmallInt;
          FLevel : SmallInt;
+         FResultVarType : TVarType;
 
       protected
          procedure StaticPostCall(exec : TdwsExecution; var Result : Variant);
@@ -5033,6 +5034,7 @@ begin
    FCallerID:=Self;
    FLevel:=context.Level;
    FResultAddr:=-1;
+   FResultVarType := TVarType(-1);
 end;
 
 // Destroy
@@ -5128,12 +5130,26 @@ end;
 // StaticPostCallInteger
 //
 procedure TFuncExpr.StaticPostCallInteger(exec : TdwsExecution; var Result : Int64);
+
+   function Fallback(exec : TdwsExecution; addr : Integer) : Int64;
+   var
+      buf : Variant;
+   begin
+      exec.Stack.ReadValue(addr, buf);
+      Result := VariantToInt64(buf);
+   end;
+
 var
    sourceAddr, destAddr: Integer;
 begin
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
-   if FuncSym.Typ.Size = 1 then
-      Result:=exec.Stack.ReadIntValue(sourceAddr);
+   case FResultVarType of
+      varInt64 :
+         Result := exec.Stack.ReadIntValue(sourceAddr);
+      TVarType(-1) : ;
+   else
+      Result := Fallback(exec, sourceAddr);
+   end;
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
@@ -5144,12 +5160,28 @@ end;
 // StaticPostCallFloat
 //
 procedure TFuncExpr.StaticPostCallFloat(exec : TdwsExecution; var Result : Double);
+
+   function Fallback(exec : TdwsExecution; addr : Integer) : Double;
+   var
+      buf : Variant;
+   begin
+      exec.Stack.ReadValue(addr, buf);
+      Result := VariantToFloat(buf);
+   end;
+
 var
    sourceAddr, destAddr: Integer;
 begin
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
-   if FuncSym.Typ.Size = 1 then
-      Result:=exec.Stack.ReadFloatValue(sourceAddr);
+   case FResultVarType of
+      varDouble :
+         Result := exec.Stack.ReadFloatValue(sourceAddr);
+      varInt64 :
+         Result := exec.Stack.ReadIntValue(sourceAddr);
+      TVarType(-1) : ;
+   else
+      Result := Fallback(exec, sourceAddr);
+   end;
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
@@ -5160,12 +5192,26 @@ end;
 // StaticPostCallString
 //
 procedure TFuncExpr.StaticPostCallString(exec : TdwsExecution; var Result : String);
+
+   procedure Fallback(exec : TdwsExecution; addr : Integer; var Result : String);
+   var
+      buf : Variant;
+   begin
+      exec.Stack.ReadValue(addr, buf);
+      VariantToString(buf, Result);
+   end;
+
 var
    sourceAddr, destAddr: Integer;
 begin
    sourceAddr:=exec.Stack.StackPointer+FuncSym.Result.StackAddr;
-   if FuncSym.Typ.Size = 1 then
-      exec.Stack.ReadStrValue(sourceAddr, Result);
+   case FResultVarType of
+      varUString :
+         exec.Stack.ReadStrValue(sourceAddr, Result);
+      TVarType(-1) : ;
+   else
+      Fallback(exec, sourceAddr, Result);
+   end;
 
    if ResultAddr>=0 then begin
       destAddr:=exec.Stack.BasePointer+ResultAddr;
@@ -5221,9 +5267,21 @@ end;
 // Initialize
 //
 procedure TFuncExpr.Initialize(context : TdwsCompilerContext);
+var
+   rt : TTypeSymbol;
 begin
    inherited;
    AddPushExprs(context);
+   if (Typ <> nil) and (Typ.Size = 1) then begin
+      rt := Typ.UnaliasedType;
+      if rt = context.TypInteger then
+         FResultVarType := varInt64
+      else if rt = context.TypFloat then
+         FResultVarType := varDouble
+      else if rt = context.TypString then
+         FResultVarType := varUString
+      else FResultVarType := varVariant;
+   end;
 end;
 
 // IsWritable

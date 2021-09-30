@@ -40,15 +40,15 @@ type
       private
 
       protected
-         procedure ProcessWhiteSpace(var context : TCSSPackContext);
-         procedure ProcessComment(var context : TCSSPackContext);
-         procedure ProcessSString(var context : TCSSPackContext);
-         procedure ProcessDString(var context : TCSSPackContext);
-         procedure ProcessHexColor(var context : TCSSPackContext);
-         procedure ProcessZero(var context : TCSSPackContext);
+         class procedure ProcessWhiteSpace(var context : TCSSPackContext);
+         class procedure ProcessComment(var context : TCSSPackContext);
+         class procedure ProcessSString(var context : TCSSPackContext);
+         class procedure ProcessDString(var context : TCSSPackContext);
+         class procedure ProcessHexColor(var context : TCSSPackContext);
+         class procedure ProcessZero(var context : TCSSPackContext);
 
       public
-         function Compress(const src : UnicodeString) : String;
+         class function Compress(const src : UnicodeString) : String;
 
    end;
 
@@ -125,7 +125,7 @@ end;
 
 // Compress
 //
-function TCSSPack.Compress(const src : UnicodeString) : String;
+class function TCSSPack.Compress(const src : UnicodeString) : String;
 var
    context : TCSSPackContext;
 begin
@@ -155,8 +155,6 @@ begin
                context.Copy;
             end;
          '(' : begin
-            if context.LastOut=' ' then
-               Dec(context.OutPtr);
             Inc(context.InParams);
             context.Copy;
          end;
@@ -200,7 +198,7 @@ end;
 
 // ProcessWhiteSpace
 //
-procedure TCSSPack.ProcessWhiteSpace(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessWhiteSpace(var context : TCSSPackContext);
 begin
    case context.LastOut of
       ' ', ':', '}', ',', '{', ';', '>' : ;
@@ -218,7 +216,7 @@ end;
 
 // ProcessComment
 //
-procedure TCSSPack.ProcessComment(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessComment(var context : TCSSPackContext);
 begin
    Assert(context.InPtr[0]='/');
    Assert(context.InPtr[1]='*');
@@ -265,7 +263,7 @@ end;
 
 // ProcessSString
 //
-procedure TCSSPack.ProcessSString(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessSString(var context : TCSSPackContext);
 begin
    Assert(context.InPtr^='''');
 
@@ -286,7 +284,7 @@ end;
 
 // ProcessDString
 //
-procedure TCSSPack.ProcessDString(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessDString(var context : TCSSPackContext);
 begin
    Assert(context.InPtr^='"');
 
@@ -307,7 +305,7 @@ end;
 
 // ProcessHexColor
 //
-procedure TCSSPack.ProcessHexColor(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessHexColor(var context : TCSSPackContext);
 var
    colorStart : PWideChar;
 begin
@@ -341,7 +339,7 @@ end;
 
 // ProcessZero
 //
-procedure TCSSPack.ProcessZero(var context : TCSSPackContext);
+class procedure TCSSPack.ProcessZero(var context : TCSSPackContext);
 var
    zeroStart : PWideChar;
 begin

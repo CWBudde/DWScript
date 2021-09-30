@@ -27,17 +27,20 @@ uses
    dwsXPlatform, dwsUtils, dwsStrings, dwsCompilerContext, dwsDataContext,
    dwsSymbols, dwsFunctions, dwsUnitSymbols, dwsOperators, dwsExprs,
    dwsMagicExprs, dwsExprList, dwsTokenTypes, dwsScriptSource,
-   dwsByteBuffer;
+   dwsByteBuffer, dwsDynamicArrays;
 
 const
    SYS_BYTEBUFFER = 'ByteBuffer';
 
 type
 
-   TBaseByteBufferSymbol = class (TBaseSymbol)
+   TBaseByteBufferSymbol = class (TTypeSymbol)
       public
+         constructor Create(const aName : String);
+         function DynamicInitialization : Boolean; override;
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
          procedure InitData(const data : TData; offset : Integer); override;
+         procedure InitVariant(var v : Variant); override;
    end;
 
    TByteBufferUnaryOpExpr = class (TUnaryOpExpr)
@@ -128,6 +131,14 @@ type
       procedure DoEvalProc(const args : TExprBaseListExec); override;
    end;
 
+   TByteBufferGetInt8Func = class(TInternalMagicIntFunction)
+      function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
+   end;
+
+   TByteBufferSetInt8Func = class(TInternalMagicProcedure)
+      procedure DoEvalProc(const args : TExprBaseListExec); override;
+   end;
+
    TByteBufferGetInt16Func = class(TInternalMagicIntFunction)
       function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
    end;
@@ -192,6 +203,10 @@ type
       procedure DoEvalProc(const args : TExprBaseListExec); override;
    end;
 
+   TByteBufferGetIntegersFunc = class(TInternalMagicDynArrayFunction)
+      procedure DoEvalAsDynArray(const args : TExprBaseListExec; var Result : IScriptDynArray); override;
+   end;
+
 {$ifdef BYTEBUFFER_FILE_FUNCTIONS}
    TFileWriteByteBuffer1Func = class(TInternalMagicIntFunction)
       function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
@@ -248,6 +263,21 @@ type
 // ------------------ TBaseByteBufferSymbol ------------------
 // ------------------
 
+// Create
+//
+constructor TBaseByteBufferSymbol.Create(const aName : String);
+begin
+   inherited Create(aName, nil);
+   FSize := 1;
+end;
+
+// DynamicInitialization
+//
+function TBaseByteBufferSymbol.DynamicInitialization : Boolean;
+begin
+   Result := True;
+end;
+
 // IsCompatible
 //
 function TBaseByteBufferSymbol.IsCompatible(typSym : TTypeSymbol) : Boolean;
@@ -258,11 +288,15 @@ end;
 // InitData
 //
 procedure TBaseByteBufferSymbol.InitData(const data : TData; offset : Integer);
-var
-   p : PVariant;
 begin
-   p := @data[offset];
-   VarCopySafe(p^, IdwsByteBuffer(TdwsByteBuffer.Create));
+   InitVariant(data[offset]);
+end;
+
+// InitVariant
+//
+procedure TBaseByteBufferSymbol.InitVariant(var v : Variant);
+begin
+   VarCopySafe(v, IdwsByteBuffer(TdwsByteBuffer.Create));
 end;
 
 // ------------------
@@ -588,6 +622,38 @@ begin
 end;
 
 // ------------------
+// ------------------ TByteBufferGetInt8Func ------------------
+// ------------------
+
+// DoEvalAsInteger
+//
+function TByteBufferGetInt8Func.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
+var
+   buffer : IdwsByteBuffer;
+begin
+   args.GetBuffer(buffer);
+   if args.Count = 2 then
+      Result := buffer.GetInt8A(args.AsInteger[1])
+   else Result := buffer.GetInt8P;
+end;
+
+// ------------------
+// ------------------ TByteBufferSetInt8Func ------------------
+// ------------------
+
+// DoEvalProc
+//
+procedure TByteBufferSetInt8Func.DoEvalProc(const args : TExprBaseListExec);
+var
+   buffer : IdwsByteBuffer;
+begin
+   args.GetBuffer(buffer);
+   if args.Count = 2 then
+      buffer.SetInt8P(args.AsInteger[1])
+   else buffer.SetInt8A(args.AsInteger[1], args.AsInteger[2])
+end;
+
+// ------------------
 // ------------------ TByteBufferGetInt16Func ------------------
 // ------------------
 
@@ -843,6 +909,76 @@ begin
    else buffer.SetDataStringA(args.AsInteger[1], args.AsString[2])
 end;
 
+// ------------------
+// ------------------ TByteBufferGetIntegersFunc ------------------
+// ------------------
+
+// DoEvalAsDynArray
+//
+procedure TByteBufferGetIntegersFunc.DoEvalAsDynArray(const args : TExprBaseListExec; var Result : IScriptDynArray);
+var
+   dyn : TScriptDynamicNativeIntegerArray;
+   buffer : IdwsByteBuffer;
+   index, count, elemSize : Integer;
+   i : NativeInt;
+   signed : Boolean;
+   pSrcInt64 : PInt64Array;
+   pSrcInt32 : PInt32Array;
+   pSrcUInt32 : PUInt32Array;
+   pSrcInt16 : PInt16Array;
+   pSrcUInt16 : PUInt16Array;
+   pSrcInt8 : PInt8Array;
+   pSrcUInt8 : PUInt8Array;
+begin
+   dyn := TScriptDynamicNativeIntegerArray.Create(TTypedExpr(args.Expr).Typ.Typ);
+   Result := dyn;
+   args.GetBuffer(buffer);
+   index := args.AsInteger[1];
+   count := args.AsInteger[2];
+   elemSize := args.AsInteger[3];
+   signed := args.AsBoolean[4];
+   buffer.RangeCheck(index, count*elemSize);
+   dyn.SetArrayLength(count);
+   case elemSize of
+      1 :  if signed then begin
+         pSrcInt8 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcInt8[i]);
+      end else begin
+         pSrcUInt8 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcUInt8[i]);
+      end;
+      2 :  if signed then begin
+         pSrcInt16 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcInt16[i]);
+      end else begin
+         pSrcUInt16 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcUInt16[i]);
+      end;
+      4 : if signed then begin
+         pSrcInt32 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcInt32[i]);
+      end else begin
+         pSrcUInt32 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcUInt32[i]);
+      end;
+      8 : begin
+         if not signed then
+            raise EdwsByteBuffer.Create('UInt64 is not supported');
+         pSrcInt64 := buffer.DataPtr;
+         for i := 0 to count-1 do
+            dyn.SetAsInteger(i, pSrcInt64[i]);
+      end;
+   else
+      raise EdwsByteBuffer.CreateFmt('Unsupported element size (%d)', [ elemSize ]);
+   end;
+end;
+
 {$ifdef BYTEBUFFER_FILE_FUNCTIONS}
 
 // ------------------
@@ -894,6 +1030,8 @@ initialization
 
    RegisterInternalIntFunction(TByteBufferGetByteFunc,     '', ['buffer', SYS_BYTEBUFFER], [iffOverloaded], 'GetByte');
    RegisterInternalIntFunction(TByteBufferGetByteFunc,     '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER], [iffOverloaded], 'GetByte');
+   RegisterInternalIntFunction(TByteBufferGetInt8Func,     '', ['buffer', SYS_BYTEBUFFER], [iffOverloaded], 'GetInt8');
+   RegisterInternalIntFunction(TByteBufferGetInt8Func,     '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER], [iffOverloaded], 'GetInt8');
    RegisterInternalIntFunction(TByteBufferGetWordFunc,     '', ['buffer', SYS_BYTEBUFFER], [iffOverloaded], 'GetWord');
    RegisterInternalIntFunction(TByteBufferGetWordFunc,     '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER], [iffOverloaded], 'GetWord');
    RegisterInternalIntFunction(TByteBufferGetInt16Func,    '', ['buffer', SYS_BYTEBUFFER], [iffOverloaded], 'GetInt16');
@@ -912,11 +1050,14 @@ initialization
    RegisterInternalFloatFunction(TByteBufferGetExtendedFunc, '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER], [iffOverloaded], 'GetExtended');
    RegisterInternalStringFunction(TByteBufferGetDataFunc,  '', ['buffer', SYS_BYTEBUFFER, 'size', SYS_INTEGER], [iffOverloaded], 'GetData');
    RegisterInternalStringFunction(TByteBufferGetDataFunc,  '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'size', SYS_INTEGER], [iffOverloaded], 'GetData');
+   RegisterInternalFunction(TByteBufferGetIntegersFunc,  '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'count', SYS_INTEGER, 'elemSize', SYS_INTEGER, 'signed', SYS_BOOLEAN], SYS_ARRAY_OF_INTEGER, [], 'GetIntegers');
 
    RegisterInternalProcedure(TByteBufferSetByteFunc,   '', ['buffer', SYS_BYTEBUFFER, 'v', SYS_INTEGER], 'SetByte', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetByteFunc,   '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'v', SYS_INTEGER], 'SetByte', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetWordFunc,   '', ['buffer', SYS_BYTEBUFFER, 'v', SYS_INTEGER], 'SetWord', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetWordFunc,   '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'v', SYS_INTEGER], 'SetWord', [iffOverloaded]);
+   RegisterInternalProcedure(TByteBufferSetInt8Func,   '', ['buffer', SYS_BYTEBUFFER, 'v', SYS_INTEGER], 'SetInt8', [iffOverloaded]);
+   RegisterInternalProcedure(TByteBufferSetInt8Func,   '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'v', SYS_INTEGER], 'SetInt8', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetInt16Func,  '', ['buffer', SYS_BYTEBUFFER, 'v', SYS_INTEGER], 'SetInt16', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetInt16Func,  '', ['buffer', SYS_BYTEBUFFER, 'index', SYS_INTEGER, 'v', SYS_INTEGER], 'SetInt16', [iffOverloaded]);
    RegisterInternalProcedure(TByteBufferSetDWordFunc,  '', ['buffer', SYS_BYTEBUFFER, 'v', SYS_INTEGER], 'SetDWord', [iffOverloaded]);

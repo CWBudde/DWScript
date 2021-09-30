@@ -18,6 +18,8 @@ unit dwsUtils;
 
 {$I dws.inc}
 {$R-}
+{$Q-}
+
 
 {.$define DOUBLE_FREE_PROTECTOR}
 
@@ -37,6 +39,21 @@ type
 
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
+
+   TInt32Array = array [0..High(MaxInt) shr 3] of Int32;
+   PInt32Array = ^TInt32Array;
+   TUInt32Array = array [0..High(MaxInt) shr 3] of UInt32;
+   PUInt32Array = ^TUInt32Array;
+
+   TInt16Array = array [0..High(MaxInt) shr 2] of Int16;
+   PInt16Array = ^TInt16Array;
+   TUInt16Array = array [0..High(MaxInt) shr 2] of UInt16;
+   PUInt16Array = ^TUInt16Array;
+
+   TInt8Array = array [0..High(MaxInt) shr 1] of Int8;
+   PInt8Array = ^TInt8Array;
+   TUInt8Array = array [0..High(MaxInt) shr 1] of UInt8;
+   PUInt8Array = ^TUInt8Array;
 
    TDoubleArray = array [0..High(MaxInt) shr 4] of Double;
    PDoubleArray = ^TDoubleArray;
@@ -1505,12 +1522,6 @@ end;
 
 // FastInt32ToBuffer
 //
-{$IFOPT R+}
-  {$DEFINE RANGEON}
-  {$R-}
-{$ELSE}
-  {$UNDEF RANGEON}
-{$ENDIF}
 function FastInt32ToBuffer(const val : Int32; var buf : TInt32StringBuffer) : Integer;
 var
    n, nd : Integer;
@@ -1519,8 +1530,6 @@ var
 begin
    if val<0 then begin
       neg:=True;
-//range checking is off here because the code causes range check errors
-//code here...
       i:=-val;
    end else begin
       if val=0 then begin
@@ -1552,18 +1561,9 @@ begin
    else Inc(n);
    Result:=n;
 end;
-{$IFDEF RANGEON}
-  {$R+}
-{$ENDIF}
 
 // FastInt64ToBuffer
 //
-{$IFOPT R+}
-  {$DEFINE RANGEON}
-  {$R-}
-{$ELSE}
-  {$UNDEF RANGEON}
-{$ENDIF}
 function FastInt64ToBuffer(const val : Int64; var buf : TInt64StringBuffer) : Integer;
 var
    n, nd : Integer;
@@ -1572,8 +1572,6 @@ var
 begin
    if val<0 then begin
       neg:=True;
-//range checking is off here because the code causes range check errors
-//code here...
       i:=-val;
    end else begin
       if val=0 then begin
@@ -1605,9 +1603,6 @@ begin
    else Inc(n);
    Result:=n;
 end;
-{$IFDEF RANGEON}
-  {$R+}
-{$ENDIF}
 
 // InitializeSmallIntegers
 //
@@ -3279,7 +3274,6 @@ end;
 
 // UnicodeCompareText
 //
-{$R-}
 function UnicodeCompareText(const s1, s2 : UnicodeString) : Integer;
 var
    n1, n2 : Integer;

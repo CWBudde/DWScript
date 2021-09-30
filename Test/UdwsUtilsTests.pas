@@ -19,7 +19,7 @@ interface
 
 uses Classes, SysUtils, Math, Variants, Types, Graphics,
    dwsXPlatformTests, dwsUtils,
-   dwsXPlatform, dwsWebUtils, dwsTokenStore, dwsCryptoXPlatform,
+   dwsXPlatform, dwsTokenStore, dwsCryptoXPlatform,
    dwsEncodingLibModule, dwsGlobalVars, dwsEncoding, dwsDataContext,
    dwsXXHash, dwsURLRewriter, dwsJSON;
 
@@ -83,8 +83,6 @@ type
          procedure TestDWSHashCodeBuckets;
 
          procedure LoadTextFromBufferTest;
-
-         procedure URLEncodedEncoder;
 
          procedure VariantClearAssignString;
 
@@ -796,13 +794,13 @@ begin
    CheckEquals('-8301034833169298228', s);
 
    n:=1;
-   for i:=1 to 20 do begin
+   for i:=1 to 18 do begin
       FastInt64ToStr(n, s);
       CheckEquals(IntToStr(n), s);
       n:=n*10;
    end;
    n:=-1;
-   for i:=1 to 20 do begin
+   for i:=1 to 18 do begin
       FastInt64ToStr(n, s);
       CheckEquals(IntToStr(n), s);
       n:=n*10;
@@ -1105,16 +1103,6 @@ begin
    CheckEquals('utf8'#$00E9, LoadTextFromBuffer(Buffer([$EF, $BB, $BF, 'u', 't', 'f', '8', $C3, $A9])), 'utf8é');
    CheckEquals('B'#$00E9, LoadTextFromBuffer(Buffer([$FE, $FF, 0, 'B', 0, $E9])), 'Bé');
    CheckEquals('L'#$00E9, LoadTextFromBuffer(Buffer([$FF, $FE, 'L', 0, $E9, 0])), 'Lé');
-end;
-
-// URLEncodedEncoder
-//
-procedure TdwsUtilsTests.URLEncodedEncoder;
-begin
-   CheckEquals('', WebUtils.EncodeURLEncoded(''), 'empty');
-   CheckEquals('a', WebUtils.EncodeURLEncoded('a'), 'a');
-   CheckEquals('a%3D', WebUtils.EncodeURLEncoded('a='), 'a=');
-   CheckEquals('%3D%3D%3D%3D%3D%3D', WebUtils.EncodeURLEncoded('======'), '======');
 end;
 
 // VariantClearAssignString
@@ -1743,13 +1731,13 @@ begin
    SetLength(buf2, cNB + 16);
    for var i := 0 to cNB-1 do begin
       for var k := 0 to i do
-         buf1[k] := k + 10 + (i and 3);
+         buf1[k] := (k + 10 + (i and 3)) and 255;
       for var k := 0 to High(buf1) do
          buf2[k] := $cd;
       WordsToBytes(PWordArray(@buf1[0]), PByteArray(@buf2[0]), i);
       CheckEquals($cd, buf2[i], 'write beyond buffer end at ' + IntToStr(i));
       for var k := 0 to i-1 do
-         CheckEquals(k + 10 + (i and 3), buf2[k]);
+         CheckEquals((k + 10 + (i and 3)) and 255, buf2[k]);
    end;
 end;
 
