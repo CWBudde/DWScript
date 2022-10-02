@@ -20,7 +20,8 @@ interface
 
 uses
    dwsUtils, dwsSymbols, dwsErrors, dwsScriptSource, dwsXPlatform,
-   dwsUnitSymbols, dwsStrings, dwsTokenizer, dwsCustomData, dwsSpecialKeywords;
+   dwsUnitSymbols, dwsStrings, dwsTokenizer, dwsCustomData, dwsSpecialKeywords,
+   dwsSymbolDictionary;
 
 type
    TCompilerOption = (
@@ -70,6 +71,7 @@ type
       protected
          procedure SetSystemTable(const val : TSystemSymbolTable);
          procedure SetProg(aProg : TObject);
+         function GetSymbolDictionary : TdwsSymbolDictionary;
 
       public
          constructor Create;
@@ -82,6 +84,7 @@ type
          function Table : TSymbolTable;
 
          function CreateConstExpr(typ : TTypeSymbol; const value : Variant) : TExprBase;
+         function CreateInteger(value : Int64) : TExprBase;
 
          function WrapWithImplicitCast(toTyp : TTypeSymbol; const scriptPos : TScriptPos; var expr) : Boolean;
          function FindType(const typName : String) : TTypeSymbol; override;
@@ -98,6 +101,7 @@ type
          property UnifiedConstants : TObject read FUnifiedConstants write FUnifiedConstants;
          property UnitList : TIdwsUnitList read FUnitList write FUnitList;
          property HelperMemberNames : TSimpleStringHash read FHelperMemberNames;
+         property SymbolDictionary : TdwsSymbolDictionary read GetSymbolDictionary;
 
          property Execution : TdwsExecution read FExecution write FExecution;
          property Options : TCompilerOptions read FOptions write FOptions;
@@ -215,9 +219,9 @@ function TdwsCompilerContext.CreateConstExpr(typ : TTypeSymbol; const value : Va
       val : IScriptDynArray;
    begin
       val := IUnknown(value) as IScriptDynArray;
-      if val <> nil then
-         Result := TConstExpr.Create(cNullPos, typ, val)
-      else Result := TConstExpr.Create(cNullPos, typ, CreateNewDynamicArray(typ.Typ) as IScriptDynArray);
+      if val = nil then
+         CreateNewDynamicArray(typ.Typ, val);
+      Result := TConstExpr.CreateValue(cNullPos, typ, val);
    end;
 
    function CreateAssociativeArrayValue(typ : TAssociativeArraySymbol) : TConstExpr;
@@ -226,8 +230,8 @@ function TdwsCompilerContext.CreateConstExpr(typ : TTypeSymbol; const value : Va
    begin
       val := IUnknown(value) as IScriptAssociativeArray;
       if val<>nil then
-         Result:=TConstExpr.Create(cNullPos, typ, val)
-      else Result:=TConstExpr.Create(cNullPos, typ, TScriptAssociativeArray.CreateNew(typ.KeyType, typ.Typ) as IScriptAssociativeArray);
+         Result:=TConstExpr.CreateValue(cNullPos, typ, val)
+      else Result:=TConstExpr.CreateValue(cNullPos, typ, TScriptAssociativeArray.CreateNew(typ.KeyType, typ.Typ) as IScriptAssociativeArray);
    end;
 
 begin
@@ -245,7 +249,14 @@ begin
       Result := TUnifiedConstants(FUnifiedConstants).CreateInteger(value)
    else if typ.typ = TypInteger then
       Result := TConstIntExpr.Create(cNullPos, typ, value)
-   else Result := TConstExpr.Create(cNullPos, typ, value);
+   else Result := TConstExpr.CreateValue(cNullPos, typ, value);
+end;
+
+// CreateInteger
+//
+function TdwsCompilerContext.CreateInteger(value : Int64) : TExprBase;
+begin
+   Result := TUnifiedConstants(FUnifiedConstants).CreateInteger(value);
 end;
 
 // WrapWithImplicitCast
@@ -291,7 +302,7 @@ begin
          if Optimize then
             TObject(expr) := typedExpr.OptimizeToTypedExpr(Self, scriptPos);
       end else if     toTyp.UnAliasedTypeIs(TDynamicArraySymbol) and (typedExpr is TArrayConstantExpr)
-                  and toTyp.UnAliasedType.Typ.SameType(typedExpr.Typ.UnaliasedType.Typ) then begin
+                  and toTyp.UnAliasedType.Typ.IsCompatible(typedExpr.Typ.UnaliasedType.Typ) then begin
          Result := True;
          typedExpr := TConvStaticArrayToDynamicExpr.Create(
             Self, scriptPos,
@@ -355,6 +366,13 @@ end;
 procedure TdwsCompilerContext.SetProg(aProg : TObject);
 begin
    FProg := aProg as TdwsProgram;
+end;
+
+// GetSymbolDictionary
+//
+function TdwsCompilerContext.GetSymbolDictionary : TdwsSymbolDictionary;
+begin
+   Result := TdwsProgram(FProg).Root.SymbolDictionary;
 end;
 
 // CustomStateGet

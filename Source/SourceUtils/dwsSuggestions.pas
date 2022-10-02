@@ -153,6 +153,7 @@ type
          procedure AddStaticArrayHelpers(a : TArraySymbol; list : TSimpleSymbolList);
          procedure AddDynamicArrayHelpers(dyn : TDynamicArraySymbol; list : TSimpleSymbolList);
          procedure AddAssociativeArrayHelpers(assoc : TAssociativeArraySymbol; list : TSimpleSymbolList);
+         procedure AddEnumerationHelpers(enum : TEnumerationSymbol; list : TSimpleSymbolList);
          procedure AddJSONVariantHelpers(list : TSimpleSymbolList);
          procedure AddTypeHelpers(typ : TTypeSymbol; meta : Boolean; list : TSimpleSymbolList);
          procedure AddUnitSymbol(unitSym : TUnitSymbol; list : TSimpleSymbolList);
@@ -377,8 +378,14 @@ begin
                FPreviousSymbolIsMeta:=False;
                if FPreviousSymbol.Typ is TArraySymbol then
                   FPreviousSymbol:=TArraySymbol(FPreviousSymbol.Typ).Typ
-               else if FPreviousSymbol is TPropertySymbol then
-                  FPreviousSymbol:=TArraySymbol(FPreviousSymbol).Typ;
+               else begin
+                  if (PreviousSymbol.Typ is TCompositeTypeSymbol) and (TCompositeTypeSymbol(PreviousSymbol.Typ).DefaultProperty <> nil) then
+                     FPreviousSymbol := TCompositeTypeSymbol(PreviousSymbol.Typ).DefaultProperty
+                  else if (PreviousSymbol is TCompositeTypeSymbol) and (TCompositeTypeSymbol(PreviousSymbol).DefaultProperty <> nil) then
+                     FPreviousSymbol := TCompositeTypeSymbol(PreviousSymbol).DefaultProperty;
+                  if FPreviousSymbol is TPropertySymbol then
+                     FPreviousSymbol := FPreviousSymbol.Typ
+               end;
             end else begin
                FPreviousSymbolIsMeta:=FPreviousSymbol.IsType;
             end;
@@ -571,7 +578,8 @@ begin
    p := FProg.ProgramObject.CompilerContext;
    for amk in [
          amkLow, amkHigh,
-         amkLength, amkCount
+         amkLength, amkCount,
+         amkIndexOf, amkContains
       ] do begin
       list.Add(a.PseudoMethodSymbol(amk, p));
    end;
@@ -587,7 +595,7 @@ begin
    p := FProg.ProgramObject.CompilerContext;
    for amk in [
          amkAdd, amkPush, amkPop, amkPeek, amkDelete, amkRemove, amkInsert,
-         amkIndexOf,
+         amkIndexOf, amkContains,
          amkMove, amkSwap, amkReverse,
          amkSetLength, amkClear,
          amkCopy,
@@ -612,6 +620,14 @@ begin
       ] do begin
       list.Add(assoc.PseudoMethodSymbol(amk, p));
    end;
+end;
+
+// AddEnumerationHelpers
+//
+procedure TdwsSuggestions.AddEnumerationHelpers(enum : TEnumerationSymbol; list : TSimpleSymbolList);
+begin
+   var p := FProg.ProgramObject.CompilerContext;
+   list.Add(enum.PseudoMethodSymbol(amkByName, p));
 end;
 
 // AddJSONVariantHelpers
@@ -803,6 +819,7 @@ begin
          end else if FPreviousSymbol is TEnumerationSymbol then begin
 
             list.AddSymbolTable(TEnumerationSymbol(FPreviousSymbol).Elements);
+            AddEnumerationHelpers(TEnumerationSymbol(FPreviousSymbol), list);
 
          end else if    (FPreviousSymbol is TElementSymbol)
                      or (FPreviousSymbol.Typ is TEnumerationSymbol) then begin
@@ -1193,7 +1210,7 @@ begin
    scope:=ScopeStruct(from);
    visibility:=ScopeVisiblity(scope, struc);
    first:=True;
-   allowConstructors:=(struc is TClassSymbol) and not TClassSymbol(struc).IsStatic;
+   allowConstructors := struc.IsClassSymbol and not TClassSymbol(struc).IsStatic;
 
    repeat
       for sym in struc.Members do begin

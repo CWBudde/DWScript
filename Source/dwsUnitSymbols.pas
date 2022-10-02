@@ -160,7 +160,7 @@ type
 
          class function IsUnitTable : Boolean; override;
 
-         function FindLocal(const aName : String; ofClass : TSymbolClass = nil) : TSymbol; override;
+         function FindLocal(const aName : String) : TSymbol; override;
          function EnumerateHelpers(helpedType : TTypeSymbol; const callback : THelperSymbolEnumerationCallback) : Boolean; override;
    end;
 
@@ -183,7 +183,7 @@ type
          constructor Create(mainSymbol : TUnitMainSymbol; const name : String);
          destructor Destroy; override;
 
-         procedure InitData(const data : TData; offset : Integer); override;
+         procedure InitDataContext(const data : IDataContext; offset : NativeInt); override;
 
          procedure RegisterNameSpaceUnit(unitSymbol : TUnitSymbol);
          function  FindNameSpaceUnit(const name : String) : TUnitSymbol;
@@ -259,7 +259,7 @@ type
       public
          constructor Create(const parent : IStaticSymbolTable);
 
-         function FindLocal(const Name : String; ofClass : TSymbolClass = nil) : TSymbol; override;
+         function FindLocal(const Name : String) : TSymbol; override;
          function FindSymbol(const Name : String; minVisibility : TdwsVisibility;
                               ofClass : TSymbolClass = nil) : TSymbol; override;
          procedure Initialize(const msgs : TdwsCompileMessageList); override;
@@ -412,14 +412,14 @@ end;
 //
 function TStaticSymbolTable._AddRef : Integer;
 begin
-   Result:=InterlockedIncrement(FRefCount);
+   Result := AtomicIncrement(FRefCount);
 end;
 
 // _Release
 //
 function TStaticSymbolTable._Release : Integer;
 begin
-   Result:=InterlockedDecrement(FRefCount);
+   Result := AtomicDecrement(FRefCount);
    if Result=0 then
       Destroy;
 end;
@@ -500,11 +500,11 @@ begin
    FParentSymbolTable:=parent.SymbolTable;
 end;
 
-function TLinkedSymbolTable.FindLocal(const Name : String; ofClass : TSymbolClass = nil): TSymbol;
+function TLinkedSymbolTable.FindLocal(const Name : String) : TSymbol;
 begin
-   Result:=FParentSymbolTable.FindLocal(Name, ofClass);
+   Result := FParentSymbolTable.FindLocal(Name);
    if not Assigned(Result) then
-      Result:=inherited FindLocal(Name, ofClass);
+      Result := inherited FindLocal(Name);
 end;
 
 function TLinkedSymbolTable.FindSymbol(const Name : String; minVisibility : TdwsVisibility;
@@ -706,7 +706,7 @@ begin
       part:=Copy(Name, 1, p-1)
    else part:=Name;
 
-   nameSpace:=TUnitSymbol(aTable.FindLocal(part, TUnitSymbol));
+   nameSpace := TUnitSymbol(aTable.FindLocalOfClass(part, TUnitSymbol));
    if nameSpace=nil then begin
       nameSpace:=TUnitSymbol.Create(nil, part);
       nameSpace.Implicit:=implicit;
@@ -813,9 +813,9 @@ begin
    FNameSpace.Free;
 end;
 
-// InitData
+// InitDataContext
 //
-procedure TUnitSymbol.InitData(const data : TData; offset : Integer);
+procedure TUnitSymbol.InitDataContext(const data : IDataContext; offset : NativeInt);
 begin
    // nothing
 end;
@@ -972,11 +972,11 @@ end;
 
 // FindLocal
 //
-function TUnitImplementationTable.FindLocal(const aName : String; ofClass : TSymbolClass = nil) : TSymbol;
+function TUnitImplementationTable.FindLocal(const aName : String) : TSymbol;
 begin
-   Result:=inherited FindLocal(aName, ofClass);
+   Result:=inherited FindLocal(aName);
    if Result=nil then
-      Result:=UnitMainSymbol.Table.FindLocal(aName, ofClass);
+      Result:=UnitMainSymbol.Table.FindLocal(aName);
 end;
 
 // EnumerateHelpers

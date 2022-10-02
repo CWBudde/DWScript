@@ -20,7 +20,6 @@ unit dwsUtils;
 {$R-}
 {$Q-}
 
-
 {.$define DOUBLE_FREE_PROTECTOR}
 
 interface
@@ -34,8 +33,11 @@ type
 
    TStringDynArray = array of String;
    TInt64DynArray = array of Int64;
+   TUInt64DynArray = array of UInt64;
+   TSingleDynArray = array of Single;
    TDoubleDynArray = array of Double;
    TInterfaceDynArray = array of IUnknown;
+   TVariantDynArray = array of Variant;
 
    TInt64Array = array [0..High(MaxInt) shr 4] of Int64;
    PInt64Array = ^TInt64Array;
@@ -55,6 +57,8 @@ type
    TUInt8Array = array [0..High(MaxInt) shr 1] of UInt8;
    PUInt8Array = ^TUInt8Array;
 
+   TSingleArray = array [0..High(MaxInt) shr 4] of Single;
+   PSingleArray = ^TSingleArray;
    TDoubleArray = array [0..High(MaxInt) shr 4] of Double;
    PDoubleArray = ^TDoubleArray;
 
@@ -70,9 +74,12 @@ type
    //
    // Uses Monitor hidden field to store refcount, so not compatible with monitor use
    // (but Monitor is buggy, so no great loss)
+   {$ifndef FPC}
+      {$define USE_MONITOR_FOR_REFCOUNT}
+   {$endif}
    TRefCountedObject = class
       private
-         {$ifdef FPC}
+         {$ifndef USE_MONITOR_FOR_REFCOUNT}
          FRefCount : Integer;
          {$endif}
          {$ifdef DOUBLE_FREE_PROTECTOR}
@@ -180,6 +187,9 @@ type
    IToVariant = interface
       ['{DE1A280D-5552-4F84-B557-957271D6EA62}']
       procedure ToVariant(var result : Variant);
+      function IsArray : Boolean;
+      function IsNumeric : Boolean;
+      function IsString : Boolean;
    end;
 
    // TVarRecArrayContainer
@@ -306,6 +316,9 @@ type
          procedure Enumerate(const callback : TSimpleCallback<T>);
          property Items[const position : Integer] : T read GetItems write SetItems; default;
          property Count : Integer read FCount;
+
+         type PItemPtr = ^T;
+         function ItemPtr(idx : Integer) : PItemPtr; inline;
    end;
 
    // TSimpleStringList
@@ -508,8 +521,9 @@ type
          function Contains(const anItem : T) : Boolean;
          function Match(var anItem : T) : Boolean;
          function Remove(const anItem : T) : Boolean; // true if removed
-         procedure Enumerate(callBack : TSimpleHashFunc<T>);
+         procedure Enumerate(const callBack : TSimpleHashFunc<T>);
          procedure Clear(resetCapacity : Boolean = True);
+         procedure PreallocateCapacity(newCapacity : Integer);
 
          function HashBucketValue(index : Integer; var anItem : T) : Boolean; inline;
          procedure Delete(index : Integer);
@@ -698,6 +712,19 @@ type
          const HighestUnifiedChar = #$007F;
    end;
 
+   TThread<T: constructor, class> = class
+      private
+         FLock : TdwsCriticalSection;
+         FValue : T;
+
+      public
+         constructor Create(const anObj : T);
+         destructor Destroy; override;
+
+         function Lock : T;
+         procedure Unlock;
+   end;
+
    TThreadCached<T> = class
       private
          FLock : TMultiReadSingleWrite;
@@ -760,6 +787,8 @@ type
          procedure Clear;
 
          property Count : Integer read FCount;
+         property First : PItemT read FFirst;
+         property Last : PItemT read FLast;
    end;
 
 const
@@ -805,8 +834,10 @@ type
          procedure WriteBytes(const b : array of Byte); overload;
          procedure WriteBytes(const buffer : RawByteString); overload;
          procedure WriteInt32(const i : Integer); inline;
+         procedure WriteInt64(const i : Int64); inline;
          procedure WriteDWord(const dw : DWORD); inline;
          procedure WriteQWord(const qw : UInt64); inline;
+         procedure WriteDouble(const d : Double); inline;
 
          procedure WriteP(p : PWideChar; nbWideChars : Integer); inline;
 
@@ -828,8 +859,8 @@ type
 
          function TailWord : Word;
 
-         function ToString : String; override; final;
-         function ToUnicodeString : UnicodeString;
+         function ToString : String; overload; override; final;
+         function ToUnicodeString : UnicodeString; inline;
          function ToUTF8String : RawByteString;
          function ToBytes : TBytes;
          function ToRawBytes : RawByteString;
@@ -838,6 +869,7 @@ type
 
          procedure StoreData(var buffer); overload;
          procedure StoreData(destStream : TStream); overload;
+         procedure StoreData(var dest : UnicodeString); overload;
          procedure StoreUTF8Data(destStream : TStream); overload;
    end;
 
@@ -883,14 +915,29 @@ type
       {$endif}
    end;
 
-   TClassCloneConstructor<T: TRefCountedObject> = record
+   TClassCloneConstructor<T: class, constructor> = record
       private
          FTemplate : T;
          FSize : Integer;
+
       public
          procedure Initialize(aTemplate : T);
          procedure Finalize;
          function Create : T; inline;
+   end;
+
+   TClassInstanceTemplate<T: class> = record
+      private
+         FTemplate : Pointer;
+         FPool : Pointer;
+
+      public
+         procedure Initialize;
+         procedure Finalize;
+         function Initialized : Boolean; inline;
+
+         function CreateInstance : T; inline;
+         procedure ReleaseInstance(instance : T); inline;
    end;
 
    ETightListOutOfBound = class(Exception)
@@ -964,8 +1011,6 @@ function UnicodeSameText(const s1, s2 : String) : Boolean; overload;
 {$endif}
 
 function AsciiCompareLen(p1, p2 : PAnsiChar; n : Integer) : Integer; overload;
-function AsciiCompareText(p : PAnsiChar; const s : RawByteString) : Integer; deprecated;
-function AsciiSameText(p : PAnsiChar; const s : RawByteString) : Boolean; deprecated;
 
 function PosA(const sub, main : RawByteString) : Integer; inline;
 
@@ -1000,7 +1045,9 @@ function StrReplaceChar(const aStr : String; oldChar, newChar : Char) : String;
 function StrReplaceMacros(const aStr : String; const macros : array of String;
                           const startDelimiter, stopDelimiter : String) : String;
 
+function StrCountString(const haystack, needle : String) : Integer;
 function StrCountChar(const aStr : String; c : Char) : Integer;
+function StrCountStartChar(const aStr : String; c : Char) : Integer;
 
 function WhichPowerOfTwo(const v : Int64) : Integer;
 
@@ -1034,6 +1081,7 @@ type
 function BinToHex(data : Pointer; n : Integer) : UnicodeString; overload;
 function BinToHex(const data; n : Integer) : UnicodeString; overload; inline;
 function BinToHex(const data : RawByteString) : UnicodeString; overload; inline;
+function BinToHexA(data : Pointer; n : Integer) : RawByteString; overload;
 
 function HexToBin(const data : String) : RawByteString; overload;
 procedure HexToBin(src : PChar; dest : PByte; nbBytes : Integer); overload;
@@ -1052,6 +1100,9 @@ procedure FastFloatToStr(const val : Extended; var s : String; const fmtSettings
 
 function  Int32ToStrU(val : Integer) : UnicodeString;
 function  StrUToInt64(const s : UnicodeString; const default : Int64) : Int64;
+function  TryStrToIntBase(const s : UnicodeString; base : Integer; var value : Int64) : Boolean;
+
+function Int64ToStrBase(val : Int64; base : Integer) : String;
 
 function Int64ToHex(val : Int64; digits : Integer) : String; inline;
 
@@ -1111,9 +1162,6 @@ function  VariantArrayHighBound(const v : Variant; index : Integer) : Integer; i
 procedure WriteVariant(writer: TWriter; const value: Variant);
 function ReadVariant(reader: TReader): Variant;
 
-type
-   EISO8601Exception = class (Exception);
-
 function TryISO8601ToDateTime(const v : String; var aResult : TDateTime) : Boolean;
 function ISO8601ToDateTime(const v : String) : TDateTime;
 function DateTimeToISO8601(dt : TDateTime; extendedFormat : Boolean) : String;
@@ -1131,7 +1179,15 @@ function PopCount32(v : Int32) : Integer;
 function PopCount64(p : PInt64; nbInt64s : Integer) : Integer;
 function PopCount(p : PByte; n : Integer) : Integer;
 
+procedure SwapInt64(var a, b : Int64); inline;
+procedure SwapDoubles(var a, b : Double); inline;
+procedure SwapPointers(var a, b : Pointer); inline;
+
+procedure TransferSimpleHashBuckets(const src, dest; nbSrcBuckets, nbDestBuckets, bucketSize : Integer);
+
 type
+   EISO8601Exception = class (Exception);
+
    TTwoChars = packed array [0..1] of Char;
    PTwoChars = ^TTwoChars;
 const
@@ -1147,6 +1203,9 @@ const
       ('8','0'), ('8','1'), ('8','2'), ('8','3'), ('8','4'), ('8','5'), ('8','6'), ('8','7'), ('8','8'), ('8','9'),
       ('9','0'), ('9','1'), ('9','2'), ('9','3'), ('9','4'), ('9','5'), ('9','6'), ('9','7'), ('9','8'), ('9','9')
       );
+
+var
+   vValueOfNullVariantAsString : String = 'Null';
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -1253,16 +1312,9 @@ var
    mix : NativeUInt;
 begin
    // based on xxHash finalizers
-   {$ifdef CPU64}
-   mix := NativeUInt(x);
-   mix := (mix xor (mix shr 33)) * 14029467366897019727;
-   mix := (mix xor (mix shr 29)) * 1609587929392839161;
-   mix := mix xor (mix shr 32);
-   {$else}
    mix := (NativeUInt(x) shr 2) * Cardinal(2246822519);
    mix := (mix xor (mix shr 15)) * Cardinal(3266489917);
    Result := (mix xor (mix shr 16));
-   {$endif}
    if Result = 0 then Result := 1;
 end;
 
@@ -1375,6 +1427,32 @@ begin
       pDest^ := Ord(cHexDigits[p^ shr 4]) + (Ord(cHexDigits[p^ and 15]) shl 16);
       Inc(pDest);
       Inc(p);
+   end;
+end;
+
+// BinToHexA
+//
+function BinToHexA(data : Pointer; n : Integer) : RawByteString; overload;
+const
+   cHexDigits : array [0..15] of AnsiChar = (
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+      'a', 'b', 'c', 'd', 'e', 'f'
+   );
+var
+   i : Integer;
+   pSrc : PByte;
+   pDest : PWord;
+begin
+   if n=0 then Exit;
+
+   SetLength(Result, n*2);
+
+   pDest := Pointer(Result);
+   pSrc := data;
+   for i := 1 to n do begin
+      pDest^ := Ord(cHexDigits[pSrc^ shr 4]) + (Ord(cHexDigits[pSrc^ and 15]) shl 8);
+      Inc(pDest);
+      Inc(pSrc);
    end;
 end;
 
@@ -1923,15 +2001,15 @@ begin
          '1', 'T', 't', 'Y', 'y' : Exit(True);
       end;
       3 : begin
-         Exit(    ((p[0] = 'Y') or (p[0] = 'y'))
-              and ((p[1] = 'E') or (p[1] = 'e'))
-              and ((p[2] = 'S') or (p[2] = 's')));
+         if     ((p[0] = 'Y') or (p[0] = 'y'))
+            and ((p[1] = 'E') or (p[1] = 'e'))
+            and ((p[2] = 'S') or (p[2] = 's')) then Exit(True);
       end;
       4 : begin
-         Exit(    ((p[0] = 'T') or (p[0] = 't'))
-              and ((p[1] = 'R') or (p[1] = 'r'))
-              and ((p[2] = 'U') or (p[2] = 'u'))
-              and ((p[3] = 'E') or (p[3] = 'e')));
+         if     ((p[0] = 'T') or (p[0] = 't'))
+            and ((p[1] = 'R') or (p[1] = 'r'))
+            and ((p[2] = 'U') or (p[2] = 'u'))
+            and ((p[3] = 'E') or (p[3] = 'e')) then Exit(True);
       end;
    end;
    // special case of integer: zero is false, everything else is true
@@ -1971,6 +2049,102 @@ end;
 function StrUToInt64(const s : UnicodeString; const default : Int64) : Int64;
 begin
    Result := StrToInt64Def(String(s), default);
+end;
+
+// TryStrToIntBase
+//
+function TryStrToIntBase(const s : UnicodeString; base : Integer; var value : Int64) : Boolean;
+var
+   p : PChar;
+   neg : Boolean;
+   d : Integer;
+   temp : Int64;
+begin
+   Result := False;
+   if (base < 2) or (base > 36) then
+      raise EConvertError.CreateFmt('Invalid base for string to integer conversion (%d)', [ base ]);
+   if s = '' then Exit;
+
+   p := Pointer(s);
+
+   try
+      neg := False;
+      case p^ of
+         '+' : Inc(p);
+         '-' : begin
+            neg := True;
+            Inc(p);
+         end;
+         '0' : begin
+            while p[1] = '0' do
+               Inc(p);
+         end;
+      end;
+
+      temp := 0;
+
+      while True do begin
+         case p^ of
+            #0 : Break;
+            '0'..'9' : d := Ord(p^) - Ord('0');
+            'a'..'z' : d := Ord(p^) + (10 - Ord('a'));
+            'A'..'Z' : d := Ord(p^) + (10 - Ord('A'));
+         else
+            Exit;
+         end;
+         if d >= base then
+            Exit;
+{$Q+}
+         temp := temp * base + d;
+{$Q-}
+         Inc(p);
+      end;
+      if neg then
+         value := -temp
+      else value := temp;
+      Result := True;
+   except
+      on E: EIntOverflow do
+         Exit(False);
+      else raise;
+   end;
+end;
+
+// Int64ToStrBase
+//
+function Int64ToStrBase(val : Int64; base : Integer) : String;
+var
+   uv : UInt64;
+   buf : array [0..64] of Char;
+   p, digit : Integer;
+   neg : Boolean;
+begin
+   if (base < 2) or (base > 36) then
+      raise EConvertError.CreateFmt('Invalid base for integer to string conversion (%d)', [ base ]);
+
+   if val = 0 then Exit('0');
+
+   neg := (val < 0);
+   if neg then
+      uv := -val
+   else uv := val;
+   p := High(buf);
+
+   while uv <> 0 do begin
+      digit := uv mod Cardinal(base);
+      uv := uv div Cardinal(base);
+      if digit < 10 then
+         buf[p] := Char(Ord('0') + digit)
+      else buf[p] := Char((Ord('a') - 10) + digit);
+      Dec(p);
+   end;
+
+   if neg then begin
+      buf[p] := '-';
+      Dec(p);
+   end;
+
+   SetString(Result, PChar(@buf[p+1]), High(buf)-p);
 end;
 
 // FastStringReplace
@@ -2097,6 +2271,19 @@ procedure VariantToString(const v : Variant; var s : String);
       Result := FloatToStr(v);
    end;
 
+   procedure VariantArrayToString(const v : Variant; var Result : String);
+   var
+      i : Integer;
+   begin
+      Result := '';
+      for i := VarArrayLowBound(v, 1) to VarArrayHighBound(v, 1) do begin
+         if Result <> '' then
+            Result := Result + ', ';
+         Result := Result + VariantToString(v[i]);
+      end;
+      Result := '[ ' + Result + ' ]';
+   end;
+
 var
    varData : PVarData;
 begin
@@ -2117,16 +2304,18 @@ begin
          FloatAsString(varData^.VDouble, s);
       varBoolean :
          if varData^.VBoolean then
-            s:='True'
-         else s:='False';
+            s := 'True'
+         else s := 'False';
       varNull :
-         s:='Null';
+         s := vValueOfNullVariantAsString;
       varUnknown :
          UnknownAsString(IUnknown(varData^.VUnknown), s);
       varError :
          s := '[varError]';
    else
-      s := v;
+      if VarIsArray(v) then
+         VariantArrayToString(v, s)
+      else s := v;
    end;
 end;
 
@@ -2421,6 +2610,74 @@ end;
 //
 function VarCompareSafe(const left, right : Variant) : TVariantRelationship;
 
+   function CompareStrings(const left, right : String) : TVariantRelationship;
+   var
+      c : Integer;
+   begin
+      c := CompareStr(left, right);
+      if c < 0 then
+         Result := vrLessThan
+      else if c = 0 then
+         Result := vrEqual
+      else Result := vrGreaterThan;
+   end;
+
+   function CompareDoubles(const left, right : Double) : TVariantRelationship;
+   begin
+      if left < right then
+         Result := vrLessThan
+      else if left > right then
+         Result := vrGreaterThan
+      else if left = right then
+         Result := vrEqual
+      else Result := vrNotEqual;
+   end;
+
+   function CompareInt64s(const left, right : Int64) : TVariantRelationship;
+   begin
+      if left < right then
+         Result := vrLessThan
+      else if left > right then
+         Result := vrGreaterThan
+      else Result := vrEqual
+   end;
+
+   function CompareDoubleToString(const left : Double; const right : String) : TVariantRelationship;
+   var
+      rv : Double;
+   begin
+      if TryStrToDouble(right, rv) then
+         Result := CompareDoubles(left, rv)
+      else Result := vrNotEqual;
+   end;
+
+   function CompareStringToDouble(const left : String; const right : Double) : TVariantRelationship;
+   var
+      lv : Double;
+   begin
+      if TryStrToDouble(left, lv) then
+         Result := CompareDoubles(lv, right)
+      else Result := vrNotEqual;
+   end;
+
+   function CompareInt64ToString(const left : Int64; const right : String) : TVariantRelationship;
+   var
+      rv : Int64;
+   begin
+      if TryStrToInt64(right, rv) then
+         Result := CompareInt64s(left, rv)
+      else Result := CompareDoubleToString(left, right);
+   end;
+
+   function CompareStringToInt64(const left : String; const right : Int64) : TVariantRelationship;
+   var
+      lv : Int64;
+   begin
+      if TryStrToInt64(left, lv) then
+         Result := CompareInt64s(lv, right)
+      else Result := CompareStringToDouble(left, right);
+   end;
+
    function CompareUnknowns(const left, right : IUnknown) : TVariantRelationship;
    var
       intfLeft, intfRight : IToVariant;
@@ -2444,6 +2701,32 @@ function VarCompareSafe(const left, right : Variant) : TVariantRelationship;
       if (left <> nil) and (left.QueryInterface(IToVariant, intfLeft)=0) then begin
          intfLeft.ToVariant(varLeft);
          Result := VarCompareSafe(varLeft, right);
+      end else Result := vrNotEqual;
+   end;
+
+   function CompareInt64ToUnknown(const left : Int64; const right : IUnknown) : TVariantRelationship; forward;
+
+   function CompareInt64ToVar(const left : Int64; const right : Variant) : TVariantRelationship;
+   begin
+      case VarType(right) of
+         varDouble : Exit(CompareDoubles(left, TVarData(right).VDouble));
+         varInt64 : Exit(CompareInt64s(left, TVarData(right).VInt64));
+         varUString : Exit(CompareInt64ToString(left, String(TVarData(right).VUString)));
+         varUnknown : Exit(CompareInt64ToUnknown(left, IUnknown(TVarData(right).VUnknown)));
+      end;
+      if VarIsArray(right) then
+         Exit(vrNotEqual)
+      else Exit(VarCompareValue(left, right));
+   end;
+
+   function CompareInt64ToUnknown(const left : Int64; const right : IUnknown) : TVariantRelationship;
+   var
+      intfRight : IToVariant;
+      varRight : Variant;
+   begin
+      if (right <> nil) and (right.QueryInterface(IToVariant, intfRight)=0) then begin
+         intfRight.ToVariant(varRight);
+         Result := CompareInt64ToVar(left, varRight);
       end else Result := vrNotEqual;
    end;
 
@@ -2474,10 +2757,56 @@ begin
             varEmpty, varNull : Exit(vrEqual);
          end;
       end;
+      varDouble : begin
+         case VarType(right) of
+            varDouble : Exit(CompareDoubles(TVarData(left).VDouble, TVarData(right).VDouble));
+            varInt64 : Exit(CompareDoubles(TVarData(left).VDouble, TVarData(right).VInt64));
+            varUString : Exit(CompareDoubleToString(TVarData(left).VDouble, String(TVarData(right).VUString)));
+            varDate : Exit(CompareDoubles(TVarData(left).VDouble, TVarData(right).VDate));
+         end;
+         if VarIsArray(right) then
+            Exit(vrNotEqual)
+         else Exit(VarCompareValue(left, right));
+      end;
+      varInt64 :
+         Exit(CompareInt64ToVar(TVarData(left).VInt64, right));
+      varUString : begin
+         case VarType(right) of
+            varDouble : Exit(CompareStringToDouble(String(TVarData(left).VUString), TVarData(right).VDouble));
+            varInt64 : Exit(CompareStringToInt64(String(TVarData(left).VUString), TVarData(right).VInt64));
+            varUString : Exit(CompareStrings(String(TVarData(left).VUString), String(TVarData(right).VUString)));
+            varDate : Exit(CompareStringToDouble(String(TVarData(left).VUString), TVarData(right).VDate));
+         end;
+         if VarIsArray(right) then
+            Exit(vrNotEqual)
+         else Exit(VarCompareValue(left, right));
+      end;
+      varDate : begin
+         case VarType(right) of
+            varDouble : Exit(CompareDoubles(TVarData(left).VDate, TVarData(right).VDouble));
+            varInt64 : Exit(CompareDoubles(TVarData(left).VDate, TVarData(right).VInt64));
+            varUString : Exit(CompareDoubleToString(TVarData(left).VDate, String(TVarData(right).VUString)));
+         else
+            if VarIsArray(right) then
+               Exit(vrNotEqual)
+            else Exit(VarCompareValue(left, right));
+         end;
+      end;
+   else
+      if VarIsArray(left) then begin
+         if VarIsArray(right) then
+            Exit(VarCompareValue(left, right))
+         else Exit(vrNotEqual);
+      end;
    end;
-   if VarType(right) = varUnknown then
-      Result := CompareVarToUnknown(left, IUnknown(TVarData(right).VUnknown))
-   else Result := VarCompareValue(left, right);
+   case VarType(right) of
+      varUnknown :
+         Result := CompareVarToUnknown(left, IUnknown(TVarData(right).VUnknown));
+   else
+      if VarIsArray(right) then
+         Result := vrNotEqual
+      else Result := VarCompareValue(left, right);
+   end;
 end;
 
 // VarSetNull
@@ -2569,7 +2898,6 @@ begin
    VarClearSafe(dest);
 
    TVarData(dest).VType := varInt64;
-   TVarData(dest).VInt64 := 0;
 end;
 
 // VarSetDefaultDouble
@@ -2579,7 +2907,6 @@ begin
    VarClearSafe(dest);
 
    TVarData(dest).VType := varDouble;
-   TVarData(dest).VDouble := 0;
 end;
 
 // VarSetDefaultString
@@ -3160,11 +3487,18 @@ end;
 // AcquireUnifier
 //
 function AcquireUnifier : TStringUnifier;
+var
+   p : Pointer;
 begin
+   Result := nil;
    repeat
-      Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[0], nil, vUnifiedStrings[0]));
+      p := vUnifiedStrings[0];
+      if p <> nil then
+         Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[0], nil, p));
       if Result <> nil then Exit;
-      Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[1], nil, vUnifiedStrings[1]));
+      p := vUnifiedStrings[1];
+      if p <> nil then
+         Result := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[1], nil, p));
       if Result <> nil then Exit;
       Sleep(0);
    until False;
@@ -3229,11 +3563,15 @@ function TidyStringsUnifier : Integer;
 var
    i : Integer;
    su : array [0..High(vUnifiedStrings)] of TStringUnifier;
+   p : Pointer;
 begin
    Result := 0;
    for i := Low(vUnifiedStrings) to High(vUnifiedStrings) do begin
       repeat
-         su[i] := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[i], nil, vUnifiedStrings[i]));
+         p := vUnifiedStrings[i];
+         if p <> nil then
+            su[i] := TStringUnifier(InterlockedCompareExchangePointer(vUnifiedStrings[i], nil, p))
+         else su[i] := nil;
       until su[i] <> nil;
       Result := Result + su[i].FCount;
       su[i].Clear;
@@ -3370,28 +3708,6 @@ begin
       Inc(p2);
    end;
    Result:=0;
-end;
-
-// AsciiCompareText
-//
-function AsciiCompareText(p : PAnsiChar; const s : RawByteString) : Integer;
-var
-   n : Integer;
-begin
-   n:=Length(s);
-   if n>0 then
-      Result:=AsciiCompareLen(p, Pointer(s), n)
-   else Result:=0;
-   if Result=0 then
-      if p[n]<>#0 then
-         Result:=1;
-end;
-
-// AsciiSameText
-//
-function AsciiSameText(p : PAnsiChar; const s : RawByteString) : Boolean;
-begin
-   Result:=(AsciiCompareText(p, s)=0);
 end;
 
 // PosA
@@ -3738,6 +4054,25 @@ begin
    end;
 end;
 
+// StrCountString
+//
+function StrCountString(const haystack, needle : String) : Integer;
+var
+   p, n : Integer;
+begin
+   Result := 0;
+   if (haystack = '') or (needle = '') then Exit;
+   n := Length(needle);
+   p := 1;
+   while True do begin
+      p := PosEx(needle, haystack, p);
+      if p > 0 then begin
+         p := p + n;
+         Inc(Result);
+      end else Break;
+   end;
+end;
+
 // StrCountChar
 //
 function StrCountChar(const aStr : String; c : Char) : Integer;
@@ -3748,6 +4083,19 @@ begin
    for i:=1 to Length(aStr) do
       if aStr[i]=c then
          Inc(Result);
+end;
+
+// StrCountStartChar
+//
+function StrCountStartChar(const aStr : String; c : Char) : Integer;
+var
+   i : Integer;
+begin
+   Result:=0;
+   for i:=1 to Length(aStr) do
+      if aStr[i]=c then
+         Inc(Result)
+      else Break;
 end;
 
 // WhichPowerOfTwo
@@ -4736,6 +5084,19 @@ end;
 
 // StoreUTF8Data
 //
+procedure TWriteOnlyBlockStream.StoreData(var dest : UnicodeString);
+begin
+   if FTotalSize > 0 then begin
+
+      Assert((FTotalSize and 1) = 0);
+      SetLength(dest, FTotalSize div SizeOf(WideChar));
+      StoreData(Pointer(dest)^);
+
+   end else dest := '';
+end;
+
+// StoreUTF8Data
+//
 procedure TWriteOnlyBlockStream.StoreUTF8Data(destStream : TStream);
 var
    buf : UTF8String;
@@ -4806,35 +5167,35 @@ var
 begin
    Inc(FTotalSize, count);
 
-   fraction:=cWriteOnlyBlockStreamBlockSize-FBlockRemaining^;
-   if count>fraction then begin
+   fraction := cWriteOnlyBlockStreamBlockSize-FBlockRemaining^;
+   if count > fraction then begin
       // does not fit in current block
       // was current block started?
-      if FBlockRemaining^>0 then begin
+      if FBlockRemaining^ > 0 then begin
          WriteSpanning(source, fraction);
          Dec(count, fraction);
-         source:=@source[fraction];
+         source := @source[fraction];
       end;
-      if count>cWriteOnlyBlockStreamBlockSize div 2 then begin
+      if count > cWriteOnlyBlockStreamBlockSize div 2 then begin
          WriteLarge(source, count);
          Exit;
       end;
    end;
 
    // if we reach here, everything fits in current block
-   dest:=@PByteArray(@FCurrentBlock[2])[FBlockRemaining^];
+   dest := @PByteArray(@FCurrentBlock[2])[FBlockRemaining^];
    Inc(FBlockRemaining^, count);
    {$ifdef WIN32}
    case Cardinal(count) of
       0 : ;
-      1 : dest[0]:=source[0];
-      2 : PWord(dest)^:=PWord(source)^;
-      3 : PThreeBytes(dest)^:=PThreeBytes(source)^;
-      4 : PCardinal(dest)^:=PCardinal(source)^;
-      5 : PFiveBytes(dest)^:=PFiveBytes(source)^;
-      6 : PSixBytes(dest)^:=PSixBytes(source)^;
-      7 : PSevenBytes(dest)^:=PSevenBytes(source)^;
-      8 : PInt64(dest)^:=PInt64(source)^;
+      1 : dest[0] := source[0];
+      2 : PWord(dest)^ := PWord(source)^;
+      3 : PThreeBytes(dest)^ := PThreeBytes(source)^;
+      4 : PCardinal(dest)^ := PCardinal(source)^;
+      5 : PFiveBytes(dest)^ := PFiveBytes(source)^;
+      6 : PSixBytes(dest)^ := PSixBytes(source)^;
+      7 : PSevenBytes(dest)^ := PSevenBytes(source)^;
+      8 : PInt64(dest)^ := PInt64(source)^;
    else
       System.Move(source^, dest^, count);
    end;
@@ -4888,6 +5249,13 @@ begin
    WriteBuf(@i, 4);
 end;
 
+// WriteInt64
+//
+procedure TWriteOnlyBlockStream.WriteInt64(const i : Int64);
+begin
+   WriteBuf(@i, 8);
+end;
+
 // WriteDWord
 //
 procedure TWriteOnlyBlockStream.WriteDWord(const dw : DWORD);
@@ -4900,6 +5268,13 @@ end;
 procedure TWriteOnlyBlockStream.WriteQWord(const qw : UInt64);
 begin
    WriteBuf(@qw, 8);
+end;
+
+// WriteDouble
+//
+procedure TWriteOnlyBlockStream.WriteDouble(const d : Double);
+begin
+   WriteBuf(@d, 8);
 end;
 
 // WriteP
@@ -5038,20 +5413,14 @@ end;
 //
 function TWriteOnlyBlockStream.ToString : String;
 begin
-   Result := String(ToUnicodeString);
+   StoreData(Result);
 end;
 
 // ToUnicodeString
 //
 function TWriteOnlyBlockStream.ToUnicodeString : UnicodeString;
 begin
-   if FTotalSize>0 then begin
-
-      Assert((FTotalSize and 1) = 0);
-      SetLength(Result, FTotalSize div SizeOf(WideChar));
-      StoreData(Result[1]);
-
-   end else Result:='';
+   StoreData(Result);
 end;
 
 // ToUTF8String
@@ -5222,17 +5591,58 @@ end;
 // ------------------ TSimpleHash<T> ------------------
 // ------------------
 
+// TransferSimpleHashBuckets
+//
+procedure TransferSimpleHashBuckets(const src, dest; nbSrcBuckets, nbDestBuckets, bucketSize : Integer);
+var
+   ptrOld, ptrNew : IntPtr;
+   destMask : Integer;
+   i, j : Integer;
+begin
+   ptrOld := IntPtr(@src);
+   destMask := nbDestBuckets - 1;
+   for i := nbSrcBuckets downto 1 do begin
+      if PCardinal(ptrOld)^ <> 0 then begin
+         j := PCardinal(ptrOld)^ and destMask;
+         ptrNew := IntPtr(@dest) + j * bucketSize;
+         while PCardinal(ptrNew)^ <> 0 do begin
+            if j = destMask then begin
+               j := 0;
+               ptrNew := IntPtr(@dest);
+            end else begin
+               Inc(j);
+               Inc(ptrNew, bucketSize);
+            end;
+         end;
+         j := bucketSize;
+         while j >= 8 do begin
+            PUInt64(ptrNew)^ := PUInt64(ptrOld)^;
+            PUInt64(ptrOld)^ := 0;
+            Inc(ptrNew, 8);
+            Inc(ptrOld, 8);
+            Dec(j, 8);
+         end;
+         if j = 4 then begin
+            PUInt32(ptrNew)^ := PUInt32(ptrOld)^;
+            PUInt32(ptrOld)^ := 0;
+            Inc(ptrOld, 4);
+         end;
+      end else Inc(ptrOld, bucketSize);
+   end;
+end;
+
 // Grow
 //
 procedure TSimpleHash<T>.Grow(capacityPreAdjusted : Boolean);
 var
    i, j, n : Integer;
-   hashCode : Integer;
+   h : Cardinal;
    {$IFDEF DELPHI_XE3}
    oldBuckets : array of TSimpleHashBucket<T>;
    {$ELSE}
    oldBuckets : TSimpleHashBucketArray<T>;
    {$ENDIF}
+   ptrOld, ptrNew, p : IntPtr;
 begin
    if not capacityPreAdjusted then begin
       if FCapacity = 0 then
@@ -5240,6 +5650,11 @@ begin
       else FCapacity := FCapacity*2;
    end;
    FGrowth := (FCapacity*11) div 16;
+
+   if FBuckets = nil then begin
+      SetLength(FBuckets, FCapacity);
+      Exit;
+   end;
 
    {$IFDEF DELPHI_XE3}
    SetLength(oldBuckets, Length(FBuckets));
@@ -5252,14 +5667,11 @@ begin
    FBuckets := nil;
    SetLength(FBuckets, FCapacity);
 
-   n:=FCapacity-1;
-   for i:=0 to High(oldBuckets) do begin
-      if oldBuckets[i].HashCode=0 then continue;
-      j:=(oldBuckets[i].HashCode and (FCapacity-1));
-      while FBuckets[j].HashCode<>0 do
-         j:=(j+1) and n;
-      FBuckets[j]:=oldBuckets[i];
-   end;
+   TransferSimpleHashBuckets(
+      oldBuckets[0], FBuckets[0],
+      Length(oldBuckets), FCapacity,
+      SizeOf(TSimpleHashBucket<T>)
+   );
 end;
 
 // LinearFind
@@ -5382,18 +5794,18 @@ end;
 
 // Enumerate
 //
-procedure TSimpleHash<T>.Enumerate(callBack : TSimpleHashFunc<T>);
+procedure TSimpleHash<T>.Enumerate(const callBack : TSimpleHashFunc<T>);
 var
    i, initialCount : Integer;
 begin
    if FCount = 0 then Exit;
    initialCount := FCount;
-   for i:=0 to High(FBuckets) do begin
-      if FBuckets[i].HashCode<>0 then begin
-         case callBack(FBuckets[i].Value) of
+   for i := 0 to High(FBuckets) do begin
+      with FBuckets[i] do if HashCode <> 0 then begin
+         case callBack(Value) of
             shaRemove : begin
-               FBuckets[i].HashCode:=0;
-               FBuckets[i].Value:=Default(T);
+               HashCode := 0;
+               Value := Default(T);
                Dec(FCount);
             end;
             shaAbort : break;
@@ -5440,14 +5852,31 @@ begin
    end;
 end;
 
+// PreallocateCapacity
+//
+procedure TSimpleHash<T>.PreallocateCapacity(newCapacity : Integer);
+var
+   cap : Integer;
+begin
+   cap := FCapacity;
+   if cap = 0 then
+      cap := cSimpleHashMinCapacity;
+   while cap < newCapacity do
+      cap := 2*cap;
+   FCapacity := cap;
+   Grow(True);
+end;
+
 // HashBucketValue
 //
 function TSimpleHash<T>.HashBucketValue(index : Integer; var anItem : T) : Boolean;
 begin
-   if FBuckets[index].HashCode <> 0 then begin
-      anItem := FBuckets[index].Value;
-      Result := True;
-   end else Result := False;
+   with FBuckets[index] do begin
+      if HashCode <> 0 then begin
+         anItem := Value;
+         Result := True;
+      end else Result := False;
+   end;
 end;
 
 // ------------------
@@ -5529,6 +5958,13 @@ begin
    for i:=0 to Count-1 do
       if callBack(FItems[i])=csAbort then
          Break;
+end;
+
+// ItemPtr
+//
+function TSimpleList<T>.ItemPtr(idx : Integer) : PItemPtr;
+begin
+   Result := @FItems[idx];
 end;
 
 // Grow
@@ -5871,7 +6307,9 @@ end;
 //
 function TNameObjectHash.GetIndex(const aName : String) : Integer;
 begin
-   Result:=GetHashedIndex(aName, HashName(aName));
+   if Count = 0 then
+      Result := -1
+   else Result := GetHashedIndex(aName, HashName(aName));
 end;
 
 // GetHashedObjects
@@ -5890,7 +6328,9 @@ end;
 //
 function TNameObjectHash.GetObjects(const aName : String) : TObject;
 begin
-   Result:=GetHashedObjects(aName, HashName(aName));
+   if Count = 0 then
+      Result := nil
+   else Result := GetHashedObjects(aName, HashName(aName));
 end;
 
 // SetHashedObjects
@@ -6139,7 +6579,7 @@ begin
    {$else}
    p:=PInteger(NativeInt(Self)+InstanceSize-hfFieldSize+hfMonitorOffset);
    {$endif}
-   Result:=InterlockedIncrement(p^);
+   Result := AtomicIncrement(p^);
 end;
 
 // DecRefCount
@@ -6156,36 +6596,41 @@ begin
    if p^=0 then begin
       Destroy;
       Result:=0;
-   end else Result:=InterlockedDecrement(p^);
+   end else Result := AtomicDecrement(p^);
 end;
 
 // GetRefCount
 //
 function TRefCountedObject.GetRefCount : Integer;
+ {$ifdef USE_MONITOR_FOR_REFCOUNT}
 var
    p : PInteger;
 begin
-   {$ifdef FPC}
-   p:=@FRefCount;
-   {$else}
    p:=PInteger(NativeInt(Self)+InstanceSize-hfFieldSize+hfMonitorOffset);
-   {$endif}
    Result:=p^;
 end;
+{$else}
+begin
+   Result := FRefCount;
+end;
+{$endif}
 
 // SetRefCount
 //
 procedure TRefCountedObject.SetRefCount(n : Integer);
+{$ifdef USE_MONITOR_FOR_REFCOUNT}
 var
    p : PInteger;
 begin
-   {$ifdef FPC}
-   p:=@FRefCount;
-   {$else}
    p:=PInteger(NativeInt(Self)+InstanceSize-hfFieldSize+hfMonitorOffset);
-   {$endif}
    p^:=n;
 end;
+{$else}
+begin
+   FRefCount := n;
+end;
+{$endif}
+
 
 // ------------------
 // ------------------ TSimpleObjectObjectHash<T1, T2> ------------------
@@ -6320,6 +6765,43 @@ begin
    FCapacity:=0;
    FGrowth:=0;
    SetLength(FBuckets, 0);
+end;
+
+// ------------------
+// ------------------ TThread<T> ------------------
+// ------------------
+
+// Create
+//
+constructor TThread<T>.Create(const anObj : T);
+begin
+   inherited Create;
+   FLock := TdwsCriticalSection.Create;
+   FValue := anObj;
+end;
+
+// Destroy
+//
+destructor TThread<T>.Destroy;
+begin
+   inherited;
+   FLock.Free;
+   FValue.Free;
+end;
+
+// Lock
+//
+function TThread<T>.Lock : T;
+begin
+   FLock.Enter;
+   Result := FValue;
+end;
+
+// Unlock
+//
+procedure TThread<T>.Unlock;
+begin
+   FLock.Leave;
 end;
 
 // ------------------
@@ -6509,8 +6991,8 @@ end;
 //
 procedure TClassCloneConstructor<T>.Initialize(aTemplate : T);
 begin
-   FTemplate:=aTemplate;
-   FSize:= FTemplate.InstanceSize;
+   FTemplate := aTemplate;
+   FSize := FTemplate.InstanceSize;
 end;
 
 // Finalize
@@ -6518,7 +7000,7 @@ end;
 procedure TClassCloneConstructor<T>.Finalize;
 begin
    FTemplate.Free;
-   TObject(FTemplate):=nil; // D2010 bug workaround
+   TObject(FTemplate) := nil; // D2010 bug workaround
 end;
 
 // Create
@@ -7376,6 +7858,96 @@ begin
    end;
 end;
 
+// SwapInt64
+//
+procedure SwapInt64(var a, b : Int64);
+var
+   buf : Int64;
+begin
+   buf := a;
+   a := b;
+   b := buf;
+end;
+
+// SwapDoubles
+//
+procedure SwapDoubles(var a, b : Double);
+var
+   buf : Double;
+begin
+   buf := a;
+   a := b;
+   b := buf;
+end;
+
+// SwapPointers
+//
+procedure SwapPointers(var a, b : Pointer); inline;
+var
+   buf : Pointer;
+begin
+   buf := a;
+   a := b;
+   b := buf;
+end;
+
+// ------------------
+// ------------------ TClassInstanceTemplate<T> ------------------
+// ------------------
+
+// Initialize
+//
+procedure TClassInstanceTemplate<T>.Initialize;
+begin
+   FTemplate := T.NewInstance;
+   FPool := nil;
+end;
+
+// Finalize
+//
+procedure TClassInstanceTemplate<T>.Finalize;
+begin
+   if FTemplate <> nil then begin
+      TObject(FTemplate).FreeInstance;
+      FTemplate := nil;
+   end;
+   if FPool <> nil then begin
+      TObject(FPool).FreeInstance;
+      FPool := nil;
+   end;
+end;
+
+// Initialized
+//
+function TClassInstanceTemplate<T>.Initialized : Boolean;
+begin
+   Result := FTemplate <> nil;
+end;
+
+// CreateInstance
+//
+function TClassInstanceTemplate<T>.CreateInstance : T;
+begin
+   Result := FPool;
+   if Result <> nil then begin
+      if InterlockedCompareExchangePointer(FPool, nil, Pointer(Result)) <> Pointer(Result) then
+         Result := nil;
+   end;
+   if Result = nil then
+      Result := GetMemory(T.InstanceSize);
+   System.Move(Pointer(FTemplate)^, Pointer(Result)^, T.InstanceSize);
+end;
+
+// ReleaseInstance
+//
+procedure TClassInstanceTemplate<T>.ReleaseInstance(instance : T);
+begin
+   if FPool <> nil then
+      FreeMemory(Pointer(instance))
+   else if InterlockedCompareExchangePointer(FPool, Pointer(instance), nil) <> nil then
+      FreeMemory(Pointer(instance));
+end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -7405,8 +7977,9 @@ initialization
 finalization
 
    FinalizeStringsUnifier;
-   TSimpleIntegerStack.vTemplate.Free;
-   TObject(vWOBSPool).Free;
+
+   FreeAndNil(TSimpleIntegerStack.vTemplate);
+   FreeAndNil(TObject(vWOBSPool));
 
 end.
 

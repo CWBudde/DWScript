@@ -49,6 +49,7 @@ type
 
          procedure VariantState(const index : TGUID; var result : Variant);
 
+         function BooleanStateDef(const index : TGUID; const default : Boolean) : Boolean;
          function IntegerStateDef(const index : TGUID; const default : Integer) : Integer;
          function StringStateDef(const index : TGUID; const default : String) : String;
 
@@ -138,6 +139,23 @@ begin
    else VarClearSafe(result);
 end;
 
+// BooleanStateDef
+//
+function TdwsCustomStates.BooleanStateDef(const index : TGUID; const default : Boolean) : Boolean;
+var
+   s : TdwsCustomState;
+begin
+   s.Key:=index;
+   if Match(s) then begin
+      case VarType(s.Value) of
+         varBoolean : Result := TVarData(s.Value).VBoolean;
+         varNull, varEmpty : Result := default;
+      else
+         Result := VariantToBool(s.Value);
+      end;
+   end else Result := default;
+end;
+
 // IntegerStateDef
 //
 function TdwsCustomStates.IntegerStateDef(const index : TGUID; const default : Integer) : Integer;
@@ -145,9 +163,13 @@ var
    s : TdwsCustomState;
 begin
    s.Key:=index;
-   if Match(s) and VariantIsOrdinal(s.Value) then
-      Result:=s.Value
-   else Result:=default;
+   if Match(s) then
+      if VariantIsOrdinal(s.Value) then
+         Result := s.Value
+      else if VarIsStr(s.Value) then
+         Result := StrToIntDef(s.Value, default)
+      else Result := default
+   else Result := default;
 end;
 
 // StringStateDef
@@ -157,9 +179,11 @@ var
    s : TdwsCustomState;
 begin
    s.Key:=index;
-   if Match(s) and VariantIsString(s.Value) then
-      VariantToString(s.Value, Result)
-   else Result:=default;
+   if Match(s) then
+      if VarIsStr(s.Value) or VarIsNumeric(s.Value) then
+         VariantToString(s.Value, Result)
+      else Result := default
+   else Result := default;
 end;
 
 // AddClonedState

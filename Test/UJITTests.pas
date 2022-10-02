@@ -6,7 +6,8 @@ uses
    Classes, SysUtils, Variants,
    dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs, dwsXPlatform,
    dwsTokenizer, dwsErrors, dwsUtils, dwsSymbols, dwsFunctions, dwsUnitSymbols,
-   dwsJITFixups, dwsJITx86, dwsJITx86_64, dwsJITx86Intrinsics, dwsCompilerContext;
+   dwsJITFixups, dwsJITx86, dwsJITx86_64, dwsJITx86Intrinsics, dwsCompilerContext,
+   dwsJSONConnector;
 
 type
 
@@ -16,6 +17,7 @@ type
          FCompiler : TDelphiWebScript;
          FStream : Tx86BaseWriteOnlyStream;
          FFixups : TFixupLogic;
+         FJSON : TdwsJSONLibModule;
 
       protected
          procedure DoInclude(const scriptName : UnicodeString; var scriptSource: UnicodeString);
@@ -69,20 +71,26 @@ begin
    pasFilter:=cBaseFilter+'.pas';
    dwsFilter:=cBaseFilter+'.dws';
 
-   CollectFiles(ExtractFilePath(ParamStr(0))+'Algorithms'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'SimpleScripts'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'ArrayPass'+PathDelim, pasFilter, FTests);
+
+   CollectFiles(ExtractFilePath(ParamStr(0))+'Algorithms'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'BuildScripts'+PathDelim, dwsFilter, FTests);
+
+   CollectFiles(ExtractFilePath(ParamStr(0))+'LambdaPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'InterfacesPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'OperatorOverloadPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'OverloadsPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'HelpersPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'PropertyExpressionsPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'SetOfPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'AssociativePass'+PathDelim, pasFilter, FTests);
 //   CollectFiles(ExtractFilePath(ParamStr(0))+'GenericsPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'InnerClassesPass'+PathDelim, pasFilter, FTests);
 
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsMath'+PathDelim, pasFilter, FTests);
-   CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsString'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsTime'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsString'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsVariant'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'FunctionsRTTI'+PathDelim, pasFilter, FTests);
 
@@ -90,6 +98,10 @@ begin
    FCompiler.OnInclude:=DoInclude;
    FCompiler.OnNeedUnit:=DoNeedUnit;
    FCompiler.Config.HintsLevel:=hlPedantic;
+   FCompiler.Config.Conditionals.Add('CONDITION');
+
+   FJSON := TdwsJSONLibModule.Create(nil);
+   FJSON.Script := FCompiler;
 
    FStream:=Tx86_Platform_WriteOnlyStream.Create;
    FFixups:=TFixupLogic.Create;
@@ -101,6 +113,7 @@ end;
 procedure TJITTests.TearDown;
 begin
    FStream.Free;
+   FJSON.Free;
    FCompiler.Free;
    FFixups.Free;
    FTests.Free;
@@ -190,8 +203,7 @@ begin
          source.LoadFromFile(FTests[i]);
 
          if    (Pos('Algorithms', FTests[i])>1)
-            or (Pos('Functions', FTests[i])>1)
-            or (Pos('Lambda', FTests[i])>1) then
+            or (Pos('Functions', FTests[i])>1) then
             FCompiler.Config.HintsLevel:=hlStrict
          else FCompiler.Config.HintsLevel:=hlPedantic;
 
@@ -206,7 +218,7 @@ begin
             continue;
          end;
 
-         OutputDebugString(FTests[i]);
+         //OutputDebugString(FTests[i]);
 
          try
             jit:={$ifdef WIN32} TdwsJITx86 {$endif}{$ifdef WIN64} TdwsJITx86_64 {$endif}.Create;
@@ -427,7 +439,7 @@ end;
 //
 procedure TJITTests.ExecutionOptimized;
 begin
-   FCompiler.Config.CompilerOptions:=[coOptimize, coAssertions];
+   FCompiler.Config.CompilerOptions := cDefaultCompilerOptions + [coOptimize, coAssertions];
    Execution;
 end;
 

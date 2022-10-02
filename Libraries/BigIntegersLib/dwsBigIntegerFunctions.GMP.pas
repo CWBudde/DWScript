@@ -38,7 +38,7 @@ type
          constructor Create;
 
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
-         procedure InitData(const data : TData; offset : Integer); override;
+         procedure InitDataContext(const data : IDataContext; offset : NativeInt); override;
    end;
 
    IdwsBigInteger = interface
@@ -513,11 +513,11 @@ begin
    Result:=(typSym<>nil) and (typSym.UnAliasedType.ClassType=TBaseBigIntegerSymbol);
 end;
 
-// InitData
+// InitDataContext
 //
-procedure TBaseBigIntegerSymbol.InitData(const data : TData; offset : Integer);
+procedure TBaseBigIntegerSymbol.InitDataContext(const data : IDataContext; offset : NativeInt);
 begin
-   VarCopySafe(data[offset], IUnknown(nil));
+   data.SetNilInterface(offset);
 end;
 
 // ------------------
@@ -544,7 +544,7 @@ end;
 //
 function TBigIntegerWrapper._Release: Integer;
 begin
-   Result := InterlockedDecrement(FRefCount);
+   Result := AtomicDecrement(FRefCount);
    if Result = 0 then
       vPool.Push(Self);
 end;

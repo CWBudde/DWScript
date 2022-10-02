@@ -43,7 +43,8 @@ type
          function GetIsGeneric : Boolean; override;
 
       public
-         procedure InitData(const data : TData; offset : Integer); override;
+         procedure InitDataContext(const data : IDataContext; offset : NativeInt); override;
+
          function DoIsOfType(typSym : TTypeSymbol) : Boolean; override;
          function IsCompatible(typSym : TTypeSymbol) : Boolean; override;
 
@@ -241,21 +242,23 @@ var
    context : TSpecializationContext;
    sig, n : String;
    i, k : Integer;
+   selfRef : Boolean;
 begin
    sig := Signature(values);
    for i := 0 to High(FSpecializations) do
       if FSpecializations[i].Signature = sig then
          Exit(FSpecializations[i].Specialization);
 
+   selfRef := (values.Count = Parameters.Count);
    n := Name + '<';
    for i := 0 to values.Count-1 do begin
       if i > 0 then
          n := n + ',';
       n := n + values.Symbols[i].Name;
+      if selfRef and (values.Symbols[i].Name <> Parameters.Parameters[i].Name) then
+         selfRef := False;
    end;
    n := n + '>';
-
-   // TODO support self-references
 
    k := Length(FSpecializations);
    SetLength(FSpecializations, k+1);
@@ -270,6 +273,7 @@ begin
       FSpecializations[k].SpecializedObjects
    );
    try
+      context.BaseGenericSymbol := Self;
       context.AcquireSymbol := AcquireSymbol;
       for i := 0 to FParameters.Count-1 do
          FParameters.Parameters[i].CheckConstraints(context);
@@ -282,6 +286,11 @@ begin
                FInternalTypes.Remove(Result);
             FSpecializations[k].Specialization := Result;
          end;
+      end else if selfRef then begin
+         Result := aContext.Table.FindTypeLocal(n);
+         Assert(Result <> nil, 'Unsupported generic reference to ' + n);
+         Result.IncRefCount;
+         FSpecializations[k].Specialization := Result;
       end else Result := nil;
    finally
       context.Free;
@@ -501,9 +510,9 @@ end;
 // ------------------ TGenericTypeSymbol ------------------
 // ------------------
 
-// InitData
+// InitDataContext
 //
-procedure TGenericTypeSymbol.InitData(const data : TData; offset : Integer);
+procedure TGenericTypeSymbol.InitDataContext(const data : IDataContext; offset : NativeInt);
 begin
    // nothing
 end;

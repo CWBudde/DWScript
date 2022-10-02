@@ -55,7 +55,7 @@ type
                             const params : TParamArray; const funcType: String;
                             const flags : TInternalFunctionFlags;
                             compositeSymbol : TCompositeTypeSymbol;
-                            const helperName : String); override;
+                            const helperName, deprecatedMsg : String); override;
          function MagicFuncExprClass : TMagicFuncExprClass; virtual; abstract;
          procedure Call(exec: TdwsProgramExecution; func: TFuncSymbol); override; final;
 
@@ -170,6 +170,7 @@ type
          FOnFastEvalBoolean : TMethodFastEvalBooleanEvent;
          FOnFastEvalFloat : TMethodFastEvalFloatEvent;
          FOnFastEvalNoResult : TMethodFastEvalNoResultEvent;
+         FOnFastEvalScriptObj : TMethodFastEvalScriptObjEvent;
 
       public
          destructor Destroy; override;
@@ -184,6 +185,7 @@ type
          property OnFastEvalBoolean : TMethodFastEvalBooleanEvent read FOnFastEvalBoolean write FOnFastEvalBoolean;
          property OnFastEvalFloat : TMethodFastEvalFloatEvent read FOnFastEvalFloat write FOnFastEvalFloat;
          property OnFastEvalNoResult : TMethodFastEvalNoResultEvent read FOnFastEvalNoResult write FOnFastEvalNoResult;
+         property OnFastEvalScriptObj : TMethodFastEvalScriptObjEvent read FOnFastEvalScriptObj write FOnFastEvalScriptObj;
    end;
 
    // TMagicStaticMethodSymbol
@@ -303,6 +305,15 @@ type
          function EvalAsFloat(exec : TdwsExecution) : Double; override;
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
          procedure EvalAsString(exec : TdwsExecution; var result : String); override;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
+         procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); override;
+   end;
+
+   TMagicMethodScriptObjExpr = class (TMagicMethodExpr)
+      public
+         procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+         procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
+         procedure EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj); override;
    end;
 
    TMagicMethodIntegerExpr = class (TMagicMethodExpr)
@@ -441,7 +452,8 @@ procedure RegisterInternalFloatFunction(InternalFunctionClass: TInternalMagicFlo
       const flags : TInternalFunctionFlags = []; const helperName : String = '');
 procedure RegisterInternalStringFunction(InternalFunctionClass: TInternalMagicStringFunctionClass;
       const FuncName: String; const FuncParams: array of String;
-      const flags : TInternalFunctionFlags = []; const helperName : String = '');
+      const flags : TInternalFunctionFlags = []; const helperName : String = '';
+      const deprecatedMsg : String = '');
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -493,9 +505,10 @@ end;
 //
 procedure RegisterInternalStringFunction(InternalFunctionClass: TInternalMagicStringFunctionClass;
       const FuncName: String; const FuncParams: array of String;
-      const flags : TInternalFunctionFlags = []; const helperName : String = '');
+      const flags : TInternalFunctionFlags = []; const helperName : String = '';
+      const deprecatedMsg : String = '');
 begin
-   RegisterInternalFunction(InternalFunctionClass, FuncName, FuncParams, SYS_STRING, flags, helperName);
+   RegisterInternalFunction(InternalFunctionClass, FuncName, FuncParams, SYS_STRING, flags, helperName, deprecatedMsg);
 end;
 
 // ------------------
@@ -569,7 +582,7 @@ constructor TInternalMagicFunction.Create(table : TSymbolTable;
       const funcName : String; const params : TParamArray; const funcType : String;
       const flags : TInternalFunctionFlags;
       compositeSymbol : TCompositeTypeSymbol;
-      const helperName : String);
+      const helperName, deprecatedMsg : String);
 var
    sym : TMagicFuncSymbol;
    ssym : TMagicStaticMethodSymbol;
@@ -588,7 +601,9 @@ begin
       Assert(helperName=''); // unsupported
       Self.FuncSymbol := ssym;
       if iffDeprecated in flags then
-         ssym.DeprecatedMessage := MSG_DeprecatedEmptyMsg;
+         if deprecatedMsg <> '' then
+            ssym.DeprecatedMessage := deprecatedMsg
+         else ssym.DeprecatedMessage := MSG_DeprecatedEmptyMsg;
    end else begin
       sym:=TMagicFuncSymbol.Generate(table, funcName, params, funcType);
       sym.params.AddParent(table);
@@ -600,7 +615,9 @@ begin
       if helperName<>'' then
          CompilerUtils.AddProcHelper(helperName, table, sym, nil);
       if iffDeprecated in flags then
-         sym.DeprecatedMessage := MSG_DeprecatedEmptyMsg;
+         if deprecatedMsg <> '' then
+            sym.DeprecatedMessage := deprecatedMsg
+         else sym.DeprecatedMessage := MSG_DeprecatedEmptyMsg;
    end;
 end;
 
@@ -919,6 +936,68 @@ var
 begin
    EvalAsVariant(exec, v);
    VariantToString(v, Result);
+end;
+
+// EvalAsInterface
+//
+procedure TMagicMethodExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+var
+   v : Variant;
+begin
+   EvalAsVariant(exec, v);
+   Assert(TVarData(v).VType = varUnknown);
+   result := IUnknown(TVarData(v).VUnknown);
+end;
+
+// EvalAsScriptObj
+//
+procedure TMagicMethodExpr.EvalAsScriptObj(exec : TdwsExecution; var Result : IScriptObj);
+var
+   v : Variant;
+begin
+   EvalAsVariant(exec, v);
+   Assert(TVarData(v).VType = varUnknown);
+   result := IUnknown(TVarData(v).VUnknown) as IScriptObj;
+end;
+
+// ------------------
+// ------------------ TMagicMethodScriptObjExpr ------------------
+// ------------------
+
+// EvalAsVariant
+//
+procedure TMagicMethodScriptObjExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
+var
+   intf : IScriptObj;
+begin
+   EvalAsScriptObj(exec, intf);
+   VarCopySafe(result, intf);
+end;
+
+// EvalAsInterface
+//
+procedure TMagicMethodScriptObjExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+var
+   obj : IScriptObj;
+begin
+   EvalAsScriptObj(exec, obj);
+   result := obj;
+end;
+
+// EvalAsScriptObj
+//
+procedure TMagicMethodScriptObjExpr.EvalAsScriptObj(exec : TdwsExecution; var result : IScriptObj);
+var
+   execRec : TExprBaseListExec;
+begin
+   execRec.ListRec := FArgs;
+   execRec.Exec := exec;
+   execRec.Expr := Self;
+   try
+      FMagicSymbol.OnFastEvalScriptObj(BaseExpr, execRec, result);
+   except
+      RaiseScriptError(exec);
+   end;
 end;
 
 // ------------------

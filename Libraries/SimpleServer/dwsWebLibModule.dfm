@@ -522,6 +522,36 @@ object dwsWebLib: TdwsWebLib
             Kind = mkClassProcedure
           end
           item
+            Name = 'SetStatusJSON'
+            Parameters = <
+              item
+                Name = 'status'
+                DataType = 'Integer'
+              end
+              item
+                Name = 'utf16json'
+                DataType = 'String'
+              end>
+            Attributes = [maStatic]
+            OnFastEval = dwsWebClassesWebResponseMethodsSetStatusJSONFastEval
+            Kind = mkClassProcedure
+          end
+          item
+            Name = 'SetStatusRedirect'
+            Parameters = <
+              item
+                Name = 'status'
+                DataType = 'Integer'
+              end
+              item
+                Name = 'location'
+                DataType = 'String'
+              end>
+            Attributes = [maStatic]
+            OnFastEval = dwsWebClassesWebResponseMethodsSetStatusRedirectFastEval
+            Kind = mkClassProcedure
+          end
+          item
             Name = 'SetETag'
             Parameters = <
               item
@@ -821,6 +851,16 @@ object dwsWebLib: TdwsWebLib
             Kind = mkClassProcedure
           end
           item
+            Name = 'SetKeepAlive'
+            Parameters = <
+              item
+                Name = 'keepAlive'
+                DataType = 'Boolean'
+              end>
+            OnEval = dwsWebClassesHttpQueryMethodsSetKeepAliveEval
+            Kind = mkClassProcedure
+          end
+          item
             Name = 'SetCustomHeaders'
             Parameters = <
               item
@@ -829,6 +869,48 @@ object dwsWebLib: TdwsWebLib
               end>
             Attributes = [maStatic]
             OnEval = dwsWebClassesHttpQueryMethodsSetCustomHeadersEval
+            Kind = mkClassProcedure
+          end
+          item
+            Name = 'GetKeepAlive'
+            ResultType = 'Boolean'
+            OnEval = dwsWebClassesHttpQueryMethodsGetKeepAliveEval
+            Kind = mkClassFunction
+          end
+          item
+            Name = 'SetSynchronousRequests'
+            Parameters = <
+              item
+                Name = 'val'
+                DataType = 'Boolean'
+              end>
+            Attributes = [maClassMethod, maStatic]
+            OnEval = dwsWebClassesHttpQueryMethodsSetSynchronousRequestEval
+            Visibility = cvPrivate
+            Kind = mkClassProcedure
+          end
+          item
+            Name = 'SetDisableRedirects'
+            Parameters = <
+              item
+                Name = 'val'
+                DataType = 'Boolean'
+              end>
+            Attributes = [maClassMethod, maStatic]
+            OnEval = dwsWebClassesHttpQueryMethodsSetDisableRedirectsEval
+            Visibility = cvPrivate
+            Kind = mkClassProcedure
+          end
+          item
+            Name = 'SetConnectionPool'
+            Parameters = <
+              item
+                Name = 'poolName'
+                DataType = 'String'
+              end>
+            Attributes = [maClassMethod, maStatic]
+            OnEval = dwsWebClassesHttpQueryMethodsSetConnectionPoolEval
+            Visibility = cvPrivate
             Kind = mkClassProcedure
           end>
         Properties = <
@@ -842,6 +924,27 @@ object dwsWebLib: TdwsWebLib
             Name = 'ConnectTimeoutMSec'
             DataType = 'Integer'
             WriteAccess = 'SetConnectTimeoutMSec'
+          end
+          item
+            Name = 'KeepAlive'
+            DataType = 'Boolean'
+            ReadAccess = 'GetKeepAlive'
+            WriteAccess = 'SetKeepAlive'
+          end
+          item
+            Name = 'ConnectionPool'
+            DataType = 'String'
+            WriteAccess = 'SetConnectionPool'
+          end
+          item
+            Name = 'SynchronousRequests'
+            DataType = 'Boolean'
+            WriteAccess = 'SetSynchronousRequests'
+          end
+          item
+            Name = 'DisableRedirects'
+            DataType = 'Boolean'
+            WriteAccess = 'SetDisableRedirects'
           end>
       end
       item
@@ -932,6 +1035,23 @@ object dwsWebLib: TdwsWebLib
             ResultType = 'String'
             OnEval = dwsWebClassesHttpRequestMethodsContentSubDataEval
             Kind = mkFunction
+          end
+          item
+            Name = 'GetCertificateInfo'
+            ResultType = 'HttpCertificateInfo'
+            OnEval = dwsWebClassesHttpRequestMethodsGetCertificateInfoEval
+            Kind = mkFunction
+          end>
+        Properties = <
+          item
+            Name = 'Header'
+            DataType = 'String'
+            ReadAccess = 'GetHeader'
+            Parameters = <
+              item
+                Name = 'name'
+                DataType = 'String'
+              end>
           end>
         OnCleanUp = dwsWebClassesHttpRequestCleanUp
       end
@@ -1020,6 +1140,66 @@ object dwsWebLib: TdwsWebLib
             ResultType = 'String'
             OnEval = dwsWebClassesWebServerSentEventMethodsToRawDataEval
             Kind = mkFunction
+          end>
+      end
+      item
+        Name = 'HttpCertificateInfo'
+        Fields = <
+          item
+            Name = 'FExpiry'
+            DataType = 'Integer'
+            Visibility = cvProtected
+          end
+          item
+            Name = 'FStart'
+            DataType = 'Integer'
+            Visibility = cvProtected
+          end
+          item
+            Name = 'FSubjectInfo'
+            DataType = 'String'
+            Visibility = cvProtected
+          end
+          item
+            Name = 'FIssuerInfo'
+            DataType = 'String'
+            Visibility = cvProtected
+          end
+          item
+            Name = 'FKeySize'
+            DataType = 'Integer'
+            Visibility = cvProtected
+          end>
+        Properties = <
+          item
+            Name = 'ExpiryUnixTime'
+            DataType = 'Integer'
+            Visibility = cvPublished
+            ReadAccess = 'FExpiry'
+          end
+          item
+            Name = 'StartUnixTime'
+            DataType = 'Integer'
+            Visibility = cvPublished
+            ReadAccess = 'FStart'
+          end
+          item
+            Name = 'SubjectInfo'
+            DataType = 'String'
+            Visibility = cvPublished
+            ReadAccess = 'FSubjectInfo'
+          end
+          item
+            Name = 'IssuerInfo'
+            DataType = 'String'
+            Visibility = cvPublished
+            ReadAccess = 'FIssuerInfo'
+          end
+          item
+            Name = 'KeySize'
+            DataType = 'String'
+            Visibility = cvPublished
+            ReadAccess = 'FKeySize'
           end>
       end>
     Enumerations = <
@@ -1142,6 +1322,20 @@ object dwsWebLib: TdwsWebLib
           end>
         ResultType = 'Integer'
         OnFastEval = dwsWebFunctionsPingIPv4FastEval
+      end
+      item
+        Name = 'PingIPv6'
+        Parameters = <
+          item
+            Name = 'hostName'
+            DataType = 'String'
+          end
+          item
+            Name = 'timeOutMSec'
+            DataType = 'Integer'
+          end>
+        ResultType = 'Integer'
+        OnFastEval = dwsWebFunctionsPingIPv6FastEval
       end>
     UnitName = 'System.Net'
     StaticSymbols = True

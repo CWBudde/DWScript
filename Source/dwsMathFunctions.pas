@@ -94,6 +94,10 @@ type
       procedure DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double); override;
    end;
 
+   THaversineFunc = class(TInternalMagicFloatFunction)
+      procedure DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double); override;
+   end;
+
    TFactorialFunc = class(TInternalMagicFloatFunction)
       procedure DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double); override;
    end;
@@ -325,6 +329,10 @@ function Lcm(const a, b : Int64) : Int64;
 function LeastFactor(const n : Int64) : Int64;
 function IsPrime(const n : Int64) : Boolean;
 function IsFinite(const v : Double) : Boolean;
+function SignFloat(const v : Double) : Int64;
+function SignInt64(const n : Int64) : Int64;
+
+function Haversine(lat1, lon1, lat2, lon2, r : Double) : Double;
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -403,6 +411,43 @@ end;
 function IsFinite(const v : Double) : Boolean;
 begin
    Result:=not (IsNan(v) or IsInfinite(v));
+end;
+
+// SignFloat
+//
+function SignFloat(const v : Double) : Int64;
+var
+   iv : Int64;
+begin
+   iv := PInt64(@v)^;
+   if (iv and $7FFFFFFFFFFFFFFF) = 0 then
+      Result := 0
+   else if (iv and $8000000000000000) = $8000000000000000 then
+      Result := -1
+   else Result := 1;
+end;
+
+// SignInt64
+//
+function SignInt64(const n : Int64) : Int64;
+begin
+   Result := 0;
+   if n < 0 then
+      Result := -1
+   else if n > 0 then
+      Result := 1;
+end;
+
+// Haversine
+//
+function Haversine(lat1, lon1, lat2, lon2, r : Double) : Double;
+const
+   p : Double = PI / 180;
+var
+   a : Double;
+begin
+   a := 1 - Cos((lat2 - lat1)*p) + Cos(lat1*p) * Cos(lat2*p) * (1 - Cos((lon2 - lon1)*p));
+   Result := (2 * r) * ArcSin(Sqrt(0.5 * a));
 end;
 
 { TOddFunc }
@@ -515,6 +560,13 @@ end;
 procedure THypotFunc.DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double);
 begin
    Result:=Hypot(args.AsFloat[0], args.AsFloat[1]);
+end;
+
+{ THaversineFunc }
+
+procedure THaversineFunc.DoEvalAsFloat(const args : TExprBaseListExec; var Result : Double);
+begin
+   Result := Haversine(args.AsFloat[0], args.AsFloat[1], args.AsFloat[2], args.AsFloat[3], args.AsFloat[4]);
 end;
 
 { TFactorialFunc }
@@ -677,14 +729,14 @@ end;
 
 function TSignFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
 begin
-   Result:=Sign(args.AsFloat[0]);
+   Result := SignFloat(args.AsFloat[0]);
 end;
 
 { TSignIntFunc }
 
 function TSignIntFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
 begin
-   Result:=Sign(args.AsInteger[0]);
+   Result := SignInt64(args.AsInteger[0]);
 end;
 
 { TAbsFloatFunc  }
@@ -1074,6 +1126,7 @@ initialization
    RegisterInternalFloatFunction(TArcTanhFunc, 'ArcTanh', ['v', SYS_FLOAT], [iffStateLess], 'ArcTanh');
    RegisterInternalFloatFunction(TCotanFunc, 'Cotan', ['a', SYS_FLOAT], [iffStateLess], 'Cotan');
    RegisterInternalFloatFunction(THypotFunc, 'Hypot', ['x', SYS_FLOAT, 'y', SYS_FLOAT], [iffStateLess]);
+   RegisterInternalFloatFunction(THaversineFunc, 'Haversine', ['lat1', SYS_FLOAT, 'lon1', SYS_FLOAT, 'lat2', SYS_FLOAT, 'lon2', SYS_FLOAT, 'r', SYS_FLOAT], [iffStateLess]);
    RegisterInternalFloatFunction(TFactorialFunc, 'Factorial', ['v', SYS_INTEGER], [iffStateLess], 'Factorial');
    RegisterInternalFloatFunction(TExpFunc, 'Exp', ['v', SYS_FLOAT], [iffStateLess], 'Exp');
    RegisterInternalFloatFunction(TLnFunc, 'Ln', ['v', SYS_FLOAT], [iffStateLess], 'Ln');

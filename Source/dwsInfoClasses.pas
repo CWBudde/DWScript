@@ -54,6 +54,7 @@ type
 
          function GetData : TData; virtual;
          function GetExternalObject : TObject; virtual;
+         function GetDataPtr : IDataContext; virtual;
          function GetMember(const s : String) : IInfo; virtual;
          function GetFieldMemberNames : TStrings; virtual;
          function GetMethod(const s : String) : IInfo; virtual;
@@ -91,7 +92,7 @@ type
          property ProgramInfo : TProgramInfo read FProgramInfo;
 
          class procedure SetChild(out result : IInfo; programInfo : TProgramInfo; childTypeSym : TSymbol;
-                                  const childDataPtr : IDataContext; const childDataMaster : IDataMaster = nil);
+                                  const childDataPtr : IDataContext; const childDataMaster : IDataMaster = nil); static;
       end;
 
   TInfoConst = class(TInfo)
@@ -147,11 +148,11 @@ type
 
    TTempParam = class(TParamSymbol)
       private
-         FData : TData;
+         FData : IDataContext;
          FIsVarParam : Boolean;
       public
          constructor Create(paramSym : TSymbol);
-         property Data : TData read FData;
+         property Data : IDataContext read FData;
          property IsVarParam : Boolean read FIsVarParam;
    end;
 
@@ -415,6 +416,13 @@ begin
   raise Exception.CreateFmt(RTE_InvalidOp, ['ExternalObject', FTypeSym.Caption]);
 end;
 
+// GetDataPtr
+//
+function TInfo.GetDataPtr : IDataContext;
+begin
+   Result := FDataPtr;
+end;
+
 // GetMember
 //
 function TInfo.GetMember(const s : String) : IInfo;
@@ -512,43 +520,43 @@ begin
    baseType := childTypeSym.baseType;
    baseTypeClass := baseType.ClassType;
 
-   if    (baseType is TBaseSymbol)
-      or (baseTypeClass=TEnumerationSymbol)
-      or (baseTypeClass=TSetOfSymbol) then
+   if    baseType.IsBaseType
+      or (baseTypeClass = TEnumerationSymbol)
+      or (baseTypeClass = TSetOfSymbol) then
          result := TInfoData.Create(programInfo, childTypeSym, childDataPtr,
                                     childDataMaster)
    else if childTypeSym.AsFuncSymbol<>nil then
       result := TInfoFunc.Create(programInfo, childTypeSym, childDataPtr,
                                  childDataMaster, nil, nil)
-   else if baseTypeClass=TRecordSymbol then
+   else if baseTypeClass = TRecordSymbol then
       result := TInfoRecord.Create(programInfo, childTypeSym, childDataPtr,
                                    childDataMaster)
+   else if baseTypeClass = TDynamicArraySymbol then
+      result := TInfoDynamicArray.Create(programInfo, childTypeSym, childDataPtr,
+                                          childDataMaster)
+   else if baseTypeClass = TClassSymbol then
+      result := TInfoClassObj.Create(programInfo, childTypeSym, childDataPtr,
+                                      childDataMaster)
+   else if baseTypeClass = TClassOfSymbol then
+      result := TInfoClassOf.Create(programInfo, childTypeSym, childDataPtr,
+                                     childDataMaster)
+   else if baseTypeClass = TAssociativeArraySymbol then
+      Result := TInfoAssociativeArray.Create(programInfo, childTypeSym, childDataPtr,
+                                             childDataMaster)
+   else if baseTypeClass = TInterfaceSymbol then
+      Result := TInfoInterfaceObj.Create(ProgramInfo, ChildTypeSym, childDataPtr,
+                                     ChildDataMaster)
    else if baseType is TStaticArraySymbol then begin
-      if baseType is TOpenArraySymbol then begin
+      if baseTypeClass = TOpenArraySymbol then begin
          result := TInfoOpenArray.Create(programInfo, childTypeSym, childDataPtr,
                                           childDataMaster);
       end else begin
          result := TInfoStaticArray.Create(programInfo, childTypeSym, childDataPtr,
                                             childDataMaster);
       end;
-   end else if baseTypeClass=TDynamicArraySymbol then
-      result := TInfoDynamicArray.Create(programInfo, childTypeSym, childDataPtr,
-                                          childDataMaster)
-   else if baseTypeClass=TClassSymbol then
-      result := TInfoClassObj.Create(programInfo, childTypeSym, childDataPtr,
-                                      childDataMaster)
-   else if baseTypeClass=TClassOfSymbol then
-      result := TInfoClassOf.Create(programInfo, childTypeSym, childDataPtr,
-                                     childDataMaster)
-   else if baseTypeClass = TAssociativeArraySymbol then
-      Result := TInfoAssociativeArray.Create(programInfo, childTypeSym, childDataPtr,
-                                             childDataMaster)
-   else if baseType is TConnectorSymbol then
+   end else if baseType is TConnectorSymbol then
       result := TInfoData.Create(programInfo, childTypeSym, childDataPtr,
                                     ChildDataMaster)
-   else if baseType is TInterfaceSymbol then
-      Result := TInfoInterfaceObj.Create(ProgramInfo, ChildTypeSym, childDataPtr,
-                                     ChildDataMaster)
    else Assert(False); // Shouldn't be ever executed
 end;
 
@@ -691,10 +699,13 @@ begin
 end;
 
 procedure TInfoData.SetData(const Value: TData);
+var
+   i : Integer;
 begin
   if Length(Value) <> FTypeSym.Size then
     raise Exception.CreateFmt(RTE_InvalidInputDataSize, [Length(Value), FTypeSym.Size]);
-  FDataPtr.WriteData(Value, 0, FTypeSym.Size);
+  for i := 0 to FTypeSym.Size-1 do
+    FDataPtr.AsVariant[i] := value[i];
 
   if Assigned(FDataMaster) then
   begin
@@ -764,7 +775,7 @@ function TInfoClass.GetMethod(const s: String): IInfo;
 var
   sym: TSymbol;
 begin
-  if not (FTypeSym is TClassSymbol) then
+  if not FTypeSym.IsClassSymbol then
     raise Exception.CreateFmt(RTE_NoClassNoMethod, [FTypeSym.Caption, s]);
 
   sym := TClassSymbol(FTypeSym).Members.FindSymbol(s, cvMagic);
@@ -898,8 +909,8 @@ constructor TTempParam.Create(ParamSym: TSymbol);
 begin
   inherited Create(ParamSym.Name, ParamSym.Typ);
   FIsVarParam := (ParamSym.ClassType=TVarParamSymbol);
-  SetLength(FData, Size);
-  ParamSym.Typ.InitData(FData, 0);
+  FData := TDataContext.CreateStandalone(Size);
+  ParamSym.Typ.InitDataContext(FData, 0);
 end;
 
 { TInfoFunc }
@@ -942,7 +953,7 @@ end;
 //
 function TInfoFunc.Call : IInfo;
 var
-   x : Integer;
+   x, i : Integer;
    tp : TTempParam;
    funcExpr : TFuncExprBase;
    resultDataPtr : IDataContext;
@@ -955,7 +966,7 @@ begin
       tp := TTempParam(FTempParams[x]);
       if tp.IsVarParam then begin
          FExec.Stack.Push(tp.Size);
-         FExec.Stack.WriteData(0, FExec.Stack.StackPointer-tp.Size, tp.Size, tp.Data);
+         FExec.Stack.WriteData(FExec.Stack.StackPointer-tp.Size, tp.Data, 0, tp.Size);
       end;
    end;
 
@@ -973,7 +984,7 @@ begin
                if tp.IsVarParam then begin
                   funcExpr.AddArg(TVarExpr.Create(cNullPos, tp));
                end else begin
-                  funcExpr.AddArg(TConstExpr.Create(cNullPos, tp.Typ, tp.Data, 0));
+                  funcExpr.AddArg(TConstExpr.CreateData(cNullPos, tp.Typ, tp.Data));
                end;
             end;
             funcExpr.Initialize(FExec.CompilerContext);
@@ -1017,7 +1028,8 @@ begin
       for x := FTempParams.Count - 1 downto 0 do begin
          tp := TTempParam(FTempParams[x]);
          if tp.IsVarParam then begin
-            FExec.Stack.ReadData(FExec.Stack.Stackpointer - tp.Size, 0, tp.Size, tp.Data);
+            for i := 0 to tp.Size-1 do
+               tp.Data.AsVariant[i] := FExec.Stack.Data[FExec.Stack.Stackpointer - tp.Size + i];
             FExec.Stack.Pop(tp.Size);
          end;
       end;
@@ -1052,7 +1064,7 @@ begin
             raise Exception.CreateFmt(RTE_UseParameter,
                                       [dataSym.Caption, funcSym.Caption]);
 
-         funcExpr.AddArg(TConstExpr.Create(cNullPos, dataSym.Typ, Params[x]));
+         funcExpr.AddArg(TConstExpr.CreateValue(cNullPos, dataSym.Typ, Params[x]));
       end;
       funcExpr.Initialize(FExec.CompilerContext);
       if Assigned(funcExpr.Typ) then begin
@@ -1090,8 +1102,7 @@ end;
 //
 function TInfoFunc.GetParameter(const s: String): IInfo;
 var
-   tp: TTempParam;
-   locData : IDataContext;
+   tp : TTempParam;
 begin
    if not FUsesTempParams then
       InitTempParams;
@@ -1099,8 +1110,7 @@ begin
    tp := TTempParam(FTempParams.FindSymbol(s, cvMagic));
 
    if Assigned(tp) then begin
-      FProgramInfo.Execution.DataContext_Create(tp.FData, 0, locData);
-      SetChild(Result, FProgramInfo, tp.Typ, locData);
+      SetChild(Result, FProgramInfo, tp.Typ, tp.FData);
    end else raise Exception.CreateFmt(RTE_NoParameterFound, [s, FTypeSym.Caption]);
 end;
 
@@ -1156,7 +1166,7 @@ var
 begin
    if FDataPtr.DataLength>0 then begin
       Result:=TFuncPtrExpr.Create(context, cNullPos,
-                                  TConstExpr.Create(cNullPos, FTypeSym.AsFuncSymbol, FDataPtr[0]));
+                                  TConstExpr.CreateValue(cNullPos, FTypeSym.AsFuncSymbol, FDataPtr[0]));
    end else begin
       if FForceStatic then
          cf := [cfoForceStatic]
@@ -1403,15 +1413,24 @@ end;
 // GetData
 //
 function TInfoDynamicArray.GetData : TData;
+var
+   i : Integer;
 begin
-   Result := SelfDynArray.ToData;
+   SetLength(Result, SelfDynArray.ArrayLength * SelfDynArray.ElementSize);
+   for i := 0 to High(Result) do
+      SelfDynArray.EvalAsVariant(i, Result[i]);
 end;
 
 // SetData
 //
 procedure TInfoDynamicArray.SetData(const Value: TData);
+var
+   i : Integer;
 begin
-   SelfDynArray.ReplaceData(value);
+   Assert(Length(value) mod SelfDynArray.ElementSize = 0, 'Array size mismatch');
+   SelfDynArray.ArrayLength := Length(value) div SelfDynArray.ElementSize;
+   for i := 0 to High(value) do
+      SelfDynArray.AsVariant[i] := value[i];
 end;
 
 // GetScriptObj
@@ -1577,7 +1596,6 @@ end;
 function TInfoProperty.GetParameter(const s: String): IInfo;
 var
   tp: TTempParam;
-  locData : IDataContext;
 begin
   if not Assigned(FTempParams) then
     InitTempParams;
@@ -1585,8 +1603,7 @@ begin
   tp := TTempParam(FTempParams.FindSymbol(s, cvMagic));
 
   if Assigned(tp) then begin
-    FProgramInfo.Execution.DataContext_Create(tp.FData, 0, locData);
-    SetChild(Result, FProgramInfo, tp.Typ, locData);
+    SetChild(Result, FProgramInfo, tp.Typ, tp.FData);
   end else
     raise Exception.CreateFmt(RTE_NoIndexFound, [s, FPropSym.Name]);
 end;
@@ -1620,7 +1637,7 @@ begin
     begin
       paramName := FuncParams[x].Name;
       destParam := Func.Parameter[paramName];
-      destParam.Data := TTempParam(FTempParams[x]).Data;
+      destParam.Data := TTempParam(FTempParams[x]).Data.AsPData^;
     end;
 end;
 
@@ -1720,11 +1737,11 @@ var
   locData : IDataContext;
 begin
   expr := TConnectorCallExpr.Create(cNullPos, FName,
-    TConstExpr.Create(cNullPos, FProgramInfo.CompilerContext.TypVariant, FDataPtr[0]));
+    TConstExpr.CreateValue(cNullPos, FProgramInfo.CompilerContext.TypVariant, FDataPtr[0]));
 
   try
     for x := 0 to Length(Params) - 1 do
-      expr.AddArg(TConstExpr.Create(cNullPos, FProgramInfo.CompilerContext.TypVariant, Params[x]));
+      expr.AddArg(TConstExpr.CreateValue(cNullPos, FProgramInfo.CompilerContext.TypVariant, Params[x]));
 
     if expr.AssignConnectorSym(FExec.Prog, FConnectorType) then
     begin
@@ -1807,12 +1824,14 @@ procedure TExternalVarDataMaster.Write(exec : TdwsExecution; const Data: TData);
 var
    funcExpr : TFuncExprBase;
    context : TdwsCompilerContext;
+   dc : IDataContext;
 begin
    if TExternalVarSymbol(FSym).WriteFunc<>nil then begin
       context := (exec as TdwsProgramExecution).CompilerContext;
       funcExpr := TFuncSimpleExpr.Create(context, cNullPos, TExternalVarSymbol(FSym).WriteFunc);
       try
-         funcExpr.AddArg(TConstExpr.Create(cNullPos, FSym.Typ, Data, 0));
+         exec.DataContext_Create(data, 0, dc);
+         funcExpr.AddArg(TConstExpr.CreateData(cNullPos, FSym.Typ, dc));
          if (funcExpr is TFuncExpr) then
             TFuncExpr(funcExpr).AddPushExprs(context);
          funcExpr.EvalNoResult(exec);
@@ -1840,7 +1859,7 @@ var
    baseExpr : TConstExpr;
 begin
    dataSource := nil;
-   baseExpr := TConstExpr.Create(cNullPos, FCaller.Prog.Root.SystemTable.SymbolTable.TypVariant, FBaseValue);
+   baseExpr := TConstExpr.CreateValue(cNullPos, FCaller.Prog.Root.SystemTable.SymbolTable.TypVariant, FBaseValue);
    readExpr := TConnectorReadMemberExpr.CreateNew(
       cNullPos, FName, baseExpr, TConnectorSymbol(FSym).ConnectorType
    );
@@ -1864,8 +1883,8 @@ var
    typVariant : TTypeSymbol;
 begin
    typVariant := FCaller.Prog.Root.SystemTable.SymbolTable.TypVariant;
-   baseExpr := TConstExpr.Create(cNullPos, typVariant, FBaseValue);
-   valueExpr := TConstExpr.Create(cNullPos, typVariant, Data, 0);
+   baseExpr := TConstExpr.CreateValue(cNullPos, typVariant, FBaseValue);
+   valueExpr := TConstExpr.CreateValue(cNullPos, typVariant, Data[0]);
    writeExpr := TConnectorWriteExpr.CreateNew(
       FCaller.CompilerContext, cNullPos, FName,
       baseExpr, valueExpr, TConnectorSymbol(FSym).ConnectorType

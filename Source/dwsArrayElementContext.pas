@@ -46,7 +46,6 @@ type
          procedure SetAsFloat(addr : NativeInt; const value : Double);
          function GetAsBoolean(addr : NativeInt) : Boolean;
          procedure SetAsBoolean(addr : NativeInt; const value : Boolean);
-         function GetAsString(addr : NativeInt) : String;
          procedure SetAsString(addr : NativeInt; const value : String);
          function GetAsInterface(addr : NativeInt) : IUnknown;
          procedure SetAsInterface(addr : NativeInt; const value : IUnknown);
@@ -62,26 +61,47 @@ type
          procedure EvalAsString(addr : NativeInt; var result : String);
          procedure EvalAsInterface(addr : NativeInt; var result : IUnknown);
 
+         procedure SetZeroInt64(addr : NativeInt);
+         procedure SetZeroFloat(addr : NativeInt);
+         procedure SetEmptyString(addr : NativeInt);
+         procedure SetEmptyVariant(addr : NativeInt);
+         procedure SetNullVariant(addr : NativeInt);
+         procedure SetNilInterface(addr : NativeInt);
+         procedure SetFalseBoolean(addr : NativeInt);
+
          function IsEmpty(addr : NativeInt) : Boolean;
          function VarType(addr : NativeInt) : TVarType;
 
          procedure CopyData(const destData : TData; destAddr, size : NativeInt);
+
          procedure WriteData(const src : IDataContext; size : NativeInt); overload;
-         procedure WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt); overload;
-         procedure WriteData(const srcData : TData; srcAddr, size : NativeInt); overload;
-         function SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean;
+         procedure WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt); overload;
+
+         function SameData(addr : NativeInt; const other : IDataContext; otherAddr, size : NativeInt) : Boolean; overload;
+         function SameData(const other : IDataContext) : Boolean; overload;
 
          function  IncInteger(addr : NativeInt; delta : Int64) : Int64;
 
          function  HashCode(size : NativeInt) : Cardinal;
 
+         constructor CreateEmpty;
+
       public
          constructor Create(const anArray : IScriptDynArray; anIndex : NativeInt);
 
+         class function NewInstance : TObject; override;
+         procedure FreeInstance; override;
    end;
 
-
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
 implementation
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+
+uses Variants;
 
 // ------------------
 // ------------------ TArrayElementDataContext ------------------
@@ -98,6 +118,32 @@ begin
    FIndex := anIndex;
    FElementSize := anArray.ElementSize;
    FBase := FIndex*FElementSize;
+end;
+
+// CreateEmpty
+//
+constructor TArrayElementDataContext.CreateEmpty;
+begin
+   inherited Create;
+end;
+
+// NewInstance
+//
+var
+   vArrayElementTemplate : TClassInstanceTemplate<TArrayElementDataContext>;
+class function TArrayElementDataContext.NewInstance : TObject;
+begin
+   if not vArrayElementTemplate.Initialized then
+      Result := inherited NewInstance
+   else Result := vArrayElementTemplate.CreateInstance;
+end;
+
+// FreeInstance
+//
+procedure TArrayElementDataContext.FreeInstance;
+begin
+   FArray := nil;
+   vArrayElementTemplate.ReleaseInstance(Self);
 end;
 
 // GetSelf
@@ -170,7 +216,7 @@ end;
 //
 function TArrayElementDataContext.GetAsBoolean(addr : NativeInt) : Boolean;
 begin
-   Result := FArray.AsBoolean[FIndex];
+   Result := FArray.AsBoolean[ComputeAddr(addr)];
 end;
 
 // SetAsBoolean
@@ -178,13 +224,6 @@ end;
 procedure TArrayElementDataContext.SetAsBoolean(addr : NativeInt; const value : Boolean);
 begin
    FArray.AsBoolean[ComputeAddr(addr)] := value;
-end;
-
-// GetAsString
-//
-function TArrayElementDataContext.GetAsString(addr : NativeInt) : String;
-begin
-   FArray.EvalAsString(ComputeAddr(addr), Result);
 end;
 
 // SetAsString
@@ -264,6 +303,57 @@ begin
    FArray.EvalAsInterface(ComputeAddr(addr), result);
 end;
 
+// SetZeroInt64
+//
+procedure TArrayElementDataContext.SetZeroInt64(addr : NativeInt);
+begin
+   SetAsInteger(addr, 0);
+end;
+
+// SetZeroFloat
+//
+procedure TArrayElementDataContext.SetZeroFloat(addr : NativeInt);
+begin
+   SetAsFloat(addr, 0);
+end;
+
+// SetEmptyString
+//
+procedure TArrayElementDataContext.SetEmptyString(addr : NativeInt);
+begin
+   SetAsString(addr, '');
+end;
+
+// SetEmptyVariant
+//
+procedure TArrayElementDataContext.SetEmptyVariant(addr : NativeInt);
+var
+   v : Variant;
+begin
+   SetAsVariant(addr, v);
+end;
+
+// SetNullVariant
+//
+procedure TArrayElementDataContext.SetNullVariant(addr : NativeInt);
+begin
+   SetAsVariant(addr, Null);
+end;
+
+// SetNilInterface
+//
+procedure TArrayElementDataContext.SetNilInterface(addr : NativeInt);
+begin
+   SetAsInterface(addr, nil);
+end;
+
+// SetFalseBoolean
+//
+procedure TArrayElementDataContext.SetFalseBoolean(addr : NativeInt);
+begin
+   SetAsBoolean(addr, False);
+end;
+
 // IsEmpty
 //
 function TArrayElementDataContext.IsEmpty(addr : NativeInt) : Boolean;
@@ -304,23 +394,32 @@ end;
 
 // WriteData
 //
-procedure TArrayElementDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt);
+procedure TArrayElementDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt);
 begin
    raise Exception.Create('TArrayElementDataContext.WriteData(2) not implemented');
 end;
 
-// WriteData
+// SameData
 //
-procedure TArrayElementDataContext.WriteData(const srcData : TData; srcAddr, size : NativeInt);
+function TArrayElementDataContext.SameData(addr : NativeInt; const other : IDataContext; otherAddr, size : NativeInt) : Boolean;
+var
+   p, i : NativeInt;
+   v1, v2 : Variant;
 begin
-   raise Exception.Create('TArrayElementDataContext.WriteData(3) not implemented');
+   p := ComputeAddr(0);
+   for i := 0 to size-1 do begin
+      FArray.EvalAsVariant(p + i, v1);
+      other.EvalAsVariant(otherAddr + i, v2);
+      if not DWSSameVariant(v1, v2) then Exit(False);
+   end;
+   Result := True;
 end;
 
 // SameData
 //
-function TArrayElementDataContext.SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean;
+function TArrayElementDataContext.SameData(const other : IDataContext) : Boolean;
 begin
-   raise Exception.Create('TArrayElementDataContext.SameData not implemented');
+   Result := (other.DataLength = FElementSize) and SameData(0, other, 0, FElementSize);
 end;
 
 // IncInteger
@@ -338,5 +437,19 @@ function TArrayElementDataContext.HashCode(size : NativeInt) : Cardinal;
 begin
    Result := FArray.HashCode(ComputeAddr(0), size);
 end;
+
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+initialization
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+
+   vArrayElementTemplate.Initialize;
+
+finalization
+
+   vArrayElementTemplate.Finalize;
 
 end.

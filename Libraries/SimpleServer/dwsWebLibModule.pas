@@ -19,7 +19,7 @@ unit dwsWebLibModule;
 interface
 
 uses
-   Windows, WinInet, Variants,
+   Windows, Winapi.WinInet, Winapi.WinHTTP, Variants,
    SysUtils, Classes, StrUtils,
    SynZip, SynCrtSock, SynCommons, SynWinSock,
    dwsUtils, dwsComp, dwsExprs, dwsWebEnvironment, dwsExprList, dwsSymbols,
@@ -194,9 +194,30 @@ type
       Info: TProgramInfo; ExtObject: TObject);
     function dwsWebFunctionsPingIPv4FastEval(
       const args: TExprBaseListExec): Variant;
+    procedure dwsWebClassesHttpQueryMethodsSetKeepAliveEval(Info: TProgramInfo;
+      ExtObject: TObject);
+    procedure dwsWebClassesHttpQueryMethodsGetKeepAliveEval(Info: TProgramInfo;
+      ExtObject: TObject);
+    function dwsWebFunctionsPingIPv6FastEval(
+      const args: TExprBaseListExec): Variant;
+    procedure dwsWebClassesHttpRequestMethodsGetCertificateInfoEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesHttpQueryMethodsSetSynchronousRequestEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesHttpQueryMethodsSetDisableRedirectsEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    procedure dwsWebClassesHttpQueryMethodsSetConnectionPoolEval(
+      Info: TProgramInfo; ExtObject: TObject);
+    function dwsWebClassesWebResponseMethodsSetStatusJSONFastEval(
+      baseExpr: TTypedExpr; const args: TExprBaseListExec): Variant;
+    function dwsWebClassesWebResponseMethodsSetStatusRedirectFastEval(
+      baseExpr: TTypedExpr; const args: TExprBaseListExec): Variant;
   private
     { Private declarations }
     FServer :  IWebServerInfo;
+    function GetServerEvents : IdwsHTTPServerEvents;
+    procedure CheckCookie(const name, value : String);
+
   public
     { Public declaration }
     property Server : IWebServerInfo read FServer write FServer;
@@ -206,7 +227,15 @@ implementation
 
 {$R *.dfm}
 
-uses dwsWinHTTP, dwsDynamicArrays, dwsICMP;
+uses dwsHttpRequest, dwsWinHTTP, dwsDynamicArrays, dwsICMP,
+   dwsInfo, dwsStrings, dwsWebUtils;
+
+function TdwsWebLib.GetServerEvents : IdwsHTTPServerEvents;
+begin
+   if (FServer = nil) or (FServer.ServerEvents = nil) then
+      raise Exception.Create('ServerEvents cannot be called from this context');
+   Result := FServer.ServerEvents
+end;
 
 // WebServerSentEventToRawData
 //
@@ -216,10 +245,10 @@ var
    dyn : IScriptDynArray;
    buf : String;
 begin
-   buf := obj.AsString[obj.FieldAddress('ID')];
+   obj.EvalAsString(obj.FieldAddress('ID'), buf);
    if buf <> '' then
       Result := 'id: ' + StringToUTF8(buf) + #10;
-   buf := obj.AsString[obj.FieldAddress('Name')];
+   obj.EvalAsString(obj.FieldAddress('Name'), buf);
    if buf <> '' then
       Result := Result + 'event: ' + StringToUTF8(buf) + #10;
    i := obj.AsInteger[obj.FieldAddress('Retry')];
@@ -307,222 +336,6 @@ begin
       inflateEnd(strm);
    end;
    SetString(data, PAnsiChar(Pointer(tmp)), strm.total_out);
-end;
-
-const
-   cWinHttpConnection : TGUID = '{0B47FA19-7BE9-41AE-A3BD-2C686117D669}';
-
-   cWinHttpCredentials : TGUID = '{FB60EB3D-1085-4A88-9923-DE895B5CAB76}';
-   cWinHttpIgnoreSSLCertificateErrors : TGUID = '{42AC8563-761B-4E3D-9767-A21F8F32201C}';
-   cWinHttpProxyName : TGUID = '{2449F585-D6C6-4FDC-8D86-0266E01CA99C}';
-   cWinHttpConnectTimeout : TGUID = '{8D322334-D1DD-4EBF-945F-193CFCA001FB}';
-   cWinHttpSendTimeout : TGUID = '{1DE21769-65B5-4039-BB66-62D405FB00B7}';
-   cWinHttpReceiveTimeout : TGUID = '{0D14B470-4F8A-48AE-BAD2-426E15FE4E03}';
-   cWinHttpCustomHeaders : TGUID = '{FD05B54E-FBF2-498A-BD1F-0B1F18F27A1E}';
-
-// HttpQuery
-//
-function HttpQuery(exec : TdwsProgramExecution;
-                   const method, url : RawByteString;
-                   const requestData, requestContentType : RawByteString;
-                   var replyHeaders, replyData : SockString;
-                   onProgress : TWinHttpProgress = nil;
-                   customStates : TdwsCustomStates = nil) : Integer;
-var
-   uri : TURI;
-   conn : TdwsWinHttpConnection;
-   iconn : IGetSelf;
-   unassignedVariant : Variant;
-begin
-   if not uri.From(url) then
-      raise Exception.CreateFmt('Invalid url "%s"', [url]);
-
-   if exec <> nil then
-      iconn := exec.CustomInterfaces[cWinHttpConnection] as IGetSelf;
-   if iconn = nil then begin
-      iconn := IGetSelf(TdwsWinHttpConnection.Create);
-      if exec <> nil then
-         exec.CustomInterfaces[cWinHttpConnection] := iconn;
-   end;
-
-   try
-      if (customStates = nil) and (exec <> nil) then begin
-         if exec.HasCustomStates then
-            customStates := exec.CustomStates;
-      end;
-
-      conn := iconn.GetSelf as TdwsWinHttpConnection;
-      if customStates <> nil then begin
-         conn.ConnectServer(uri, customStates.StringStateDef(cWinHttpProxyName, ''),
-                            customStates.IntegerStateDef(cWinHttpConnectTimeout, HTTP_DEFAULT_CONNECTTIMEOUT),
-                            customStates.IntegerStateDef(cWinHttpSendTimeout, HTTP_DEFAULT_SENDTIMEOUT),
-                            customStates.IntegerStateDef(cWinHttpReceiveTimeout, HTTP_DEFAULT_RECEIVETIMEOUT));
-         conn.SetIgnoreSSLErrors(customStates[cWinHttpIgnoreSSLCertificateErrors]);
-         conn.SetCredentials(customStates[cWinHttpCredentials]);
-         conn.SetCustomHeaders(customStates[cWinHttpCustomHeaders]);
-      end else begin
-         conn.ConnectServer(uri, '', HTTP_DEFAULT_CONNECTTIMEOUT, HTTP_DEFAULT_SENDTIMEOUT, HTTP_DEFAULT_RECEIVETIMEOUT);
-         conn.SetIgnoreSSLErrors(unassignedVariant);
-         conn.SetCredentials(unassignedVariant);
-         conn.SetCustomHeaders(unassignedVariant);
-      end;
-      conn.SetOnProgress(onProgress);
-
-      Result := conn.Request(uri, method, 0, '', requestData, requestContentType, replyHeaders, replyData);
-   except
-      on EWinHTTP do begin
-         if exec <> nil then
-            exec.CustomInterfaces[cWinHttpConnection] := nil;
-         raise;
-      end;
-   end;
-end;
-
-type
-   THttpRequestThread = class (TThread)
-      Method, URL : RawByteString;
-      RequestData, RequestContentType : RawByteString;
-      ResponseData : SockString;
-      RawResponseHeaders : SockString;
-      FResponseHeaders : TStrings;
-      CustomStates : TdwsCustomStates;
-      CurrentSize, ContentLength : DWORD;
-      StatusCode : Integer;
-      Error : String;
-      Completed, Released : Boolean;
-      ReleaseLock : TMultiReadSingleWrite;
-      constructor CreateQuery(const method, url : RawByteString;
-                              const requestData, requestContentType : RawByteString;
-                              const customStates : TdwsCustomStates);
-      destructor Destroy; override;
-      procedure PrepareResponseHeaders;
-      function GetResponseHeader(const name : String) : String;
-      procedure Execute; override;
-      procedure Release;
-      function Wait : THttpRequestThread;
-      procedure DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
-   end;
-
-// CreateQuery
-//
-constructor THttpRequestThread.CreateQuery(const method, url : RawByteString;
-                              const requestData, requestContentType : RawByteString;
-                              const customStates : TdwsCustomStates);
-begin
-   inherited Create;
-   Self.Method := method;
-   Self.URL := url;
-   Self.RequestData := requestData;
-   Self.RequestContentType := requestContentType;
-   Self.CustomStates := customStates;
-   FreeOnTerminate := False;
-   ReleaseLock := TMultiReadSingleWrite.Create;
-end;
-
-// Destroy
-//
-destructor THttpRequestThread.Destroy;
-begin
-   inherited;
-   ReleaseLock.Free;
-   FResponseHeaders.Free;
-   CustomStates.Free;
-end;
-
-// PrepareResponseHeaders
-//
-procedure THttpRequestThread.PrepareResponseHeaders;
-
-   procedure AddHeader(const s : String);
-   var
-      k : Integer;
-   begin
-      k := Pos(':', s);
-      if k > 0 then
-         FResponseHeaders.Add(SysUtils.TrimRight(Copy(s, 1, k-1) + '=' + SysUtils.Trim(Copy(s, k+1))));
-   end;
-
-var
-   h : String;
-   p, pn : Integer;
-begin
-   FResponseHeaders := TFastCompareTextList.Create;
-   if (RawResponseHeaders <> '') and (not Released) then begin
-      RawByteStringToScriptString(RawResponseHeaders, h);
-
-      p := 1;
-      while True do begin
-         pn := StrUtils.PosEx(#13#10, h, p);
-         if pn > 0 then begin
-            AddHeader(Copy(h, p, pn-p));
-            p := pn + 2;
-         end else break;
-      end;
-      AddHeader(Copy(h, p));
-   end;
-end;
-
-// GetResponseHeader
-//
-function THttpRequestThread.GetResponseHeader(const name : String) : String;
-begin
-   if FResponseHeaders = nil then
-      PrepareResponseHeaders;
-end;
-
-// Execute
-//
-procedure THttpRequestThread.Execute;
-begin
-   if not Released then try
-      StatusCode := HttpQuery(nil, Method, URL, RequestData, RequestContentType,
-                              RawResponseHeaders, ResponseData,
-                              DoProgress, CustomStates);
-      FreeAndNil(CustomStates);
-      RequestData := '';
-      RequestContentType := '';
-      ContentLength := Length(ResponseData);
-      CurrentSize := ContentLength;
-   except
-      on E: Exception do
-         Error := E.Message;
-   end;
-   ReleaseLock.BeginWrite;
-   Completed := True;
-   if Released then
-      FreeOnTerminate := True;
-   ReleaseLock.EndWrite;
-end;
-
-// Release
-//
-procedure THttpRequestThread.Release;
-begin
-   ReleaseLock.BeginWrite;
-   if Completed then begin
-      if not Finished then
-         WaitFor;
-      Free;
-   end else begin
-      Released := True;
-      ReleaseLock.EndWrite;
-   end;
-end;
-
-// Wait
-//
-function THttpRequestThread.Wait : THttpRequestThread;
-begin
-   if not Finished then WaitFor;
-   Result := Self;
-end;
-
-// DoProgress
-//
-procedure THttpRequestThread.DoProgress(Sender: TWinHttpAPI; CurrentSize, ContentLength: DWORD);
-begin
-   Self.CurrentSize := CurrentSize;
-   Self.ContentLength := ContentLength;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsDeleteEval(Info: TProgramInfo;
@@ -616,18 +429,32 @@ end;
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsRequestEval(
   Info: TProgramInfo; ExtObject: TObject);
 var
-   rq : THttpRequestThread;
+   rq : THttpRequest;
+   rqc : THttpRequestContainer;
    obj : IScriptObj;
 begin
    obj := TScriptObjInstance.Create(Info.Table.FindTypeSymbol('HttpRequest', cvPublic) as TClassSymbol,
                                     Info.Execution);
-   rq := THttpRequestThread.CreateQuery(
-      Info.ParamAsDataString[0], Info.ParamAsDataString[1],
-      Info.ParamAsDataString[2], Info.ParamAsDataString[3],
-      Info.Execution.CustomStates.Clone
-      );
-   obj.ExternalObject := rq;
+   rq := THttpRequest.Create;
+   rq.Method := Info.ParamAsDataString[0];
+   rq.URL := Info.ParamAsDataString[1];
+   rq.RequestData := Info.ParamAsDataString[2];
+   rq.RequestContentType := Info.ParamAsDataString[3];
+   if Info.Execution.CustomStates.BooleanStateDef(cWinHttpSynchronousRequest, False) then begin
+      rqc := THttpRequestContainer.CreateSynchronous(Info.Execution, rq);
+   end else begin
+      if Info.Execution.HasCustomStates then
+         rq.CustomStates := Info.Execution.CustomStates.Clone;
+      rqc := THttpRequestContainer.CreateAsync(rq);
+   end;
+   obj.ExternalObject := rqc;
    Info.ResultAsVariant := obj;
+end;
+
+procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetConnectionPoolEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   HttpQuerySetConnectionPool(Info.Execution, Info.ParamAsString[0]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetConnectTimeoutMSecEval(
@@ -640,6 +467,18 @@ procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetSendTimeoutMSecEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
    Info.Execution.CustomStates[cWinHttpSendTimeout]:=Info.ParamAsInteger[0];
+end;
+
+procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetSynchronousRequestEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.Execution.CustomStates[cWinHttpSynchronousRequest]:=Info.ParamAsBoolean[0];
+end;
+
+procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetDisableRedirectsEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.Execution.CustomStates[cWinHttpDisabledRedirects]:=Info.ParamAsBoolean[0];
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetReceiveTimeoutMSecEval(
@@ -688,6 +527,12 @@ begin
    Info.Execution.CustomStates[cWinHttpIgnoreSSLCertificateErrors]:=Info.ParamAsBoolean[0];
 end;
 
+procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetKeepAliveEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.Execution.CustomStates[cWinHttpKeepAlive]:=Info.ParamAsBoolean[0];
+end;
+
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsGetIgnoreSSLCertificateErrorsEval(
   Info: TProgramInfo; ExtObject: TObject);
 var
@@ -699,10 +544,16 @@ begin
    Info.ResultAsBoolean:=v;
 end;
 
+procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsGetKeepAliveEval(
+  Info: TProgramInfo; ExtObject: TObject);
+begin
+   Info.ResultAsBoolean := Info.Execution.CustomStates.BooleanStateDef(cWinHttpKeepAlive, cWinHttpDefaultKeepAlive);
+end;
+
 procedure TdwsWebLib.dwsWebClassesHttpQueryMethodsSetProxyNameEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.Execution.CustomStates[cWinHttpProxyName]:=Info.ParamAsString[0];
+   Info.Execution.CustomStates[cWinHttpProxyName] := Info.ParamAsString[0];
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebRequestMethodsAuthenticatedUserFastEvalString(
@@ -960,7 +811,7 @@ begin
    if wr <> nil then begin
       args.EvalAsVariant(0, v);
       if (VarType(v) = varUnknown) and (TVarData(v).VUnknown <> nil) then begin
-         wr.ContentJSON := (IUnknown(TVarData(v).VUnknown) as IBoxedJSONValue).Value.ToUnicodeString
+         wr.ContentJSON := (IUnknown(TVarData(v).VUnknown) as IBoxedJSONValue).Value.ToUnicodeString;
       end else begin
          wr.ContentJSON := '';
       end;
@@ -1014,16 +865,58 @@ begin
    end;
 end;
 
+function TdwsWebLib.dwsWebClassesWebResponseMethodsSetStatusRedirectFastEval(
+  baseExpr: TTypedExpr; const args: TExprBaseListExec): Variant;
+var
+   wr : TWebResponse;
+   status : Int64;
+begin
+   wr := args.WebResponse;
+   if wr <> nil then begin
+      status := args.AsInteger[0];
+      if (status < 300) or (status > 399) then
+         raise Exception.CreateFmt('Redirection status code should be in [300-399] range but got %d', [ status ]);
+      wr.StatusCode := status;
+      wr.Headers.Values['Location'] := args.AsString[1];
+   end;
+end;
+
+function TdwsWebLib.dwsWebClassesWebResponseMethodsSetStatusJSONFastEval(
+  baseExpr: TTypedExpr; const args: TExprBaseListExec): Variant;
+var
+   wr : TWebResponse;
+begin
+   wr := args.WebResponse;
+   if wr <> nil then begin
+      wr.StatusCode := args.AsInteger[0];
+      wr.ContentJSON := args.AsString[1];
+   end;
+end;
+
+// CheckCookie
+//
+procedure TdwsWebLib.CheckCookie(const name, value : String);
+begin
+   if not WebUtils.IsValidCookieName(name) then
+      raise Exception.Create('Cookie name contains characters not allowed by RFC 6265');
+   if not WebUtils.IsValidCookieValue(value) then
+      raise Exception.Create('Cookie value contains characters not allowed by RFC 6265');
+end;
+
 procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetCookie_StringStringFloat_FastEvalNoResult(
   baseExpr: TTypedExpr; const args: TExprBaseListExec);
 var
    cookie : TWebResponseCookie;
    wr : TWebResponse;
+   name, value : String;
 begin
    wr := args.WebResponse;
    if wr <> nil then begin
-      cookie := wr.Cookies.AddCookie(args.AsString[0]);
-      cookie.Value := args.AsString[1];
+      args.EvalAsString(0, name);
+      args.EvalAsString(1, value);
+      CheckCookie(name, value);
+      cookie := wr.Cookies.AddCookie(name);
+      cookie.Value := value;
       cookie.ExpiresGMT := args.AsFloat[2];
    end;
 end;
@@ -1033,11 +926,15 @@ procedure TdwsWebLib.dwsWebClassesWebResponseMethodsSetCookie_StringStringFloatS
 var
    cookie : TWebResponseCookie;
    wr : TWebResponse;
+   name, value : String;
 begin
    wr := args.WebResponse;
    if wr <> nil then begin
-      cookie := wr.Cookies.AddCookie(args.AsString[0]);
-      cookie.Value := args.AsString[1];
+      args.EvalAsString(0, name);
+      args.EvalAsString(1, value);
+      CheckCookie(name, value);
+      cookie := wr.Cookies.AddCookie(name);
+      cookie.Value := value;
       cookie.ExpiresGMT := args.AsFloat[2];
       cookie.Path := args.AsString[3];
       cookie.Domain := args.AsString[4];
@@ -1116,7 +1013,7 @@ var
    obj : TScriptObjInstance;
 begin
    obj := Info.ScriptObj.GetSelf as TScriptObjInstance;
-   FServer.ServerEvents.PostEvent(Info.ParamAsString[0], WebServerSentEventToRawData(obj));
+   GetServerEvents.PostEvent(Info.ParamAsString[0], WebServerSentEventToRawData(obj));
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebServerSentEventMethodsToRawDataEval(
@@ -1131,25 +1028,25 @@ end;
 procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsCloseEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   FServer.ServerEvents.CloseRequests(Info.ParamAsString[0]);
+   GetServerEvents.CloseRequests(Info.ParamAsString[0]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsConnectionsEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsStringArray := FServer.ServerEvents.SourceRequests(Info.ParamAsString[0]);
+   Info.ResultAsStringArray := GetServerEvents.SourceRequests(Info.ParamAsString[0]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsPostRawEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   FServer.ServerEvents.PostEvent(Info.ParamAsString[0], Info.ParamAsDataString[1]);
+   GetServerEvents.PostEvent(Info.ParamAsString[0], Info.ParamAsDataString[1]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesWebServerSentEventsMethodsSourceNamesEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsStringArray := FServer.ServerEvents.SourceNames;
+   Info.ResultAsStringArray := GetServerEvents.SourceNames;
 end;
 
 function TdwsWebLib.dwsWebFunctionsDeflateCompressFastEval(
@@ -1210,85 +1107,114 @@ begin
    Result := PingIPv4(args.AsString[0], args.AsInteger[1]);
 end;
 
+function TdwsWebLib.dwsWebFunctionsPingIPv6FastEval(
+  const args: TExprBaseListExec): Variant;
+begin
+   Result := PingIPv6(args.AsString[0], args.AsInteger[1]);
+end;
+
 procedure TdwsWebLib.dwsWebClassesHttpRequestCleanUp(ExternalObject: TObject);
 var
-   t : THttpRequestThread;
+   rqc : THttpRequestContainer;
 begin
-   t := (ExternalObject as THttpRequestThread);
-   t.Release;
+   rqc := (ExternalObject as THttpRequestContainer);
+   rqc.Release;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsCompletedEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsBoolean := (ExtObject as THttpRequestThread).Completed;
+   Info.ResultAsBoolean := (ExtObject as THttpRequestContainer).Completed;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsContentDataEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsDataString := (ExtObject as THttpRequestThread).Wait.ResponseData;
+   Info.ResultAsDataString := (ExtObject as THttpRequestContainer).Wait.ResponseData;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsContentLengthEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsInteger := (ExtObject as THttpRequestThread).ContentLength;
+   Info.ResultAsInteger := (ExtObject as THttpRequestContainer).Request.ContentLength;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsContentSubDataEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsDataString := Copy((ExtObject as THttpRequestThread).Wait.ResponseData,
+   Info.ResultAsDataString := Copy((ExtObject as THttpRequestContainer).Wait.ResponseData,
                                    Info.ParamAsInteger[0]+1, Info.ParamAsInteger[1]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsContentTypeEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsString := (ExtObject as THttpRequestThread).Wait.GetResponseHeader('Content-Type');
+   Info.ResultAsString := (ExtObject as THttpRequestContainer).Wait.GetResponseHeader('Content-Type');
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsCurrentContentSizeEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsInteger := (ExtObject as THttpRequestThread).CurrentSize;
+   Info.ResultAsInteger := (ExtObject as THttpRequestContainer).Request.CurrentSize;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsErrorEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsString := (ExtObject as THttpRequestThread).Error;
+   Info.ResultAsString := (ExtObject as THttpRequestContainer).Request.Error;
+end;
+
+procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsGetCertificateInfoEval(
+  Info: TProgramInfo; ExtObject: TObject);
+var
+   certInfo : TdwsHttpCertificateInfo;
+   certifObj : IInfo;
+begin
+   certInfo := (ExtObject as THttpRequestContainer).Wait.CertificateInfo;
+   if (certInfo <> nil) and (certInfo.Expiry <> 0) then begin
+
+      certifObj := Info.Vars['HttpCertificateInfo'].Method[SYS_TOBJECT_CREATE].Call([]);
+
+      certifObj.Member['FExpiry'].ValueAsInteger := certInfo.Expiry;
+      certifObj.Member['FExpiry'].ValueAsInteger := certInfo.Start;
+      certifObj.Member['FSubjectInfo'].ValueAsString := certInfo.SubjectInfo;
+      certifObj.Member['FIssuerInfo'].ValueAsString := certInfo.IssuerInfo;
+      certifObj.Member['FKeySize'].ValueAsInteger := certInfo.KeySize;
+
+      Info.ResultAsVariant := certifObj.Value;
+
+   end else Info.ResultAsVariant := IUnknown(nil);
+
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsGetHeaderEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsString := (ExtObject as THttpRequestThread).Wait.GetResponseHeader(Info.ParamAsString[0]);
+   Info.ResultAsString := (ExtObject as THttpRequestContainer).Wait.GetResponseHeader(Info.ParamAsString[0]);
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsHeadersEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsDataString := (ExtObject as THttpRequestThread).Wait.RawResponseHeaders;
+   Info.ResultAsDataString := (ExtObject as THttpRequestContainer).Wait.RawResponseHeaders;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsMethodEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsDataString := (ExtObject as THttpRequestThread).Method;
+   Info.ResultAsDataString := (ExtObject as THttpRequestContainer).Request.Method;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsStatusCodeEval(
   Info: TProgramInfo; ExtObject: TObject);
 begin
-   Info.ResultAsInteger := (ExtObject as THttpRequestThread).Wait.StatusCode;
+   Info.ResultAsInteger := (ExtObject as THttpRequestContainer).Wait.StatusCode;
 end;
 
 procedure TdwsWebLib.dwsWebClassesHttpRequestMethodsURLEval(Info: TProgramInfo;
   ExtObject: TObject);
 begin
-   Info.ResultAsDataString := (ExtObject as THttpRequestThread).URL;
+   Info.ResultAsDataString := (ExtObject as THttpRequestContainer).Request.URL;
 end;
 
 end.

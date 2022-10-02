@@ -20,13 +20,13 @@ unit dwsCodeGen;
 interface
 
 uses
-   Classes, SysUtils,
+   Classes, SysUtils,     dwsXPlatform,
    dwsUtils, dwsSymbols, dwsExprs, dwsCoreExprs, dwsDataContext, dwsConstExprs,
    {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
    dwsUnitSymbols, dwsErrors, dwsRTTIFunctions, dwsSymbolDictionary,
    dwsContextMap, dwsCompilerContext;
 
-   // experimental codegen support classes for DWScipt
+   // experimental codegen support classes for DWScript
 
 type
 
@@ -210,6 +210,7 @@ type
          procedure SmartLinkFilterSymbolTable(table : TSymbolTable; var changed : Boolean); virtual;
          procedure SmartLinkUnaliasSymbolTable(table : TSymbolTable); virtual;
          procedure SmartLinkFilterStructSymbol(structSymbol : TCompositeTypeSymbol; var changed : Boolean); virtual;
+         procedure SmartLinkFilterHelperSymbol(helperSymbol : THelperSymbol; var changed : Boolean); virtual;
          procedure SmartLinkFilterInterfaceSymbol(intfSymbol : TInterfaceSymbol; var changed : Boolean); virtual;
          procedure SmartLinkFilterMemberFieldSymbol(fieldSymbol : TFieldSymbol; var changed : Boolean); virtual;
 
@@ -259,6 +260,10 @@ type
          procedure CompileClassSymbol(cls : TClassSymbol);
          procedure CompileClassSymbolIfNeeded(cls : TClassSymbol);
          procedure CompileInterfaceSymbol(intf : TInterfaceSymbol);
+
+         procedure SmartLinkProgramInSession(const prog : IdwsProgram);
+         procedure SmartLinkTables(table, systemTable : TSymbolTable; unitSyms : TUnitMainSymbols);
+
          procedure BeforeCompileProgram(table, systemTable : TSymbolTable; unitSyms : TUnitMainSymbols);
          procedure CompileProgram(const prog : IdwsProgram); virtual;
          procedure CompileProgramInSession(const prog : IdwsProgram); virtual;
@@ -539,7 +544,7 @@ begin
    end else if sym is TDataSymbol then begin
       if TDataSymbol(sym).HasExternalName then
          Exit(TDataSymbol(sym).ExternalName);
-   end else if sym is TClassSymbol then begin
+   end else if sym.IsClassSymbol then begin
       if TClassSymbol(sym).ExternalRoot<>nil then
          Exit(TClassSymbol(sym).ExternalName);
    end else if sym is TFieldSymbol then begin
@@ -737,7 +742,7 @@ begin
          CompileEnumerationSymbol(TEnumerationSymbol(sym))
       else if sym is TRecordSymbol then
          CompileRecordSymbol(TRecordSymbol(sym))
-      else if sym is TClassSymbol then begin
+      else if sym.IsClassSymbol then begin
          if FCompiledClasses.IndexOf(sym)<0 then
             CompileClassSymbol(TClassSymbol(sym));
       end else if sym is THelperSymbol then begin
@@ -913,12 +918,59 @@ begin
    end;
 end;
 
+// SmartLinkProgramInSession
+//
+procedure TdwsCodeGen.SmartLinkProgramInSession(const prog : IdwsProgram);
+begin
+   Assert(FContext <> nil);
+
+   if (cgoSmartLink in Options) and (prog.SymbolDictionary.Count > 0) then begin
+      FSymbolDictionary:=prog.SymbolDictionary;
+      FSourceContextMap:=prog.SourceContextMap;
+      try
+         SmartLinkTables(
+            prog.Table,
+            prog.ProgramObject.SystemTable.SymbolTable,
+            prog.ProgramObject.UnitMains
+         );
+      finally
+         FSymbolDictionary:=nil;
+         FSourceContextMap:=nil;
+      end;
+   end;
+end;
+
+// SmartLinkTables
+//
+procedure TdwsCodeGen.SmartLinkTables(table, systemTable : TSymbolTable; unitSyms : TUnitMainSymbols);
+var
+   i : Integer;
+   changed : Boolean;
+begin
+   SmartLinkUnaliasSymbolTable(table);
+   for i:=0 to unitSyms.Count-1 do begin
+      SmartLinkUnaliasSymbolTable(unitSyms[i].Table);
+      SmartLinkUnaliasSymbolTable(unitSyms[i].ImplementationTable);
+   end;
+
+   DeVirtualize;
+
+   SmartLinkFilterSymbolTable(table, changed);
+
+   repeat
+      changed:=False;
+      for i:=0 to unitSyms.Count-1 do begin
+         SmartLinkFilterSymbolTable(unitSyms[i].Table, changed);
+         SmartLinkFilterSymbolTable(unitSyms[i].ImplementationTable, changed);
+      end;
+   until not changed;
+end;
+
 // BeforeCompileProgram
 //
 procedure TdwsCodeGen.BeforeCompileProgram(table, systemTable : TSymbolTable; unitSyms : TUnitMainSymbols);
 var
    i : Integer;
-   changed : Boolean;
 begin
    if FRootSymbolMap = nil then
       FRootSymbolMap := CreateSymbolMap(nil, nil);
@@ -927,25 +979,8 @@ begin
    ReserveSymbolNames;
    MapInternalSymbolNames(table, systemTable);
 
-   if FSymbolDictionary<>nil then begin
-
-      SmartLinkUnaliasSymbolTable(table);
-      for i:=0 to unitSyms.Count-1 do begin
-         SmartLinkUnaliasSymbolTable(unitSyms[i].Table);
-         SmartLinkUnaliasSymbolTable(unitSyms[i].ImplementationTable);
-      end;
-
-      DeVirtualize;
-
-      SmartLinkFilterSymbolTable(table, changed);
-
-      repeat
-         changed:=False;
-         for i:=0 to unitSyms.Count-1 do begin
-            SmartLinkFilterSymbolTable(unitSyms[i].Table, changed);
-            SmartLinkFilterSymbolTable(unitSyms[i].ImplementationTable, changed);
-         end;
-      until not changed;
+   if FSymbolDictionary <> nil then begin
+      SmartLinkTables(table, systemTable, unitSyms);
    end;
 
    for i:=0 to unitSyms.Count-1 do
@@ -1004,16 +1039,21 @@ begin
       FSymbolDictionary:=nil;
       FSourceContextMap:=nil;
    end;
-
-   p.ResourceStringList.ComputeIndexes;
-
-   BeginProgramSession(prog);
    try
-      BeforeCompileProgram(prog.Table, p.SystemTable.SymbolTable, p.UnitMains);
 
-      CompileProgramInSession(prog);
+      p.ResourceStringList.ComputeIndexes;
+
+      BeginProgramSession(prog);
+      try
+         BeforeCompileProgram(prog.Table, p.SystemTable.SymbolTable, p.UnitMains);
+         CompileProgramInSession(prog);
+      finally
+         EndProgramSession;
+      end;
+
    finally
-      EndProgramSession;
+      FSymbolDictionary:=nil;
+      FSourceContextMap:=nil;
    end;
 end;
 
@@ -1125,7 +1165,7 @@ procedure TdwsCodeGen.MapInternalSymbolNames(progTable, systemTable : TSymbolTab
       for i:=0 to table.Count-1 do begin
          sym:=table.Symbols[i];
          if sym is TStructuredTypeSymbol then begin
-            if (sym is TClassSymbol) or (sym is TRecordSymbol) then begin
+            if sym.IsClassSymbol or (sym is TRecordSymbol) then begin
                MapStructuredSymbol(TStructuredTypeSymbol(sym), False);
             end else if sym is TInterfaceSymbol then
                FSymbolMap.MapSymbol(sym, cgssGlobal, False)
@@ -1165,7 +1205,7 @@ begin
          unitSym:=TUnitSymbol(sym);
          if unitSym.Table is TStaticSymbolTable then
             MapPrioritySymbolNames(unitSym.Table);
-      end else if sym is TClassSymbol then begin
+      end else if sym.IsClassSymbol then begin
          if TClassSymbol(sym).IsExternal then begin
             FSymbolMap.ReserveExternalName(sym);
          end;
@@ -1199,7 +1239,7 @@ begin
                MapNormalSymbolNames(unitSym.ImplementationTable);
             end;
          end;
-      end else if (sym is TClassSymbol) or (sym is TRecordSymbol) then begin
+      end else if sym.IsClassSymbol or (sym is TRecordSymbol) then begin
          MapStructuredSymbol(TStructuredTypeSymbol(sym), True);
       end else if sym is TInterfaceSymbol then begin
          FSymbolMap.MapSymbol(sym, cgssGlobal, True);
@@ -1587,7 +1627,7 @@ function TdwsCodeGen.SmartLink(symbol : TSymbol): Boolean;
    end;
 
 begin
-   Result:=(FSymbolDictionary=nil) or IsReferenced(symbol);
+   Result := (FSymbolDictionary=nil) or IsReferenced(symbol);
 end;
 
 // SmartLinkMethod
@@ -1678,8 +1718,11 @@ begin
 
             if sym is TInterfaceSymbol then
                SmartLinkFilterInterfaceSymbol(TInterfaceSymbol(sym), localChanged)
-            else if not (sym is THelperSymbol) then
-               SmartLinkFilterStructSymbol(TStructuredTypeSymbol(sym), localChanged);
+            else SmartLinkFilterStructSymbol(TStructuredTypeSymbol(sym), localChanged);
+
+         end else if sym is THelperSymbol then begin
+
+            SmartLinkFilterHelperSymbol(THelperSymbol(sym), localChanged)
 
          end else begin
 
@@ -1829,6 +1872,57 @@ begin
          end else continue;
 
          if not SmartLink(member) then begin
+            if FSymbolDictionary.FindSymbolPosList(member)<>nil then begin
+               RemoveReferencesInContextMap(member);
+               FSymbolDictionary.Remove(member);
+               localChanged:=True;
+            end;
+         end;
+
+      end;
+      changed:=changed or localChanged;
+   until not localChanged;
+end;
+
+// SmartLinkFilterHelperSymbol
+//
+procedure TdwsCodeGen.SmartLinkFilterHelperSymbol(helperSymbol : THelperSymbol; var changed : Boolean);
+
+   procedure RemoveReferencesInContextMap(symbol : TSymbol);
+   begin
+      if FSourceContextMap=nil then Exit;
+      FSourceContextMap.EnumerateContextsOfSymbol(symbol, SmartLinkFilterOutSourceContext);
+   end;
+
+var
+   member : TSymbol;
+   prop : TPropertySymbol;
+   localChanged : Boolean;
+   symPosList : TSymbolPositionList;
+begin
+   if FSymbolDictionary=nil then Exit;
+   if helperSymbol.IsExternal then Exit;
+
+   symPosList := FSymbolDictionary.FindSymbolPosList(helperSymbol);
+   if symPosList = nil then Exit;
+
+   // remove members cross-references
+   repeat
+      localChanged:=False;
+      for member in helperSymbol.Members do begin
+
+         if member is TPropertySymbol then begin
+
+            prop:=TPropertySymbol(member);
+            if prop.Visibility=cvPublished then continue;
+
+         end else if not (member is TMethodSymbol) then begin
+
+            continue;
+
+         end;
+
+         if not SmartLinkMethod(TMethodSymbol(member)) then begin
             if FSymbolDictionary.FindSymbolPosList(member)<>nil then begin
                RemoveReferencesInContextMap(member);
                FSymbolDictionary.Remove(member);
@@ -2044,6 +2138,7 @@ begin
       FLevel := TFuncSymbol(aSymbol).Level;
 
    FHash := TdwsMappedSymbolHash.Create;
+   FHash.PreallocateCapacity(512);
    FNames := TSimpleNameObjectHash<TSymbol>.Create;
 
    if aParent = nil then begin
@@ -2143,7 +2238,7 @@ begin
       existing:=FNames[n];
       if (existing<>FReservedSymbol) and (existing<>sym) then begin
          // ignore duplicate external, the raise is mostly a debugging facility at the moment
-//         RaiseAlreadyDefined(sym, existing)
+         // RaiseAlreadyDefined(sym, existing)
       end else FNames.Objects[n]:=sym;
    end;
 end;

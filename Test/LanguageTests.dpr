@@ -46,6 +46,7 @@ uses
   ULocalizerTests in 'ULocalizerTests.pas',
   dwsRTTIFunctions,
   dwsRTTIConnector,
+  dwsRTTIExposer,
   dwsStringResult,
   dwsMetrics,
   UJSONTests in 'UJSONTests.pas',
@@ -75,7 +76,10 @@ uses
   dwsDynamicArrays in '..\Source\dwsDynamicArrays.pas',
   dwsArrayExprs in '..\Source\dwsArrayExprs.pas',
   UdwsTabularTests in 'UdwsTabularTests.pas',
-  UdwsCSSPackTests in 'UdwsCSSPackTests.pas';
+  UdwsCSSPackTests in 'UdwsCSSPackTests.pas',
+  UdwsIniFileTests in 'UdwsIniFileTests.pas',
+  UdwsCustomDataTests in 'UdwsCustomDataTests.pas',
+  UdwsTimeSeriesTests in 'UdwsTimeSeriesTests.pas';
 
 {$R *.res}
 

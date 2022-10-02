@@ -2176,7 +2176,7 @@ begin
     begin
       Result := '.\' + TUnitSymbol(Symbol).Name + '\Index';
     end else
-    if Symbol is TClassSymbol then
+    if Symbol.IsClassSymbol then
     begin
       Result := '.\' + TUnitSymbol(TClassSymbol(Symbol).UnitSymbol).Name;
       Result := Result + '\Classes\' + TClassSymbol(Symbol).Name + '\Index';
@@ -3043,7 +3043,7 @@ end;
 procedure TSymbolUnit.TConstSymbolGetDataEval(info: TProgramInfo;
   ExtObject: TObject);
 begin
-  info.ResultAsVariant := TConstSymbol(ExtObject).Data;
+  info.ResultAsVariant := TConstSymbol(ExtObject).DataContext.AsVariant[0];
 end;
 {$ENDREGION}
 
@@ -3383,7 +3383,7 @@ begin
 
   for Symbol in UnitSymbol.Table do
   begin
-    if Symbol is TClassSymbol then
+    if Symbol.IsClassSymbol then
     begin
       // create classes directoy
       if not DirectoryExists(UnitDir + 'Classes\') then

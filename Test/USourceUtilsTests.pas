@@ -67,10 +67,13 @@ type
          procedure UnitNamesSuggest;
          procedure OverloadSuggest;
          procedure LengthDotSuggest;
+         procedure DefaultPropertySuggest;
          procedure PropertyDescription;
          procedure ImplementationSuggest;
          procedure ParameterSuggest;
          procedure FunctionCaptionDescription;
+         procedure PropertiesDescription;
+         procedure ConstantsDescription;
    end;
 
 // ------------------------------------------------------------------
@@ -376,11 +379,13 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 3);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
-   CheckTrue(sugg.Count=4, 's.');
-   CheckEquals('Count', sugg.Code[0], 's. 0');
-   CheckEquals('High', sugg.Code[1], 's. 1');
-   CheckEquals('Length', sugg.Code[2], 's. 2');
-   CheckEquals('Low', sugg.Code[3], 's. 3');
+   var expected := [
+      'Contains', 'Count', 'High',
+      'IndexOf', 'Length', 'Low'
+   ];
+   CheckEquals(Length(expected), sugg.Count, 's. Length');
+   for var i := 0 to High(expected) do
+      CheckEquals(expected[i], sugg.Code[i], 's. ' + IntToStr(i));
 
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 4);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
@@ -420,7 +425,7 @@ begin
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
    var expected := [
-      'Add', 'Clear', 'Copy', 'Count', 'Delete', 'Filter', 'High',
+      'Add', 'Clear', 'Contains', 'Copy', 'Count', 'Delete', 'Filter', 'High',
       'IndexOf', 'Insert', 'Length', 'Low', 'Map', 'Move',
       'Peek', 'Pop', 'Push', 'Remove', 'Reverse',
       'SetLength', 'Sort', 'Swap'
@@ -479,10 +484,10 @@ end;
 //
 procedure TSourceUtilsTests.HelperSuggestTest;
 const
-   cSugg : array [0..19] of String = (
+   cSugg : array [0..20] of String = (
       'Abs', 'Clamp', 'Compare', 'Compare', 'Factorial', 'Hello', 'IsOdd', 'IsPrime',
       'LeastFactor', 'Max', 'Min', 'Next', 'PopCount', 'Sign', 'Sqr', 'TestBit',
-      'ToBin', 'ToHexString', 'ToString', 'Unsigned32'
+      'ToBin', 'ToHexString', 'ToString', 'ToString', 'Unsigned32'
       );
 
 var
@@ -585,11 +590,12 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 7);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
-   CheckEquals(4, sugg.Count, '.L');
+   CheckEquals(5, sugg.Count, '.L');
    CheckEquals('Left', sugg.Code[0], '.L 0');
    CheckEquals('Length', sugg.Code[1], '.L 1');
-   CheckEquals('Low', sugg.Code[2], '.L 2');
-   CheckEquals('LowerCase', sugg.Code[3], '.L 3');
+   CheckEquals('LocaleCompare', sugg.Code[2], '.L 2');
+   CheckEquals('Low', sugg.Code[3], '.L 3');
+   CheckEquals('LowerCase', sugg.Code[4], '.L 4');
 
    prog:=FCompiler.Compile('function T(i : Integer) : String; forward;'#13#10
                            +'T(Ord(IntToStr(1)[1]+"])([")).Le');
@@ -651,14 +657,14 @@ begin
                            +'T('#13#10
                            +'1'#13#10
                            +')'#13#10
-                           +'.LO');
+                           +'.LOW');
 
-   scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 5, 4);
+   scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 5, 5);
    sugg:=TdwsSuggestions.Create(prog, scriptPos, [soNoReservedWords]);
 
-   CheckEquals(2, sugg.Count, '.Lo');
-   CheckEquals('Low', sugg.Code[0], '.Lo 0');
-   CheckEquals('LowerCase', sugg.Code[1], '.L 1');
+   CheckEquals(2, sugg.Count, '.Low');
+   CheckEquals('Low', sugg.Code[0], '.Low 0');
+   CheckEquals('LowerCase', sugg.Code[1], '.Low 1');
 end;
 
 // ForVariable
@@ -811,8 +817,9 @@ begin
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 13);
 
    sugg:=TdwsSuggestions.Create(prog, scriptPos);
-   CheckEquals(1, sugg.Count, 'column 13');
-   CheckEquals('One', sugg.Code[0], 'sugg 2, 13, 0');
+   CheckEquals(2, sugg.Count, 'column 13');
+   CheckEquals('ByName', sugg.Code[0], 'sugg 2, 13, 0');
+   CheckEquals('One', sugg.Code[1], 'sugg 2, 13, 1');
 
    scriptPos:=TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 18);
 
@@ -1030,8 +1037,43 @@ begin
    scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 2, 21);
 
    sugg := TdwsSuggestions.Create(prog, scriptPos);
-   CheckEquals(1, sugg.Count);
+   CheckEquals(2, sugg.Count);
    CheckEquals('ToString () : String', sugg.Caption[0]);
+   CheckEquals('ToString (base: Integer) : String', sugg.Caption[1]);
+end;
+
+// DefaultPropertySuggest
+//
+procedure TSourceUtilsTests.DefaultPropertySuggest;
+var
+   prog : IdwsProgram;
+   sugg : IdwsSuggestions;
+   scriptPos : TScriptPos;
+begin
+   prog := FCompiler.Compile( 'type TTest = class'#10
+                             +'   F : array of String;'#10
+                             +'   property Prop[i : Integer] : String read (F[i]); default;'#10
+                             +'end;'#10
+                             +'var t : TTest;'#10
+                             +'PrintLn(t[0].ToU');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 6, 17);
+
+   sugg := TdwsSuggestions.Create(prog, scriptPos);
+   CheckEquals(1, sugg.Count);
+   CheckEquals('ToUpper () : String', sugg.Caption[0]);
+
+   prog := FCompiler.Compile( 'type TTest = class'#10
+                             +'   class function Get(i : Integer) : String;'#10
+                             +'   property Prop[i : Integer] : String read Get; default;'#10
+                             +'end;'#10
+                             +'PrintLn(TTest[0].ToL');
+
+   scriptPos := TScriptPos.Create(prog.SourceList[0].SourceFile, 5, 21);
+
+   sugg := TdwsSuggestions.Create(prog, scriptPos);
+   CheckEquals(1, sugg.Count);
+   CheckEquals('ToLower () : String', sugg.Caption[0]);
 end;
 
 // PropertyDescription
@@ -1052,7 +1094,7 @@ begin
    cls := prog.Table.FindSymbol('TTest', cvMagic, TClassSymbol);
    Check(cls <> nil, 'TTest missing');
 
-   prop := (cls as TClassSymbol).Members.FindLocal('Hello', TPropertySymbol);
+   prop := (cls as TClassSymbol).Members.FindLocalOfClass('Hello', TPropertySymbol);
    Check(prop <> nil, 'TTest.Hello missing');
 
    CheckEquals('world', (prop as TPropertySymbol).UserDescription);
@@ -1158,6 +1200,61 @@ begin
                symClassFn.Caption, 'TestFC');
    CheckEquals('class function TestFC(a: array of TTest): array of String',
                symClassFn.Description, 'TestFC');
+end;
+
+// PropertiesDescription
+//
+procedure TSourceUtilsTests.PropertiesDescription;
+var
+   prog : IdwsProgram;
+   classSymMembers : TMembersSymbolTable;
+begin
+   prog := FCompiler.Compile(
+        'type TTestEnum = enum (Alpha = 0, Beta = 1, Gamma = 2, Unknown = -1);'#10
+      + 'type TStringArray = array of String;'#10
+      + 'type TNameValue = record'#10
+      + '   Name : String;'#10
+      + '   Value : String;'#10
+      + 'end;'#10
+      + 'type TMyClass = class'#10
+      + '   private'#10
+      + '      FField : array[String] of TTestEnum;'#10
+      + '   public'#10
+      + '      property Prop : array of TTestEnum;'#10
+      + '      property Keys : array of String read (FField.Keys);'#10
+      + '      property NameValue : TNameValue;'#10
+      + '      property StringTab : TStringArray;'#10
+      + 'end;'
+   );
+   CheckFalse(prog.Msgs.HasErrors, prog.Msgs.AsInfo);
+   classSymMembers := (prog.Table.FindLocal('TMyClass') as TClassSymbol).Members;
+
+   CheckEquals('property Prop: array of TTestEnum read write', classSymMembers.FindSymbol('Prop', cvMagic).Description, 'Test1');
+   CheckEquals('property Keys: array of String read', classSymMembers.FindSymbol('Keys', cvMagic).Description, 'Test2');
+   CheckEquals('property NameValue: TNameValue read write', classSymMembers.FindSymbol('NameValue', cvMagic).Description, 'Test3');
+   CheckEquals('property StringTab: TStringArray read write', classSymMembers.FindSymbol('StringTab', cvMagic).Description, 'Test4');
+end;
+
+// ConstantsDescription
+//
+procedure TSourceUtilsTests.ConstantsDescription;
+var
+   prog : IdwsProgram;
+begin
+   prog := FCompiler.Compile(
+        'const i : Integer = 123;'#10
+      + 'const f = 1.5;'#10
+      + 'const s = ''foobar'';'#10
+      + 'const s2 = "foo''bar";'#10
+      + 'const v : Variant = Null;'#10
+   );
+   CheckFalse(prog.Msgs.HasErrors, prog.Msgs.AsInfo);
+
+   CheckEquals('const i: Integer = 123', (prog.Table.FindLocal('i') as TConstSymbol).Description);
+   CheckEquals('const f: Float = 1.5', (prog.Table.FindLocal('f') as TConstSymbol).Description);
+   CheckEquals('const s: String = ''foobar''', (prog.Table.FindLocal('s') as TConstSymbol).Description);
+   CheckEquals('const s2: String = "foo''bar"', (prog.Table.FindLocal('s2') as TConstSymbol).Description);
+   CheckEquals('const v: Variant = Null', (prog.Table.FindLocal('v') as TConstSymbol).Description);
 end;
 
 // SuggestInBlockWithError

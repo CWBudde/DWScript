@@ -358,7 +358,7 @@ begin
          paramList.Add(':a' + intToStr(i));
          dyn.EvalAsVariant(i, v);
          params.AddElementExpr(cNullPos, prog.Root.CompilerContext,
-                               TConstExpr.Create(cNullPos, prog.Root.CompilerContext.TypVariant, v));
+                               TConstExpr.CreateValue(cNullPos, prog.Root.CompilerContext.TypVariant, v));
       end;
       result := StringReplace(query, param, format('(%s)', [paramList.CommaText]), []);
    finally
@@ -496,7 +496,7 @@ var
    v : Variant;
 begin
    FAssign.EvalNoResult(exec);
-   dyn := CreateNewDynamicArray(FTyp);
+   CreateNewDynamicArray(FTyp, dyn);
    n := 0;
 
    while FStep.EvalAsBoolean(exec) do
@@ -506,7 +506,7 @@ begin
       dyn.SetAsVariant(n, v);
       inc(n);
    end;
-   result := IScriptDynArray(dyn);
+   VarCopySafe(result, dyn);
    FFree.EvalNoResult(exec);
 end;
 

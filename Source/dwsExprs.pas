@@ -55,8 +55,6 @@ type
    TProgramExpr = class;
    TDataExpr = class;
 
-   TVariantDynArray = array of Variant;
-
    TProgramExprList = array[0..MaxInt shr 4] of TProgramExpr;
    PProgramExprList = ^TProgramExprList;
    PProgramExpr = ^TProgramExpr;
@@ -71,6 +69,7 @@ type
    TMethodFastEvalIntegerEvent = function(baseExpr : TTypedExpr; const args : TExprBaseListExec) : Int64 of object;
    TMethodFastEvalFloatEvent = function(baseExpr : TTypedExpr; const args : TExprBaseListExec) : Double of object;
    TMethodFastEvalBooleanEvent = function(baseExpr : TTypedExpr; const args : TExprBaseListExec) : Boolean of object;
+   TMethodFastEvalScriptObjEvent = procedure(baseExpr : TTypedExpr; const args : TExprBaseListExec; var result : IScriptObj) of object;
 
    // Symbol attributes information
    TdwsSymbolAttribute = class (TRefCountedObject)
@@ -234,6 +233,8 @@ type
       function GetResult : TdwsResult;
       function GetObjectCount : Integer;
       function GetProg : IdwsProgram;
+      function HasProgram : Boolean;
+      function HasCompileErrors : Boolean;
       function GetLocalizer : IdwsLocalizer;
       procedure SetLocalizer(const loc : IdwsLocalizer);
       function GetExecutionTimedOut : Boolean;
@@ -349,6 +350,8 @@ type
 
          // for interface only, script exprs use direct properties
          function GetProg : IdwsProgram;
+         function HasProgram : Boolean;
+         function HasCompileErrors : Boolean;
          function GetInfo : TProgramInfo;
          function GetResult : TdwsResult;
          function GetObjectCount : Integer;
@@ -389,8 +392,10 @@ type
          procedure DebuggerNotifyException(const exceptObj : IScriptObj); override;
 
          class function CallStackToString(const callStack : TdwsExprLocationArray) : String; static;
-         procedure RaiseAssertionFailed(fromExpr : TExprBase; const msg : String; const scriptPos : TScriptPos);
-         procedure RaiseAssertionFailedFmt(fromExpr : TExprBase; const fmt : String; const args : array of const; const scriptPos : TScriptPos);
+         procedure RaiseAssertionFailed(fromExpr : TExprBase; const msg : String;
+                                        const scriptPos : TScriptPos; exec : TdwsExecution);
+         procedure RaiseAssertionFailedFmt(fromExpr : TExprBase; const fmt : String; const args : array of const;
+                                           const scriptPos : TScriptPos; exec : TdwsExecution);
 
          function CreateEDelphiObj(const ClassName : String;
                                    const Message : String) : IScriptObj;
@@ -711,6 +716,7 @@ type
 
          procedure RaiseUpperExceeded(exec : TdwsExecution; index : Integer);
          procedure RaiseLowerExceeded(exec : TdwsExecution; index : Integer);
+         procedure BoundsCheckFailed(exec : TdwsExecution; index : Integer);
 
          procedure CheckScriptObject(exec : TdwsExecution; const scriptObj : IScriptObj);
 
@@ -924,6 +930,7 @@ type
          procedure ClearArgs;
          function ExpectedArg : TParamSymbol; virtual; abstract;
          function GetArgType(idx : Integer) : TTypeSymbol;
+         function ArgIsOfType(idx : Integer; aTyp : TTypeSymbol) : Boolean;
          function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
          procedure CompileTimeCheck(context : TdwsCompilerContext); virtual;
 
@@ -1570,13 +1577,13 @@ type
          property PrevObject : TScriptObj read FPrevObject write FPrevObject;
    end;
 
-   TScriptObjInstance = class (TScriptObj, IScriptObj)
+   TScriptObjInstance = class sealed (TScriptObj, IScriptObj)
       private
-         FClassSym : TClassSymbol;
          FExternalObject : TObject;
-         FExecutionContext : TdwsProgramExecution;
-         FOnObjectDestroy: TObjectDestroyEvent;
          FDestroyed : Boolean;
+         FClassSym : TClassSymbol;
+         FExecutionContext : TdwsProgramExecution;
+         FOnObjectDestroy : TObjectDestroyEvent;
 
       protected
          function GetClassSym: TClassSymbol;
@@ -1590,6 +1597,9 @@ type
          constructor Create(aClassSym : TClassSymbol; executionContext : TdwsProgramExecution = nil);
          destructor Destroy; override;
          procedure BeforeDestruction; override;
+
+         class function NewInstance: TObject; override;
+         procedure FreeInstance; override;
 
          function ToString : String; override;
          function ScriptTypeName : String; override;
@@ -1613,7 +1623,7 @@ type
 
    TScriptAssociativeArrayHashCodes = array of Cardinal;
 
-   TScriptAssociativeArray = class sealed (TScriptObj, IScriptAssociativeArray)
+   TScriptAssociativeArray = class sealed (TDataContext, IScriptAssociativeArray)
       private
          FElementTyp, FKeyTyp : TTypeSymbol;
          FElementSize, FKeySize : Integer;
@@ -1621,7 +1631,7 @@ type
          FCount : NativeInt;
          FCapacity, FGrowth : NativeInt;
          FHashCodes : TScriptAssociativeArrayHashCodes;
-         FKeys : TData;
+         FKeys : IDataContext;
          FCreateKeyOnAccess : Boolean;
 
       protected
@@ -1648,7 +1658,6 @@ type
          procedure GetDataAsString(exec : TdwsExecution; index : TTypedExpr; var result : String); overload;
          procedure GetDataAsString(exec : TdwsExecution; const keyValue : Variant; var result : String); overload;
 
-         //procedure ReplaceData(exec : TdwsExecution; index : Int64; value : TDataExpr);
          procedure ReplaceValue(exec : TdwsExecution; index, value : TTypedExpr); overload;
          procedure ReplaceValue(exec : TdwsExecution; const key, value : Variant); overload;
 
@@ -1663,8 +1672,9 @@ type
          function Count : NativeInt;
          function Capacity : NativeInt;
 
-         function CopyKeys : TData;
+         procedure CopyKeys(const dest : IScriptDynArray);
 
+         property Keys : IDataContext read FKeys;
          property KeyType : TTypeSymbol read FKeyTyp;
          property ElementType : TTypeSymbol read FElementTyp;
    end;
@@ -1707,9 +1717,12 @@ uses dwsFunctions, dwsCoreExprs, dwsMagicExprs, dwsMethodExprs, dwsUnifiedConsta
 
 // TScriptDynamicArray_InitData
 //
-procedure TScriptDynamicArray_InitData(elemTyp : TTypeSymbol; var result : Variant);
+procedure TScriptDynamicArray_InitData(elemTyp : TTypeSymbol; const resultDC : IDataContext; offset : NativeInt);
+var
+   intf : IScriptDynArray;
 begin
-   result := CreateNewDynamicArray(elemTyp);
+   CreateNewDynamicArray(elemTyp, intf);
+   resultDC.AsInterface[offset] := intf;
 end;
 
 { TScriptObjectWrapper }
@@ -1745,8 +1758,8 @@ type
 constructor TScriptObjectWrapper.Create(scriptObj : TScriptObjInstance);
 begin
    inherited Create;
-   FScriptObj:=scriptObj;
-   ReplaceData(scriptObj.AsPData^);
+   FScriptObj := scriptObj;
+   DirectData := scriptObj.DirectData;
 end;
 
 // GetClassSym
@@ -2072,8 +2085,11 @@ begin
             Debugger.NotifyException(Self, e.ExceptionObj);
          Msgs.AddRuntimeError(e.ScriptPos, e.Message, e.ScriptCallStack);
       end;
-      on e: EScriptError do
+      on e: EScriptError do begin
+         if IsDebugging then
+            Debugger.NotifyException(Self, nil);
          Msgs.AddRuntimeError(e.ScriptPos, e.Message, e.ScriptCallStack);
+      end;
       on e: EScriptStackException do
          Msgs.AddRuntimeError(LastScriptError.ScriptPos,
                               e.Message,
@@ -2190,17 +2206,20 @@ end;
 
 // RaiseAssertionFailed
 //
-procedure TdwsProgramExecution.RaiseAssertionFailed(fromExpr : TExprBase; const msg : String; const scriptPos : TScriptPos);
+procedure TdwsProgramExecution.RaiseAssertionFailed(fromExpr : TExprBase; const msg : String;
+                                                    const scriptPos : TScriptPos; exec : TdwsExecution);
 begin
-   RaiseAssertionFailedFmt(fromExpr, RTE_AssertionFailed, [scriptPos.AsInfo, msg], scriptPos);
+   RaiseAssertionFailedFmt(fromExpr, RTE_AssertionFailed, [scriptPos.AsInfo, msg], scriptPos, exec);
 end;
 
 // RaiseAssertionFailedFmt
 //
-procedure TdwsProgramExecution.RaiseAssertionFailedFmt(fromExpr : TExprBase; const fmt : String; const args : array of const; const scriptPos : TScriptPos);
+procedure TdwsProgramExecution.RaiseAssertionFailedFmt(fromExpr : TExprBase; const fmt : String; const args : array of const;
+                                                       const scriptPos : TScriptPos; exec : TdwsExecution);
 var
    exceptObj : IScriptObj;
    fmtMsg : String;
+   e : EScriptAssertionFailed;
 begin
    SetScriptError(fromExpr);
    fmtMsg:=Format(fmt, args);
@@ -2208,7 +2227,10 @@ begin
    (exceptObj.ExternalObject as TdwsExceptionContext).Skip(1); // temporary constructor expression
    if IsDebugging then
       DebuggerNotifyException(exceptObj);
-   raise EScriptAssertionFailed.Create(fmtMsg, exceptObj, scriptPos)
+   e := EScriptAssertionFailed.Create(fmtMsg, exceptObj, scriptPos);
+   if exec <> nil then
+      e.ScriptCallStack := exec.GetCallStack;
+   raise e;
 end;
 
 // CreateEDelphiObj
@@ -2431,7 +2453,7 @@ begin
    try
       destroySym := CompilerContext.TypDefaultDestructor;
       expr := TDestructorVirtualExpr.Create(CompilerContext, cNullPos, destroySym,
-                                            TConstExpr.Create(cNullPos, ScriptObj.ClassSym, scriptObj));
+                                            TConstExpr.CreateValue(cNullPos, ScriptObj.ClassSym, scriptObj));
 
       caller:=CallStackLastExpr;
       if caller<>nil then begin
@@ -2549,6 +2571,20 @@ end;
 function TdwsProgramExecution.GetProg : IdwsProgram;
 begin
    Result:=FProg;
+end;
+
+// HasProgram
+//
+function TdwsProgramExecution.HasProgram : Boolean;
+begin
+   Result := FProg <> nil;
+end;
+
+// HasCompileErrors
+//
+function TdwsProgramExecution.HasCompileErrors : Boolean;
+begin
+   Result := (FProg <> nil) and FProg.CompileMsgs.HasErrors;
 end;
 
 // EnterRecursion
@@ -3841,11 +3877,8 @@ end;
 // EvalAsScriptDynArray
 //
 procedure TProgramExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
-var
-   intf : IUnknown;
 begin
-   EvalAsInterface(exec, intf);
-   Result := intf as IScriptDynArray;
+   EvalAsInterface(exec, IUnknown(result));
 end;
 
 // EvalAsScriptAssociativeArray
@@ -3981,6 +4014,15 @@ end;
 procedure TProgramExpr.RaiseLowerExceeded(exec : TdwsExecution; index : Integer);
 begin
    RaiseScriptError(exec, EScriptOutOfBounds.CreateFmt(RTE_ArrayLowerBoundExceeded, [index]));
+end;
+
+// BoundsCheckFailed
+//
+procedure TProgramExpr.BoundsCheckFailed(exec : TdwsExecution; index : Integer);
+begin
+   if index < 0 then
+      RaiseLowerExceeded(exec, index)
+   else RaiseUpperExceeded(exec, index);
 end;
 
 // CheckScriptObject
@@ -4553,6 +4595,7 @@ function TFuncExprBase.Optimize(context : TdwsCompilerContext) : TProgramExpr;
 var
    buf : Variant;
    prog : TdwsProgram;
+   resultDC : IDataContext;
 begin
    Result:=Self;
    if IsConstant then begin
@@ -4565,8 +4608,8 @@ begin
          end else begin
             context.Execution.Stack.Push(prog.DataSize);
             try
-               EvalAsVariant(context.Execution, buf);
-               Result:=TConstExpr.Create(ScriptPos, typ, context.Execution.Stack.Data, FResultAddr);
+               GetDataPtr(context.Execution, resultDC);
+               Result:=TConstExpr.CreateData(ScriptPos, typ, resultDC);
             finally
                context.Execution.Stack.Pop(prog.DataSize);
             end;
@@ -4693,6 +4736,16 @@ begin
          Result:=expr.Typ
       else Result:=nil;
    end else Result:=nil;
+end;
+
+// ArgIsOfType
+//
+function TFuncExprBase.ArgIsOfType(idx : Integer; aTyp : TTypeSymbol) : Boolean;
+var
+   argTyp : TTypeSymbol;
+begin
+   argTyp := GetArgType(idx);
+   Result := (argTyp <> nil) and argTyp.IsOfType(aTyp);
 end;
 
 // ------------------
@@ -4856,11 +4909,9 @@ end;
 procedure TPushOperator.ExecuteTempAddr(exec : TdwsExecution);
 var
    vpd : IDataContext;
-   data : TData;
 begin
-   SetLength(data, 1);
-   FArgExpr.EvalAsVariant(exec, data[0]);
-   exec.DataContext_Create(data, 0, vpd);
+   exec.DataContext_CreateEmpty(1, vpd);
+   FArgExpr.EvalAsVariantToDataContext(exec, vpd, 0);
    exec.Stack.WriteInterfaceValue(exec.Stack.StackPointer+FStackAddr, vpd);
 end;
 
@@ -4870,13 +4921,10 @@ procedure TPushOperator.ExecuteTempData(exec : TdwsExecution);
 var
    vpd : IDataContext;
    dataExpr : TDataExpr;
-   data : TData;
 begin
-   SetLength(data, FArgExpr.Typ.Size);
+   dataExpr := TDataExpr(FArgExpr);
 
-   dataExpr:=TDataExpr(FArgExpr);
-   exec.DataContext_Create(data, 0, vpd);
-
+   exec.DataContext_CreateEmpty(FArgExpr.Typ.Size, vpd);
    vpd.WriteData(dataExpr.DataPtr[exec], FArgExpr.Typ.Size);
 
    exec.Stack.WriteInterfaceValue(exec.Stack.StackPointer+FStackAddr, vpd);
@@ -4888,14 +4936,12 @@ procedure TPushOperator.ExecuteTempArrayAddr(exec : TdwsExecution);
 var
    ace : TArrayConstantExpr;
    vpd : IDataContext;
-   data : TData;
 begin
    ace:=TArrayConstantExpr(FArgExpr);
-   SetLength(data, ace.Size);
 
-   exec.DataContext_Create(data, 0, vpd);
+   exec.DataContext_CreateEmpty(ace.Size, vpd);
 
-   ace.EvalAsTData(exec, vpd.AsPData^);
+   ace.EvalToDataContext(exec, vpd, 0);
 
    exec.Stack.WriteInterfaceValue(exec.Stack.StackPointer+FStackAddr, vpd);
 end;
@@ -4981,8 +5027,7 @@ var
    dataExpr : TDataExpr;
 begin
    dataExpr:=TDataExpr(FArgExpr);
-   dataExpr.DataPtr[exec].CopyData(exec.Stack.Data, exec.Stack.StackPointer+FStackAddr,
-                                   FTypeParamSym.Typ.Size);
+   exec.Stack.WriteData(exec.Stack.StackPointer+FStackAddr, dataExpr.DataPtr[exec], 0, FTypeParamSym.Typ.Size);
 end;
 
 // ExecuteConstData
@@ -4991,15 +5036,18 @@ procedure TPushOperator.ExecuteConstData(exec : TdwsExecution);
 var
    constExpr : TConstExpr;
 begin
-   constExpr:=TConstExpr(FArgExpr);
-   exec.Stack.WriteData(0, exec.Stack.StackPointer+FStackAddr, Length(constExpr.Data), constExpr.Data);
+   constExpr := TConstExpr(FArgExpr);
+   exec.Stack.WriteData(exec.Stack.StackPointer+FStackAddr, constExpr.DataContext, 0, constExpr.Typ.Size);
 end;
 
 // ExecuteInitResult
 //
 procedure TPushOperator.ExecuteInitResult(exec : TdwsExecution);
+var
+   buf : IDataContext;
 begin
-   TTypeSymbol(FArgExpr).InitData(exec.Stack.Data, exec.Stack.StackPointer+FStackAddr);
+   exec.DataContext_CreateStack(FStackAddr, buf);
+   TTypeSymbol(FArgExpr).InitDataContext(buf, 0);
 end;
 
 // ExecuteLazy
@@ -5701,12 +5749,9 @@ end;
 // GetDataPtr
 //
 procedure TAnonymousFuncRefExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
-var
-   data : TData;
 begin
-   SetLength(data, 1);
-   EvalAsVariant(exec, data[0]);
-   exec.DataContext_Create(data, 0, result);
+   exec.DataContext_CreateEmpty(1, result);
+   EvalAsVariantToDataContext(exec, result, 0);
 end;
 
 // ------------------
@@ -6025,7 +6070,7 @@ var
 begin
    if IsConstant then begin
       EvalAsVariant(context.Execution, v);
-      Result := TConstExpr.Create(ScriptPos, context.TypVariant, v);
+      Result := TConstExpr.CreateValue(ScriptPos, context.TypVariant, v);
       Orphan(context);
    end else Result:=Self;
 end;
@@ -6465,7 +6510,7 @@ procedure TProgramInfo.GetSymbolInfo(sym : TSymbol; var info : IInfo);
    begin
       SetLength(dat, sym.Typ.Size);
       extVDM := TExternalVarDataMaster.Create(Execution, TExternalVarSymbol(sym));
-      if sym.Typ is TClassSymbol then
+      if sym.Typ.IsClassSymbol then
          extVDM.Read(Execution, dat); // initialize 'Self'-Object
       Execution.DataContext_Create(dat, 0, locData);
       TInfo.SetChild(Result, Self, sym.Typ, locData, extVDM);
@@ -6473,13 +6518,10 @@ procedure TProgramInfo.GetSymbolInfo(sym : TSymbol; var info : IInfo);
 
    procedure GetTypeSymbolInfo(sym : TSymbol; var Result : IInfo);
    var
-      dat : TData;
       locData : IDataContext;
    begin
-      if sym.BaseType is TClassSymbol then begin
-         SetLength(dat, 1);
-         VarClearSafe(dat[0]);
-         Execution.DataContext_Create(dat, 0, locData);
+      if sym.BaseType.IsClassSymbol then begin
+         Execution.DataContext_CreateEmpty(1, locData);
          Result := TInfoClassObj.Create(Self, sym, locData);
       end else Result:=nil;
    end;
@@ -6529,11 +6571,8 @@ procedure TProgramInfo.GetSymbolInfo(sym : TSymbol; var info : IInfo);
    end;
 
    procedure GetConstSymbol(sym : TConstSymbol; var Result : IInfo);
-   var
-      locData : IDataContext;
    begin
-      Execution.DataContext_Create(sym.Data, 0, locData);
-      TInfo.SetChild(Result, Self, sym.Typ, locData);
+      TInfo.SetChild(Result, Self, sym.Typ, sym.DataContext);
    end;
 
 begin
@@ -6641,21 +6680,18 @@ end;
 
 function TProgramInfo.GetTemp(const DataType: String): IInfo;
 var
-  data: TData;
+  data : IDataContext;
   typSym: TTypeSymbol;
-  locData : IDataContext;
 begin
   typSym := FTable.FindTypeSymbol(DataType, cvMagic);
 
   if not Assigned(typSym) then
     raise Exception.CreateFmt(RTE_DatatypeNotFound, [DataType]);
 
-  data := nil;
-  SetLength(data, typSym.Size);
-  typSym.InitData(data, 0);
+  data := TDataContext.CreateStandalone(typSym.Size);
+  typSym.InitDataContext(data, 0);
 
-  Execution.DataContext_Create(data, 0, locData);
-  TInfo.SetChild(Result, Self, typSym, locData);
+  TInfo.SetChild(Result, Self, typSym, data);
 end;
 
 // RaiseExceptObj
@@ -6798,15 +6834,14 @@ var
    stackAddr : Integer;
    exec : TdwsExecution;
 begin
-   sym:=FuncSym.Result;
-   if sym=nil then
+   sym := FuncSym.Result;
+   if sym = nil then
       RaiseVariableNotFound(SYS_RESULT);
-   Assert(sym.InheritsFrom(TDataSymbol));
-   exec:=Execution;
-   if sym.Level=FLevel then
-      stackAddr:=sym.StackAddr+exec.Stack.BasePointer
-   else stackAddr:=sym.StackAddr+exec.Stack.GetSavedBp(Level);
-   Result:=@exec.Stack.Data[stackAddr];
+   exec := Execution;
+   if sym.Level = FLevel then
+      stackAddr := sym.StackAddr + exec.Stack.BasePointer
+   else stackAddr := sym.StackAddr + exec.Stack.GetSavedBp(Level);
+   Result := @exec.Stack.Data[stackAddr];
 end;
 
 procedure TProgramInfo.SetResultAsVariant(const Value: Variant);
@@ -6882,22 +6917,24 @@ end;
 function TProgramInfo.GetParamDataContext(index : Integer) : IDataContext;
 var
    ip : TSymbolTable;
-   sym : TDataSymbol;
+   sym : TSymbol;
+   dataSym : TDataSymbol;
    stackAddr : Integer;
    exec : TdwsExecution;
 begin
-   ip:=FuncSym.Params;
-   if Cardinal(index)>=Cardinal(ip.Count) then begin
+   ip := FuncSym.Params;
+   if Cardinal(index) >= Cardinal(ip.Count) then begin
       RaiseIncorrectParameterIndex(index);
-      Result:=nil;
+      Result := nil;
    end else begin
-      sym:=TDataSymbol(ip[index]);
-      Assert(sym.InheritsFrom(TDataSymbol));
-      exec:=Execution;
-      if sym.Level=FLevel then
-         stackAddr:=sym.StackAddr+exec.Stack.BasePointer
-      else stackAddr:=sym.StackAddr+exec.Stack.GetSavedBp(Level);
-      if sym.InheritsFrom(TByRefParamSymbol) then begin
+      sym := ip[index];
+      Assert(sym.IsDataSymbol);
+      dataSym := TDataSymbol(sym);
+      exec := Execution;
+      if dataSym.Level = FLevel then
+         stackAddr := dataSym.StackAddr+exec.Stack.BasePointer
+      else stackAddr := dataSym.StackAddr+exec.Stack.GetSavedBp(Level);
+      if dataSym.InheritsFrom(TByRefParamSymbol) then begin
          Result := IDataContext(IUnknown(Execution.Stack.Data[stackAddr]))
       end else Result := exec.Stack.CreateDataContext(exec.Stack.Data, stackAddr);
    end;
@@ -7050,7 +7087,7 @@ begin
     // Check current class type. If not found cycle object ancestry
     typeSym := FindSymbolInUnits(unitList, AObject.ClassName);
     // If no exact match found then look for supported ancestors
-    if Assigned(typeSym) and (typeSym is TClassSymbol) then
+    if typeSym.IsClassSymbol then
       Result := TClassSymbol(typeSym);
 
     // Allowed to look through ancestor types
@@ -7061,7 +7098,7 @@ begin
         ParentRTTI := GetTypeData(AObject.ClassInfo).ParentInfo;
         repeat
           typeSym := FindSymbolInUnits(unitList, String(ParentRTTI^.Name));
-          if Assigned(typeSym) and (typeSym is TClassSymbol) then       // match found, stop searching
+          if typeSym.IsClassSymbol then       // match found, stop searching
           begin
             Result := TClassSymbol(typeSym);
             Break;
@@ -7222,30 +7259,28 @@ constructor TScriptObjInstance.Create(aClassSym : TClassSymbol; executionContext
 var
    externalClass : TClassSymbol;
    fieldIter : TFieldSymbol;
-   instanceData : PData;
 begin
-   FClassSym:=aClassSym;
-   if aClassSym=nil then Exit;
+   FClassSym := aClassSym;
+   if aClassSym = nil then Exit;
 
-   if executionContext<>nil then
+   if executionContext <> nil then
       executionContext.ScriptObjCreated(Self);
 
    SetDataLength(aClassSym.ScriptInstanceSize);
 
    // initialize fields
-   instanceData:=AsPData;
-   fieldIter:=aClassSym.FirstField;
-   while fieldIter<>nil do begin
-      fieldIter.InitData(instanceData^, 0);
-      fieldIter:=fieldIter.NextField;
+   fieldIter := aClassSym.FirstField;
+   while fieldIter <> nil do begin
+      fieldIter.InitDataContext(Self, 0);
+      fieldIter := fieldIter.NextField;
    end;
 
    // initialize OnObjectDestroy
-   externalClass:=aClassSym;
-   while (externalClass<>nil) and not Assigned(externalClass.OnObjectDestroy) do
-      externalClass:=externalClass.Parent;
-   if externalClass<>nil then
-      FOnObjectDestroy:=externalClass.OnObjectDestroy;
+   externalClass := aClassSym;
+   while (externalClass <> nil) and not Assigned(externalClass.OnObjectDestroy) do
+      externalClass := externalClass.Parent;
+   if externalClass <> nil then
+      FOnObjectDestroy := externalClass.OnObjectDestroy;
 end;
 
 // Destroy
@@ -7296,6 +7331,25 @@ begin
    inherited;
 end;
 
+// NewInstance
+//
+var
+   vScriptObjTemplate : TClassInstanceTemplate<TScriptObjInstance>;
+class function TScriptObjInstance.NewInstance: TObject;
+begin
+   if not vScriptObjTemplate.Initialized then
+      Result := inherited NewInstance
+   else Result := vScriptObjTemplate.CreateInstance;
+end;
+
+// FreeInstance
+//
+procedure TScriptObjInstance.FreeInstance;
+begin
+   ClearData;
+   vScriptObjTemplate.ReleaseInstance(Self);
+end;
+
 // ToString
 //
 function TScriptObjInstance.ToString : String;
@@ -7324,11 +7378,16 @@ function TScriptObjInstance.FieldAddress(const fieldName : String) : Integer;
 var
    clsSym : TClassSymbol;
    field : TFieldSymbol;
+   sym : TSymbol;
 begin
+   field := nil;
    clsSym := FClassSym;
    repeat
-      field := TFieldSymbol(clsSym.Members.FindLocal(fieldName, TFieldSymbol));
-      if field <> nil then break;
+      sym := clsSym.Members.FindLocal(fieldName);
+      if (sym <> nil) and (sym.ClassType = TFieldSymbol) then begin
+         field := TFieldSymbol(sym);
+         Break;
+      end;
       clsSym := clsSym.Parent;
    until clsSym = nil;
    if field = nil then
@@ -7340,7 +7399,7 @@ end;
 //
 function TScriptObjInstance.FieldAsString(const fieldName : String) : String;
 begin
-   Result := AsString[FieldAddress(fieldName)];
+   EvalAsString(FieldAddress(fieldName), Result);
 end;
 
 // FieldAsInteger
@@ -7427,12 +7486,12 @@ end;
 
 // TScriptAssociativeInteger_InitData
 //
-procedure TScriptAssociativeArray_InitData(typ : TTypeSymbol; var result : Variant);
+procedure TScriptAssociativeArray_InitData(typ : TTypeSymbol; const resultDC : IDataContext; offset : NativeInt);
 var
    a : TAssociativeArraySymbol;
 begin
-   a:=(typ as TAssociativeArraySymbol);
-   result:=IScriptAssociativeArray(TScriptAssociativeArray.CreateNew(a.KeyType, a.Typ));
+   a := (typ as TAssociativeArraySymbol);
+   resultDC.AsInterface[offset] := IScriptAssociativeArray(TScriptAssociativeArray.CreateNew(a.KeyType, a.Typ));
 end;
 
 // CreateNew
@@ -7449,11 +7508,12 @@ begin
    else size := 0;
    Result.FKeyTyp := keyTyp;
    Result.FKeySize := size;
+   Result.FKeys := TDataContext.CreateStandalone(0);
 
    if elemTyp <> nil then begin
       size := elemTyp.Size;
       ct := elemTyp.UnAliasedType.ClassType;
-      Result.FCreateKeyOnAccess := (ct = TDynamicArraySymbol) or (ct = TAssociativeArraySymbol)
+      Result.FCreateKeyOnAccess := (ct = TDynamicArraySymbol) or (ct = TAssociativeArraySymbol) or (size > 1)
    end else size := 0;
    Result.FElementTyp := elemTyp;
    Result.FElementSize := size;
@@ -7480,14 +7540,13 @@ begin
    FGrowth:=(FCapacity*11) div 16;
 
    oldHashCodes:=FHashCodes;
-   oldKeys:=FKeys;
+   oldKeys := FKeys.AsPData^;
    oldData := AsPData^;
 
    FHashCodes:=nil;
    SetLength(FHashCodes, FCapacity);
 
-   FKeys:=nil;
-   SetLength(FKeys, FCapacity*FKeySize);
+   FKeys := TDataContext.CreateStandalone(FCapacity*FKeySize);
 
    ClearData;
    SetDataLength(FCapacity*FElementSize);
@@ -7499,7 +7558,7 @@ begin
       while FHashCodes[j]<>0 do
          j:=(j+1) and n;
       FHashCodes[j]:=oldHashCodes[i];
-      DWSCopyData(oldKeys, i*FKeySize, FKeys, j*FKeySize, FKeySize);
+      DWSCopyData(oldKeys, i*FKeySize, FKeys.AsPData^, j*FKeySize, FKeySize);
       DWSCopyData(oldData, i*FElementSize, AsPData^, j*FElementSize, FElementSize);
    end;
 end;
@@ -7554,7 +7613,7 @@ var
 begin
    for i := 0 to High(FHashCodes) do begin
       if FHashCodes[i] <> 0 then
-         Assert(TVarData(AsVariant[i]).VType <> 0);
+         Assert(TVarData(AsVariant[i*FElementSize]).VType <> 0);
    end;
 end;
 
@@ -7564,7 +7623,7 @@ procedure TScriptAssociativeArray.ReplaceValue(exec : TdwsExecution; index, valu
 
    procedure WriteDataExpr(index : Integer);
    begin
-      WriteData(index*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), FElementSize)
+      WriteData(index*FElementSize, (value as TDataExpr).GetDataPtrFunc(exec), 0, FElementSize)
    end;
 
 var
@@ -7578,7 +7637,7 @@ begin
    i:=(hashCode and (FCapacity-1));
    if not LinearFind(key, i) then begin
       FHashCodes[i]:=hashCode;
-      key.CopyData(FKeys, i*FKeySize, FKeySize);
+      FKeys.WriteData(i*FKeySize, key,0, FKeySize);
       Inc(FCount);
    end;
    if FElementSize > 1 then
@@ -7612,7 +7671,6 @@ var
    i : Integer;
    hashCode : Cardinal;
    key : IDataContext;
-   buf : Variant;
 begin
    if FCreateKeyOnAccess then
       if FCount >= FGrowth then Grow;
@@ -7626,16 +7684,20 @@ begin
       end;
    end;
 
-   exec.DataContext_CreateEmpty(FElementSize, result);
-   FElementTyp.InitDataContext(result);
-
    if FCreateKeyOnAccess then begin
-      Assert(FElementSize = 1);
+
+      CreateOffset(i*FElementSize, result);
+      FElementTyp.InitDataContext(result, 0);
+
       FHashCodes[i] := hashCode;
-      key.CopyData(FKeys, i*FKeySize, FKeySize);
+      FKeys.WriteData(i*FKeySize, key, 0, FKeySize);
       Inc(FCount);
-      result.EvalAsVariant(0, buf);
-      AsVariant[i] := buf;
+
+   end else begin
+
+      exec.DataContext_CreateEmpty(FElementSize, result);
+      FElementTyp.InitDataContext(result, 0);
+
    end;
 end;
 
@@ -7645,6 +7707,7 @@ procedure TScriptAssociativeArray.GetDataAsVariant(exec : TdwsExecution; const k
 var
    hashCode : Cardinal;
    i : Integer;
+   dc : IDataContext;
 begin
    if FCreateKeyOnAccess then
       if FCount >= FGrowth then Grow;
@@ -7658,8 +7721,9 @@ begin
       end;
    end else hashcode := 0;
 
-   VarClearSafe(result);
-   FElementTyp.InitVariant(result);
+   dc := TDataContext.CreateStandalone(1);
+   FElementTyp.InitDataContext(dc, 0);
+   dc.EvalAsVariant(0, result);
 
    if FCreateKeyOnAccess then begin
       FHashCodes[i] := hashCode;
@@ -7759,7 +7823,7 @@ begin
          Exit;
       end;
    end;
-   result := '';
+   FElementTyp.InitString(result);
 end;
 
 // GetDataAsString
@@ -7777,7 +7841,7 @@ begin
          Exit;
       end;
    end;
-   result := '';
+   FElementTyp.InitString(result);
 end;
 
 // ContainsKey
@@ -7820,7 +7884,7 @@ begin
 
       if ((gap >= k) or (k > i)) and ((i >= gap) or (k <= gap)) and ((i >= gap) or (k > i)) then begin
          InternalCopyData(i*FElementSize, gap*FElementSize, FElementSize);
-         DWSCopyData(FKeys, i*FKeySize, gap*FKeySize, FKeySize);
+         DWSCopyData(FKeys.AsPData^, i*FKeySize, gap*FKeySize, FKeySize);
          FHashCodes[gap] := FHashCodes[i];
          FHashCodes[i] := 0;
          gap := i;
@@ -7828,13 +7892,13 @@ begin
    until False;
 
    FHashCodes[gap] := 0;
-   FKeyTyp.InitData(FKeys, gap*FKeySize);
-   FElementTyp.InitData(AsPData^, gap*FElementSize);
+   FKeyTyp.InitDataContext(FKeys, gap*FKeySize);
+   FElementTyp.InitDataContext(Self, gap*FElementSize);
    Dec(FCount);
 
    Result := True;
 
-   DebugIntegrityCheck;
+   //DebugIntegrityCheck;
 end;
 
 // Clear
@@ -7842,7 +7906,7 @@ end;
 procedure TScriptAssociativeArray.Clear;
 begin
    SetDataLength(0);
-   FKeys:=nil;
+   FKeys := TDataContext.CreateStandalone(0);
    FHashCodes:=nil;
    FCount:=0;
    FCapacity:=0;
@@ -7856,7 +7920,7 @@ begin
    if Cardinal(index) >= Cardinal(FCapacity) then Exit(False);
    if FHashCodes[index] = 0 then Exit(False);
 
-   DWSCopyData(FKeys, index*FKeySize, key, 0, FKeySize);
+   DWSCopyData(FKeys.AsPData^, index*FKeySize, key, 0, FKeySize);
    CreateOffset(index*FElementSize, value);
    Result := True;
 end;
@@ -7877,23 +7941,23 @@ end;
 
 // CopyKeys
 //
-function TScriptAssociativeArray.CopyKeys : TData;
+procedure TScriptAssociativeArray.CopyKeys(const dest : IScriptDynArray);
 var
    i, k : Integer;
 begin
-   SetLength(Result, FKeySize*FCount);
+   dest.ArrayLength := FCount;
    k := 0;
    if FKeySize > 1 then begin
       for i := 0 to FCapacity-1 do begin
          if FHashCodes[i] <> 0 then begin
-            DWSCopyData(FKeys, i*FKeySize, Result, k, FKeySize);
+            dest.WriteData(k*FKeySize, FKeys, i*FKeySize, FKeySize);
             Inc(k, FKeySize);
          end;
       end;
    end else begin
       for i := 0 to FCapacity-1 do begin
          if FHashCodes[i] <> 0 then begin
-            VarCopySafe(Result[k], FKeys[i]);
+            dest.AsVariant[k] := FKeys.AsVariant[i];
             Inc(k);
          end;
       end;
@@ -8175,7 +8239,7 @@ var
 begin
    msg.EvalAsString(exec, msgStr);
    (exec as TdwsProgramExecution).RaiseAssertionFailedFmt(nil,
-      RTE_PreConditionFailed, [funcSym.QualifiedName, scriptPos.AsInfo, msgStr], scriptPos);
+      RTE_PreConditionFailed, [funcSym.QualifiedName, scriptPos.AsInfo, msgStr], scriptPos, exec);
 end;
 
 // ------------------
@@ -8191,7 +8255,7 @@ var
 begin
    msg.EvalAsString(exec, msgStr);
    (exec as TdwsProgramExecution).RaiseAssertionFailedFmt(nil,
-      RTE_PostConditionFailed, [funcSym.QualifiedName, scriptPos.AsInfo, msgStr], scriptPos);
+      RTE_PostConditionFailed, [funcSym.QualifiedName, scriptPos.AsInfo, msgStr], scriptPos, exec);
 end;
 
 // ------------------
@@ -8400,10 +8464,14 @@ initialization
    TDynamicArraySymbol.SetInitDynamicArrayProc(TScriptDynamicArray_InitData);
    TAssociativeArraySymbol.SetInitAssociativeArrayProc(TScriptAssociativeArray_InitData);
 
+   vScriptObjTemplate.Initialize;
+
 finalization
 
    TdwsGuardianThread.Finalize;
    TdwsGuardianThread.vExecutionsPool.FreeAll;
+
+   vScriptObjTemplate.Finalize;
 
 end.
 

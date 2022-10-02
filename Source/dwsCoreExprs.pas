@@ -72,6 +72,7 @@ type
 
    TBaseTypeVarExpr = class (TVarExpr)
       public
+         procedure AssignExpr(exec : TdwsExecution; Expr: TTypedExpr); override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
          procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
    end;
@@ -384,11 +385,13 @@ type
 
          procedure EvalAsString(exec : TdwsExecution; var result : String); override;
          procedure EvalAsVariant(exec : TdwsExecution; var Result : Variant); override;
-         function EvalAsInteger(exec : TdwsExecution) : Int64; override;
-         function EvalAsFloat(exec : TdwsExecution) : Double; override;
-         function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
+         function  EvalAsInteger(exec : TdwsExecution) : Int64; override;
+         function  EvalAsFloat(exec : TdwsExecution) : Double; override;
+         function  EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
          procedure EvalAsScriptObj(exec : TdwsExecution; var Result : IScriptObj); override;
          procedure EvalAsInterface(exec : TdwsExecution; var result : IUnknown); override;
+         procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
+         procedure EvalAsScriptAssociativeArray(exec : TdwsExecution; var result : IScriptAssociativeArray); override;
 
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
 
@@ -446,22 +449,22 @@ type
    TAssignedExpr = class(TUnaryOpBoolExpr)
    end;
 
-   TAssignedInstanceExpr = class(TAssignedExpr)
+   TAssignedInstanceExpr = class sealed (TAssignedExpr)
    public
      function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
 
-   TAssignedInterfaceExpr = class(TAssignedExpr)
+   TAssignedInterfaceExpr = class sealed (TAssignedExpr)
    public
      function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
 
-   TAssignedMetaClassExpr = class(TAssignedExpr)
+   TAssignedMetaClassExpr = class sealed (TAssignedExpr)
    public
      function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
 
-   TAssignedFuncPtrExpr = class(TAssignedExpr)
+   TAssignedFuncPtrExpr = class sealed (TAssignedExpr)
    public
      function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
    end;
@@ -632,6 +635,7 @@ type
    TDivExpr = class(TIntegerBinOpExpr)
       function EvalAsInteger(exec : TdwsExecution) : Int64; override;
       function Optimize(context : TdwsCompilerContext) : TProgramExpr; override;
+      procedure RaiseDivisionByZero(exec : TdwsExecution);
    end;
    // a div const b
    TDivConstExpr = class(TIntegerBinOpExpr)
@@ -978,6 +982,7 @@ type
                                left : TDataExpr);
          function RightValue : Variant; override;
          procedure EvalNoResult(exec : TdwsExecution); override;
+         function SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr; override;
    end;
 
    // left := nil (class)
@@ -1100,6 +1105,14 @@ type
    TEnumerationElementQualifiedNameExpr = class (TEnumerationElementNameExpr)
       public
          procedure EvalAsString(exec : TdwsExecution; var result : String); override;
+   end;
+
+   // retrieve an enumeration element value by its name
+   TEnumerationElementByNameExpr = class (TUnaryOpIntExpr)
+      public
+         constructor Create(context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos;
+                            enumSymbol : TEnumerationSymbol; expr : TTypedExpr); reintroduce;
+         function EvalAsInteger(exec : TdwsExecution) : Int64; override;
    end;
 
    // statement; statement; statement;
@@ -1242,6 +1255,7 @@ type
 
          procedure TypeCheck(context : TdwsCompilerContext; typ : TTypeSymbol); virtual; abstract;
          function IsConstant : Boolean; virtual; abstract;
+         function ApplyToConstantMask(var mask : UInt64) : Boolean; virtual;
          function IsExpr(aClass : TClass) : Boolean; virtual; abstract;
 
          property ScriptPos : TScriptPos read FScriptPos;
@@ -1275,6 +1289,7 @@ type
 
          procedure TypeCheck(context : TdwsCompilerContext; typ : TTypeSymbol); override;
          function IsConstant : Boolean; override;
+         function ApplyToConstantMask(var mask : UInt64) : Boolean; override;
          function IsExpr(aClass : TClass) : Boolean; override;
 
          property CompareExpr : TTypedExpr read FCompareExpr;
@@ -1319,6 +1334,7 @@ type
 
          procedure TypeCheck(context : TdwsCompilerContext; typ : TTypeSymbol); override;
          function IsConstant : Boolean; override;
+         function ApplyToConstantMask(var mask : UInt64) : Boolean; override;
          function IsExpr(aClass : TClass) : Boolean; override;
 
          property FromExpr : TTypedExpr read FFromExpr;
@@ -1430,12 +1446,12 @@ type
    // bitwise val in [case conditions list]
    TBitwiseInOpExpr = class(TUnaryOpBoolExpr)
       private
-         FMask : Integer;
+         FMask : UInt32;
 
       public
          function EvalAsBoolean(exec : TdwsExecution) : Boolean; override;
 
-         property Mask : Integer read FMask write FMask;
+         property Mask : UInt32 read FMask write FMask;
    end;
 
    // for FVarExpr := FFromExpr to FToExpr do FDoExpr;
@@ -1724,7 +1740,7 @@ type
          procedure EvalNoResult(exec : TdwsExecution); override;
    end;
 
-   TStringArraySetExpr = class(TNoResultExpr)
+   TStringArraySetExpr = class (TNoResultExpr)
       private
          FStringExpr: TDataExpr;
          FIndexExpr: TTypedExpr;
@@ -1839,7 +1855,7 @@ var
 begin
    typ := dataSym.Typ.UnAliasedType;
    if dataSym.ClassType = TSelfSymbol then begin
-      if typ is TClassSymbol then
+      if typ.IsClassSymbol then
          Result := TSelfObjectVarExpr.Create(scriptPos, dataSym)
       else Result := TSelfVarExpr.Create(scriptPos, dataSym);
    end else if typ.Size = 1 then begin
@@ -1851,7 +1867,7 @@ begin
          Result := TStrVarExpr.Create(scriptPos, dataSym)
       else if typ.IsOfType(context.TypBoolean) then
          Result := TBoolVarExpr.Create(scriptPos, dataSym)
-      else if (typ is TClassSymbol) or (typ is TDynamicArraySymbol) then
+      else if typ.IsClassSymbol or (typ is TDynamicArraySymbol) then
          Result := TObjectVarExpr.Create(scriptPos, dataSym)
       else Result := TBaseTypeVarExpr.Create(scriptPos, dataSym)
    end else Result := TVarExpr.Create(scriptPos, dataSym);
@@ -1908,7 +1924,7 @@ end;
 //
 procedure TVarExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
 begin
-   exec.Stack.InitDataPtr(Result, FStackAddr);
+   exec.Stack.InitBaseDataPtr(Result, FStackAddr);
 end;
 
 // GetRelativeDataPtr
@@ -1988,6 +2004,16 @@ end;
 // ------------------ TBaseTypeVarExpr ------------------
 // ------------------
 
+// AssignExpr
+//
+procedure TBaseTypeVarExpr.AssignExpr(exec : TdwsExecution; Expr: TTypedExpr);
+var
+   buf : Variant;
+begin
+   Expr.EvalAsVariant(exec, buf);
+   exec.Stack.WriteValue(exec.Stack.BasePointer + FStackAddr, buf);
+end;
+
 // EvalAsVariant
 //
 procedure TBaseTypeVarExpr.EvalAsVariant(exec : TdwsExecution; var Result : Variant);
@@ -2052,7 +2078,8 @@ end;
 //
 function TIntVarExpr.EvalAsPInteger(exec : TdwsExecution) : PInt64;
 begin
-   Result:=exec.Stack.PointerToIntValue(exec.Stack.BasePointer+FStackAddr);
+//   Result:=exec.Stack.PointerToIntValue(exec.Stack.BasePointer+FStackAddr);
+   Result:=exec.Stack.PointerToIntValue_BaseRelative(FStackAddr);
 end;
 
 // ------------------
@@ -2206,14 +2233,14 @@ end;
 
 function TBoolVarExpr.EvalAsBoolean(exec : TdwsExecution) : Boolean;
 begin
-   Result:=exec.Stack.ReadBoolValue(exec.Stack.BasePointer + FStackAddr);
+   Result:=exec.Stack.ReadBoolValue_BaseRelative(FStackAddr);
 end;
 
 // EvalAsInteger
 //
 function TBoolVarExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
 begin
-   Result:=Int64(exec.Stack.ReadBoolValue(exec.Stack.BasePointer + FStackAddr));
+   Result := Ord(exec.Stack.ReadBoolValue_BaseRelative(FStackAddr));
 end;
 
 // ------------------
@@ -2307,14 +2334,14 @@ end;
 //
 function TVarParentExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
 begin
-   Result:=exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr];
+   VariantToInt64(exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr], Result);
 end;
 
 // EvalAsFloat
 //
 function TVarParentExpr.EvalAsFloat(exec : TdwsExecution) : Double;
 begin
-   Result:=exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr];
+   Result := VariantToFloat(exec.Stack.Data[exec.Stack.GetSavedBp(FLevel)+FStackAddr]);
 end;
 
 // ------------------
@@ -2807,7 +2834,7 @@ var
    dc : IDataContext;
 begin
    FExpr.GetDataPtr(exec, dc);
-   FExpr.Typ.InitDataContext(dc);
+   FExpr.Typ.InitDataContext(dc, 0);
 end;
 
 // GetSubExpr
@@ -2847,19 +2874,21 @@ var
    dataExpr : TDataExpr;
    fieldSym : TFieldSymbol;
    fieldAddr : Integer;
+   dc : IDataContext;
 begin
    recType:=TRecordSymbol(Typ);
    for sym in recType.Members do begin
       if sym.ClassType=TFieldSymbol then begin
          fieldSym := TFieldSymbol(sym);
          expr := fieldSym.DefaultExpr;
-         if expr = nil then
-            fieldSym.InitData(exec.Stack.Data, exec.Stack.BasePointer+FAddr)
-         else begin
+         if expr = nil then begin
+            exec.DataContext_CreateBase(FAddr, dc);
+            fieldSym.InitDataContext(dc, 0);
+         end else begin
             fieldAddr := exec.Stack.BasePointer+FAddr+fieldSym.Offset;
             if (expr is TDataExpr) and (TDataExpr(expr).Typ.Size > 1) then begin
                dataExpr := TDataExpr(expr);
-               dataExpr.DataPtr[exec].CopyData(exec.Stack.Data, fieldAddr, fieldSym.Size);
+               exec.Stack.WriteData(fieldAddr, dataExpr.DataPtr[exec], 0, fieldSym.Size);
             end else expr.EvalAsVariant(exec, exec.Stack.Data[fieldAddr]);
          end;
       end;
@@ -3054,6 +3083,20 @@ end;
 // EvalAsInterface
 //
 procedure TFieldExpr.EvalAsInterface(exec : TdwsExecution; var result : IUnknown);
+begin
+   GetScriptObj(exec).EvalAsInterface(FieldSym.Offset, PIUnknown(@Result)^);
+end;
+
+// EvalAsScriptDynArray
+//
+procedure TFieldExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
+begin
+   GetScriptObj(exec).EvalAsInterface(FieldSym.Offset, PIUnknown(@Result)^);
+end;
+
+// EvalAsScriptAssociativeArray
+//
+procedure TFieldExpr.EvalAsScriptAssociativeArray(exec : TdwsExecution; var result : IScriptAssociativeArray);
 begin
    GetScriptObj(exec).EvalAsInterface(FieldSym.Offset, PIUnknown(@Result)^);
 end;
@@ -3359,36 +3402,32 @@ function TInOpExpr.Optimize(context : TdwsCompilerContext) : TProgramExpr;
    end;
 
 var
-   enumSym : TEnumerationSymbol;
-   value : Variant;
-   i, k, mask : Integer;
+   i : Integer;
+   mask : UInt64;
    cc : TCaseCondition;
    iioe : TIntegerInOpExpr;
 begin
-   Result:=Self;
-   // if left is an enumeration with 31 or less symbols (31 is limit for JS)
-   // and conditions are constants, then it can be optimized to a bitwise test
-   if (FLeft.Typ is TEnumerationSymbol) and ConstantConditions then begin
+   Result := Self;
 
-      enumSym:=TEnumerationSymbol(FLeft.Typ);
-      if (enumSym.LowBound<0) or (enumSym.HighBound>31) then Exit;
-      mask:=0;
-      for k:=enumSym.LowBound to enumSym.HighBound do begin
-         value:=Int64(k);
-         for i:=0 to FCaseConditions.Count-1 do begin
-            cc:=TCaseCondition(FCaseConditions.List[i]);
-            if cc.IsTrue(context.Execution, Value) then begin
-               mask:=mask or (1 shl k);
-               Break;
-            end;
+   if FLeft.IsOfType(context.TypInteger) then begin
+
+      // all case conditions are constanst and in the 0..31 range (31 is limit for JS)
+      // then it can be optimized to a bitwise test
+      mask := 0;
+      for i := 0 to FCaseConditions.Count-1 do begin
+         cc := TCaseCondition(FCaseConditions.List[i]);
+         if not cc.ApplyToConstantMask(mask) then begin
+            mask := 0;
+            Break;
          end;
       end;
-      Result:=TBitwiseInOpExpr.Create(context, ScriptPos, FLeft);
-      TBitwiseInOpExpr(Result).Mask:=mask;
-      FLeft:=nil;
-      Orphan(context);
-
-   end else if FLeft.IsOfType(context.TypInteger) then begin
+      if (mask > 0) and (mask <= $FFFFFFFF) then begin
+         Result := TBitwiseInOpExpr.Create(context, ScriptPos, FLeft);
+         TBitwiseInOpExpr(Result).Mask := mask;
+         FLeft := nil;
+         Orphan(context);
+         Exit;
+      end;
 
       if TCaseConditionsHelper.CanOptimizeToTyped(FCaseConditions, TConstIntExpr) then begin
          iioe := TIntegerInOpExpr.Create(context, Left);
@@ -3682,6 +3721,45 @@ begin
 end;
 
 // ------------------
+// ------------------ TEnumerationElementByNameExpr ------------------
+// ------------------
+
+// Create
+//
+constructor TEnumerationElementByNameExpr.Create(
+   context : TdwsBaseSymbolsContext; const aScriptPos : TScriptPos;
+   enumSymbol : TEnumerationSymbol; expr : TTypedExpr);
+begin
+   inherited Create(context, aScriptPos, expr);
+   Typ := enumSymbol;
+end;
+
+// EvalAsInteger
+//
+function TEnumerationElementByNameExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+var
+   enumSymbol : TEnumerationSymbol;
+   elementSymbol : TElementSymbol;
+   name : String;
+   p : Integer;
+begin
+   enumSymbol := TEnumerationSymbol(Typ);
+   Expr.EvalAsString(exec, name);
+   p := StrIndexOfChar(name, '.');
+   if p > 0 then begin
+      Dec(p);
+      if (Length(enumSymbol.Name) <> p) or (UnicodeCompareLen(PChar(enumSymbol.Name), PChar(name), p) <> 0) then
+         Exit(0);
+      name := Copy(name, p+2);
+   end;
+   elementSymbol := enumSymbol.ElementByName(name);
+   if elementSymbol <> nil then
+      Result := elementSymbol.Value
+   else Result := 0;
+end;
+
+
+// ------------------
 // ------------------ TAssertExpr ------------------
 // ------------------
 
@@ -3715,7 +3793,7 @@ procedure TAssertExpr.EvalNoResult(exec : TdwsExecution);
          FMessage.EvalAsString(exec, msg);
          msg:=' : '+msg;
       end else msg:='';
-      (exec as TdwsProgramExecution).RaiseAssertionFailed(Self, msg, FScriptPos);
+      (exec as TdwsProgramExecution).RaiseAssertionFailed(Self, msg, FScriptPos, exec);
    end;
 
 begin
@@ -4441,13 +4519,14 @@ end;
 // TDivExpr
 //
 function TDivExpr.EvalAsInteger(exec : TdwsExecution) : Int64;
+var
+   n, d : Int64;
 begin
-   try
-      Result:=FLeft.EvalAsInteger(exec) div FRight.EvalAsInteger(exec);
-   except
-      exec.SetScriptError(Self);
-      raise;
-   end;
+   n := FLeft.EvalAsInteger(exec);
+   d := FRight.EvalAsInteger(exec);
+   if d = 0 then
+      RaiseDivisionByZero(exec);
+   Result := n div d;
 end;
 
 // Optimize
@@ -4463,6 +4542,14 @@ begin
       Right:=nil;
       Orphan(context);
    end;
+end;
+
+// RaiseDivisionByZero
+//
+procedure TDivExpr.RaiseDivisionByZero(exec : TdwsExecution);
+begin
+   exec.SetScriptError(Self);
+   RaiseScriptError(exec, EScriptError.Create(CPE_DivisionByZero));
 end;
 
 // ------------------
@@ -5409,26 +5496,24 @@ procedure TAssignArrayConstantExpr.EvalNoResult(exec : TdwsExecution);
 var
    dynIntf : IScriptDynArray;
    dynObj : IScriptDynArray;
-   srcData : TData;
-   dataPtr : IDataContext;
+   srcData : IDataContext;
 begin
-   TArrayConstantExpr(FRight).EvalAsTData(exec, srcData);
+   TArrayConstantExpr(FRight).GetDataPtr(exec, srcData);
    if FLeft.Typ.ClassType = TDynamicArraySymbol then begin
       // to dynamic array
       FLeft.EvalAsScriptDynArray(exec, dynIntf);
       if dynIntf=nil then begin
          // first init
-         dynObj := CreateNewDynamicArray(TDynamicArraySymbol(FLeft.Typ).Typ);
+         CreateNewDynamicArray(TDynamicArraySymbol(FLeft.Typ).Typ, dynObj);
          FLeft.AssignValueAsScriptDynArray(exec, dynObj);
       end else begin
          dynObj := dynIntf;
       end;
-      dynObj.ArrayLength := Length(srcData) div dynObj.ElementSize;
-      dynObj.WriteData(srcData, 0, Length(srcData));
+      dynObj.ArrayLength := srcData.DataLength div dynObj.ElementSize;
+      dynObj.WriteData(0, srcData, 0, srcData.DataLength);
    end else begin
       // to static array
-      exec.DataContext_Create(srcData, 0, dataPtr);
-      FLeft.AssignData(exec, dataPtr);
+      FLeft.AssignData(exec, srcData);
    end;
 end;
 
@@ -5670,6 +5755,30 @@ begin
    TVarExpr(FLeft).AssignValueAsScriptObj(exec, nil);
 end;
 
+// SpecializeProgramExpr
+//
+function TAssignNilToVarExpr.SpecializeProgramExpr(const context : ISpecializationContext) : TProgramExpr;
+var
+   specializedLeft : TDataExpr;
+begin
+   specializedLeft := Left.SpecializeDataExpr(context);
+   if specializedLeft = nil then Exit(nil);
+   if specializedLeft.Typ.IsCompatible(context.BaseSymbols.TypNil) then begin
+      Result := TAssignNilToVarExpr.CreateVal(
+         CompilerContextFromSpecialization(context), ScriptPos,
+         specializedLeft
+      )
+   end else begin
+      context.Msgs.AddCompilerErrorFmt(
+         ScriptPos, CPE_IncompatibleTypes,
+         [ specializedLeft.Typ.Name, context.BaseSymbols.TypNil ]
+      );
+      Result := nil;
+   end;
+   if Result = nil then
+      specializedLeft.Free;
+end;
+
 // ------------------
 // ------------------ TAssignNilClassToVarExpr ------------------
 // ------------------
@@ -5692,7 +5801,7 @@ var
    dataPtr : IDataContext;
 begin
    TVarExpr(FLeft).GetDataPtr(exec, dataPtr);
-   FLeft.Typ.InitDataContext(dataPtr);
+   FLeft.Typ.InitDataContext(dataPtr, 0);
 end;
 
 // ------------------
@@ -6633,6 +6742,13 @@ begin
            or (typ is TEnumerationSymbol);
 end;
 
+// ApplyToConstantMask
+//
+function TCaseCondition.ApplyToConstantMask(var mask : UInt64) : Boolean;
+begin
+   Result := False;
+end;
+
 // ------------------
 // ------------------ TCaseConditionsHelper ------------------
 // ------------------
@@ -6696,7 +6812,7 @@ var
    buf : Variant;
 begin
    FCompareExpr.EvalAsVariant(exec, buf);
-   Result:=(buf=value);
+   Result := VarCompareSafe(buf, value) = vrEqual;
 end;
 
 // StringIsTrue
@@ -6732,6 +6848,20 @@ end;
 function TCompareCaseCondition.IsConstant : Boolean;
 begin
    Result:=FCompareExpr.IsConstant;
+end;
+
+// ApplyToConstantMask
+//
+function TCompareCaseCondition.ApplyToConstantMask(var mask : UInt64) : Boolean;
+var
+   v : Int64;
+begin
+   if FCompareExpr is TConstIntExpr then begin
+      v := TConstIntExpr(FCompareExpr).Value;
+      Result := (UInt64(v) <= 63);
+      if Result then
+         mask := mask or (UInt64(1) shl v);
+   end else Result := False;
 end;
 
 // IsExpr
@@ -6770,8 +6900,21 @@ end;
 // IsTrue
 //
 function TCompareConstStringCaseCondition.IsTrue(exec : TdwsExecution; const value : Variant) : Boolean;
+
+   function Fallback : Boolean;
+   begin
+      if VariantIsString(value) then
+         Result := (value = FValue)
+      else Result := VarCompareSafe(value, FValue) = vrEqual;
+   end;
+
 begin
-   Result := VariantIsString(value) and (value = FValue);
+   case VarType(value) of
+      varUString :
+         Result := UnicodeString(TVarData(value).VUString) = FValue;
+   else
+      Result := Fallback;
+   end;
 end;
 
 // StringIsTrue
@@ -6908,6 +7051,23 @@ end;
 function TRangeCaseCondition.IsConstant : Boolean;
 begin
    Result:=FFromExpr.IsConstant and FToExpr.IsConstant;
+end;
+
+// ApplyToConstantMask
+//
+function TRangeCaseCondition.ApplyToConstantMask(var mask : UInt64) : Boolean;
+var
+   fromValue, toValue : Int64;
+begin
+   if (FromExpr is TConstIntExpr) and (ToExpr is TConstIntExpr) then begin
+      fromValue := TConstIntExpr(FromExpr).Value;
+      toValue := TConstIntExpr(ToExpr).Value;
+      Result := (UInt64(fromValue) <= 63) and (UInt64(toValue) <= 63);
+      if Result then begin
+         for fromValue := fromValue to toValue do
+            mask := mask or (UInt64(1) shl fromValue);
+      end;
+   end else Result := False;
 end;
 
 // IsExpr
@@ -8121,15 +8281,15 @@ procedure TSwapExpr.EvalNoResult(exec : TdwsExecution);
 
    procedure SwapN(size : Integer);
    var
-      buf : TData;
+      buf : IDataContext;
       dataPtr0, dataPtr1 : IDataContext;
    begin
-      SetLength(buf, size);
+      buf := exec.Stack.CreateEmpty(size);
       dataPtr0:=Arg0.DataPtr[exec];
       dataPtr1:=Arg1.DataPtr[exec];
-      dataPtr0.CopyData(buf, 0, size);
+      buf.WriteData(dataPtr0, size);
       dataPtr0.WriteData(dataPtr1, size);
-      dataPtr1.WriteData(buf, 0, size);
+      dataPtr1.WriteData(buf, size);
    end;
 
 var

@@ -75,7 +75,8 @@ type
          procedure Push(delta : Integer); inline;
          procedure Pop(delta : Integer); inline;
 
-         procedure WriteData(sourceAddr, destAddr, size: Integer; const sourceData: TData);
+         procedure WriteData(sourceAddr, destAddr, size: Integer; const sourceData: TData); overload;
+         procedure WriteData(destAddr : Integer; sourceDC : IDataContext; sourceAddr, size : NativeInt); overload;
          procedure ReadData(sourceAddr, destAddr, size: Integer; destData: TData);
          procedure CopyData(sourceAddr, destAddr, size: Integer);
 
@@ -100,15 +101,16 @@ type
          function  ReadFloatValue(sourceAddr : Integer) : Double; //inline;
          function  ReadFloatValue_BaseRelative(sourceAddr : Integer) : Double; inline;
          procedure ReadStrValue(sourceAddr : Integer; var Result : String);
-         function  ReadBoolValue(sourceAddr : Integer): Boolean;
+         function  ReadBoolValue_BaseRelative(addr : Integer): Boolean;
          procedure ReadInterfaceValue(sourceAddr : Integer; var Result : IUnknown);
 
-         function  PointerToIntValue(addr : Integer) : PInt64;
+         function  PointerToIntValue_BaseRelative(addr : Integer) : PInt64;
          function  PointerToFloatValue_BaseRelative(addr : Integer) : PDouble;
          function  PointerToStringValue_BaseRelative(addr : Integer) : PString;// inline;
          function  PointerToInterfaceValue_BaseRelative(addr : Integer) : PIUnknown;
 
-         procedure InitDataPtr(var dataPtr : IDataContext; addr : Integer); inline;
+         procedure InitStackDataPtr(var dataPtr : IDataContext; addr : Integer); inline;
+         procedure InitBaseDataPtr(var dataPtr : IDataContext; addr : Integer); inline;
          procedure InitDataPtrLevel(var dataPtr : IDataContext; level, addr : Integer); inline;
 
          procedure InitRelativeDataPtr(const getPData : TGetPDataFunc; var dataPtr : IDataContext; addr : Integer); inline;
@@ -452,16 +454,16 @@ begin
    {$endif}
 end;
 
-// ReadBoolValue
+// ReadBoolValue_BaseRelative
 //
-function TStackMixIn.ReadBoolValue(sourceAddr : Integer): Boolean;
+function TStackMixIn.ReadBoolValue_BaseRelative(addr : Integer) : Boolean;
 var
    varData : PVarData;
 begin
-   varData := @Data[sourceAddr];
-   if varData.VType=varBoolean then
+   varData := GetBaseDataP(addr);
+   if varData.VType = varBoolean then
       Result:=varData.VBoolean
-   else Result:=VariantToBool(PVariant(varData)^);
+   else Result := VariantToBool(PVariant(varData)^);
 end;
 
 // ReadInterfaceValue
@@ -476,13 +478,13 @@ begin
    else Result:=PVariant(varData)^;
 end;
 
-// PointerToIntValue
+// PointerToIntValue_BaseRelative
 //
-function TStackMixIn.PointerToIntValue(addr : Integer) : PInt64;
+function TStackMixIn.PointerToIntValue_BaseRelative(addr : Integer) : PInt64;
 var
    varData : PVarData;
 begin
-   varData:=@Data[addr];
+   varData := GetBaseDataP(addr);
    Assert(varData.VType=varInt64);
    Result:=@varData.VInt64;
 end;
@@ -525,11 +527,18 @@ begin
    Result:=@varData.VUnknown;
 end;
 
-// InitDataPtr
+// InitBaseDataPtr
 //
-procedure TStackMixIn.InitDataPtr(var dataPtr : IDataContext; addr : Integer);
+procedure TStackMixIn.InitBaseDataPtr(var dataPtr : IDataContext; addr : Integer);
 begin
    dataPtr:=FDataPtrPool.Create(Data, BasePointer+addr);
+end;
+
+// InitStackDataPtr
+//
+procedure TStackMixIn.InitStackDataPtr(var dataPtr : IDataContext; addr : Integer);
+begin
+   dataPtr:=FDataPtrPool.Create(Data, StackPointer+addr);
 end;
 
 // InitDataPtrLevel
@@ -606,6 +615,18 @@ begin
       Inc(SourceAddr);
       Inc(DestAddr);
       Dec(Size);
+   end;
+end;
+
+// WriteData
+//
+procedure TStackMixIn.WriteData(destAddr : Integer; sourceDC : IDataContext; sourceAddr, size : NativeInt);
+begin
+   while size > 0 do begin
+      sourceDC.EvalAsVariant(sourceAddr, Data[destAddr]);
+      Inc(sourceAddr);
+      Inc(destAddr);
+      Dec(size);
    end;
 end;
 

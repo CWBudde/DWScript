@@ -651,16 +651,18 @@ procedure TdwsSimpleDebugger.NotifyException(exec : TdwsExecution; const exceptO
       info : TProgramInfo;
       progExec : TdwsProgramExecution;
       exceptInfo : IInfo;
-      data : TData;
+      exceptClassSym : TClassSymbol;
       dataContext : IDataContext;
    begin
-      progExec:=(exec as TdwsProgramExecution);
-      info:=progExec.AcquireProgramInfo(nil);
+      progExec := (exec as TdwsProgramExecution);
+      info := progExec.AcquireProgramInfo(nil);
       try
-         SetLength(data, 1);
-         data[0]:=exceptObj;
-         exec.DataContext_Create(data, 0, dataContext);
-         exceptInfo:=TInfoClassObj.Create(info, exceptObj.ClassSym, dataContext);
+         exec.DataContext_CreateEmpty(1, dataContext);
+         dataContext.AsInterface[0] := exceptObj;
+         if exceptObj = nil then
+            exceptClassSym := (exec as TdwsProgramExecution).CompilerContext.TypException
+         else exceptClassSym := exceptObj.ClassSym;
+         exceptInfo := TInfoClassObj.Create(info, exceptClassSym, dataContext);
          FOnNotifyException(exceptInfo);
       finally
          progExec.ReleaseProgramInfo(info);
@@ -1756,19 +1758,16 @@ procedure TdwsBreakpointableLines.RegisterScriptPos(const scriptPos : TScriptPos
 
 var
    i : Integer;
-   location, locationLC : String;
+   locationLC : String;
 begin
    if scriptPos.SourceFile = nil then Exit;
    if scriptPos.SourceFile <> FLastSourceFile then begin
       FLastSourceFile := scriptPos.SourceFile;
-      location := FLastSourceFile.Location;
-      if location = '' then
-         location := FLastSourceFile.Name;
-      UnicodeLowerCase(location, locationLC);
+      UnicodeLowerCase(FLastSourceFile.Name, locationLC);
       FLastBreakpointLines := FSources.Objects[locationLC];
       if FLastBreakpointLines = nil then begin
          FLastBreakpointLines := TBreakpointBits.Create;
-         FLastBreakpointLines.SourceName := location;
+         FLastBreakpointLines.SourceName := FLastSourceFile.Name;
          FSources.AddObject(locationLC, FLastBreakpointLines);
          FLastBreakpointLines.Size := CountLines(scriptPos.SourceFile.Code) + 1;
       end;

@@ -112,8 +112,20 @@ type
       function DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean; override;
    end;
 
+   TGlobalQueuePeekFunc = class(TInternalMagicBoolFunction)
+      function DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean; override;
+   end;
+
+   TGlobalQueueFirstFunc = class(TInternalMagicBoolFunction)
+      function DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean; override;
+   end;
+
    TGlobalQueueLengthFunc = class(TInternalMagicIntFunction)
       function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
+   end;
+
+   TGlobalQueueSnapshotFunc = class(TInternalMagicDynArrayFunction)
+      procedure DoEvalAsDynArray(const args : TExprBaseListExec; var Result : IScriptDynArray); override;
    end;
 
    TCleanupGlobalQueuesFunc = class(TInternalMagicProcedure)
@@ -138,6 +150,10 @@ type
       procedure DoEvalProc(const args : TExprBaseListExec); override;
    end;
 
+   TIncrementPrivateVarFunc = class(TInternalMagicIntFunction)
+      function DoEvalAsInteger(const args : TExprBaseListExec) : Int64; override;
+   end;
+
    TCompareExchangePrivateVarFunc = class(TInternalMagicVariantFunction)
       procedure DoEvalAsVariant(const args : TExprBaseListExec; var result : Variant); override;
    end;
@@ -155,7 +171,7 @@ function TryReadGlobalVar(const aName: String; var value: Variant): Boolean;
 function ReadGlobalVarDef(const aName: String; const aDefault: Variant): Variant;
 {: Increments an integer global var. If not an integer, conversion is attempted.<p>
    Returns the value after the incrementation }
-function IncrementGlobalVar(const aName : String; const delta : Int64) : Int64;
+function IncrementGlobalVar(const aName : String; const delta : Int64; const expirationSeconds : Double) : Int64;
 {: Compares aName with comparand, if equal exchanges with value, returns initial value of aName }
 function CompareExchangeGlobalVar(const aName : String; const value, comparand : Variant) : Variant;
 {: Delete specified global var if it exists. }
@@ -182,7 +198,10 @@ function GlobalQueuePush(const aName : String; const aValue : Variant) : Integer
 function GlobalQueueInsert(const aName : String; const aValue : Variant) : Integer;
 function GlobalQueuePull(const aName : String; var aValue : Variant) : Boolean;
 function GlobalQueuePop(const aName : String; var aValue : Variant) : Boolean;
+function GlobalQueuePeek(const aName : String; var aValue : Variant) : Boolean;
+function GlobalQueueFirst(const aName : String; var aValue : Variant) : Boolean;
 function GlobalQueueLength(const aName : String) : Integer;
+procedure GlobalQueueSnapshot(const aName : String; const destination : IScriptDynArray);
 procedure CleanupGlobalQueues(const filter : String = '*');
 
 function InternalGlobalVars : PGlobalVars;
@@ -248,7 +267,9 @@ procedure CastVariantForGlobalStorage(const varIn : Variant; var varOut : Varian
       named : IGetSelf;
       toVariant : IToVariant;
    begin
-      if IUnknown(TVarData(varIn).VUnknown).QueryInterface(IToVariant, toVariant) = S_OK then begin
+      if TVarData(varIn).VUnknown = nil then
+         VarSetNull(varOut)
+      else if IUnknown(TVarData(varIn).VUnknown).QueryInterface(IToVariant, toVariant) = S_OK then begin
          toVariant.ToVariant(varOut);
       end else begin
          if IUnknown(TVarData(varIn).VUnknown).QueryInterface(IGetSelf, named) = S_OK then
@@ -300,9 +321,9 @@ end;
 
 // IncrementGlobalVar
 //
-function IncrementGlobalVar(const aName : String; const delta : Int64) : Int64;
+function IncrementGlobalVar(const aName : String; const delta : Int64; const expirationSeconds : Double) : Int64;
 begin
-   Result:=vGlobalVars.Increment(aName, delta);
+   Result:=vGlobalVars.Increment(aName, delta, expirationSeconds);
 end;
 
 // CompareExchangeGlobalVar
@@ -522,6 +543,42 @@ begin
    end;
 end;
 
+// GlobalQueuePeek
+//
+function GlobalQueuePeek(const aName : String; var aValue : Variant) : Boolean;
+var
+   gq : TGlobalQueue;
+begin
+   vGlobalQueuesCS.BeginWrite;
+   try
+      gq:=vGlobalQueues.Objects[aName];
+      if (gq <> nil) and (gq.Count > 0)  then begin
+         aValue := gq.Last.Value;
+         Result := True;
+      end else Result := False;
+   finally
+      vGlobalQueuesCS.EndWrite;
+   end;
+end;
+
+// GlobalQueueFirst
+//
+function GlobalQueueFirst(const aName : String; var aValue : Variant) : Boolean;
+var
+   gq : TGlobalQueue;
+begin
+   vGlobalQueuesCS.BeginWrite;
+   try
+      gq:=vGlobalQueues.Objects[aName];
+      if (gq <> nil) and (gq.Count > 0)  then begin
+         aValue := gq.First.Value;
+         Result := True;
+      end else Result := False;
+   finally
+      vGlobalQueuesCS.EndWrite;
+   end;
+end;
+
 // GlobalQueueLength
 //
 function GlobalQueueLength(const aName : String) : Integer;
@@ -534,6 +591,28 @@ begin
       if gq<>nil then
          Result:=gq.Count
       else Result:=0;
+   finally
+      vGlobalQueuesCS.EndRead;
+   end;
+end;
+
+// GlobalQueueSnapshot
+//
+procedure GlobalQueueSnapshot(const aName : String; const destination : IScriptDynArray);
+begin
+   vGlobalQueuesCS.BeginRead;
+   try
+      var gq := vGlobalQueues.Objects[aName];
+      if gq <> nil then begin
+         destination.ArrayLength := gq.Count;
+         if gq.Count > 0 then begin
+            var iter := gq.First;
+            for var i := 0 to gq.Count-1 do begin
+               destination.AsVariant[i] := iter.Value;
+               iter := iter.Next;
+            end;
+         end;
+      end;
    finally
       vGlobalQueuesCS.EndRead;
    end;
@@ -635,15 +714,11 @@ begin
    Result := vGlobalVars.Write(args.AsString[0], v, args.AsFloat[2]);
 end;
 
-// ------------------
-// ------------------ TIncrementGlobalVarFunc ------------------
-// ------------------
+{ TIncrementGlobalVarFunc }
 
-// DoEvalAsInteger
-//
 function TIncrementGlobalVarFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
 begin
-   Result:=vGlobalVars.Increment(args.AsString[0], args.AsInteger[1]);
+   Result:=vGlobalVars.Increment(args.AsString[0], args.AsInteger[1], args.AsFloat[2]);
 end;
 
 { TCompareExchangeGlobalVarFunc }
@@ -686,7 +761,7 @@ begin
    sl := TStringList.Create;
    try
       vGlobalVars.EnumerateNamesToStrings(args.AsString[0], sl);
-      newArray := CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypString);
+      CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypString, newArray);
       result := newArray;
       newArray.AddStrings(sl);
    finally
@@ -778,6 +853,36 @@ begin
 end;
 
 // ------------------
+// ------------------ TGlobalQueuePeekFunc ------------------
+// ------------------
+
+// DoEvalAsBoolean
+//
+function TGlobalQueuePeekFunc.DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean;
+var
+   v : Variant;
+begin
+   Result := GlobalQueuePeek(args.AsString[0], v);
+   if Result then
+      args.ExprBase[1].AssignValue(args.Exec, v);
+end;
+
+// ------------------
+// ------------------ TGlobalQueueFirstFunc ------------------
+// ------------------
+
+// DoEvalAsBoolean
+//
+function TGlobalQueueFirstFunc.DoEvalAsBoolean(const args : TExprBaseListExec) : Boolean;
+var
+   v : Variant;
+begin
+   Result := GlobalQueueFirst(args.AsString[0], v);
+   if Result then
+      args.ExprBase[1].AssignValue(args.Exec, v);
+end;
+
+// ------------------
 // ------------------ TCleanupGlobalQueuesFunc ------------------
 // ------------------
 
@@ -797,6 +902,21 @@ end;
 function TGlobalQueueLengthFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
 begin
    Result:=GlobalQueueLength(args.AsString[0]);
+end;
+
+// ------------------
+// ------------------ TGlobalQueueSnapshotFunc ------------------
+// ------------------
+
+// DoEvalAsDynArray
+//
+procedure TGlobalQueueSnapshotFunc.DoEvalAsDynArray(const args : TExprBaseListExec; var Result : IScriptDynArray);
+var
+   elementType : TTypeSymbol;
+begin
+   elementType := (args.Expr as TTypedExpr).Typ.Typ;
+   CreateNewDynamicArray(elementType, result);
+   GlobalQueueSnapshot(args.AsString[0], Result);
 end;
 
 // ------------------
@@ -831,6 +951,13 @@ end;
 procedure TCleanupPrivateVarsFunc.DoEvalProc(const args : TExprBaseListExec);
 begin
    vPrivateVars.Cleanup(PrivateVarName(args));
+end;
+
+{ TIncrementPrivateVarFunc }
+
+function TIncrementPrivateVarFunc.DoEvalAsInteger(const args : TExprBaseListExec) : Int64;
+begin
+   Result:=vPrivateVars.Increment(args.AsString[0], args.AsInteger[1], args.AsFloat[2]);
 end;
 
 { TCompareExchangePrivateVarFunc }
@@ -874,8 +1001,8 @@ begin
       enum.FOffset := Length(prefix)+1;
       vPrivateVars.EnumerateNames(prefix + filter, enum.Add);
 
-      dynArray := CreateNewDynamicArray(typString);
-      result := dynArray;
+      CreateNewDynamicArray(typString, dynArray);
+      VarCopySafe(result, dynArray);
       dynArray.AddStrings(enum);
    finally
       enum.Free;
@@ -900,7 +1027,7 @@ initialization
    RegisterInternalBoolFunction(TTryReadGlobalVarFunc, 'TryReadGlobalVar', ['n', SYS_STRING, '@v', SYS_VARIANT]);
    RegisterInternalBoolFunction(TWriteGlobalVarFunc, 'WriteGlobalVar', ['n', SYS_STRING, 'v', SYS_VARIANT], [iffOverloaded]);
    RegisterInternalBoolFunction(TWriteGlobalVarExpireFunc, 'WriteGlobalVar', ['n', SYS_STRING, 'v', SYS_VARIANT, 'e', SYS_FLOAT], [iffOverloaded]);
-   RegisterInternalIntFunction(TIncrementGlobalVarFunc, 'IncrementGlobalVar', ['n', SYS_STRING, 'i=1', SYS_INTEGER]);
+   RegisterInternalIntFunction(TIncrementGlobalVarFunc, 'IncrementGlobalVar', ['n', SYS_STRING, 'i=1', SYS_INTEGER, 'e=0', SYS_FLOAT]);
    RegisterInternalFunction(TCompareExchangeGlobalVarFunc, 'CompareExchangeGlobalVar', ['n', SYS_STRING, 'v', SYS_VARIANT, 'c', SYS_VARIANT], SYS_VARIANT);
    RegisterInternalBoolFunction(TDeleteGlobalVarFunc, 'DeleteGlobalVar', ['n', SYS_STRING]);
    RegisterInternalProcedure(TCleanupGlobalVarsFunc, 'CleanupGlobalVars', ['filter=*', SYS_STRING]);
@@ -911,6 +1038,7 @@ initialization
 
    RegisterInternalFunction(TReadPrivateVarFunc, 'ReadPrivateVar', ['n', SYS_STRING, 'd=Unassigned', SYS_VARIANT], SYS_VARIANT);
    RegisterInternalBoolFunction(TWritePrivateVarFunc, 'WritePrivateVar', ['n', SYS_STRING, 'v', SYS_VARIANT, 'e=0', SYS_FLOAT]);
+   RegisterInternalIntFunction(TIncrementPrivateVarFunc, 'IncrementPrivateVar', ['n', SYS_STRING, 'i=1', SYS_INTEGER, 'e=0', SYS_FLOAT]);
    RegisterInternalProcedure(TCleanupPrivateVarsFunc, 'CleanupPrivateVars', ['filter=*', SYS_STRING]);
    RegisterInternalFunction(TCompareExchangePrivateVarFunc, 'CompareExchangePrivateVar', ['n', SYS_STRING, 'v', SYS_VARIANT, 'c', SYS_VARIANT], SYS_VARIANT);
    RegisterInternalFunction(TPrivateVarsNamesFunc, 'PrivateVarsNames', ['filter', SYS_STRING], SYS_ARRAY_OF_STRING);
@@ -919,7 +1047,13 @@ initialization
    RegisterInternalIntFunction(TGlobalQueueInsertFunc, 'GlobalQueueInsert', ['n', SYS_STRING, 'v', SYS_VARIANT]);
    RegisterInternalBoolFunction(TGlobalQueuePullFunc, 'GlobalQueuePull', ['n', SYS_STRING, '@v', SYS_VARIANT]);
    RegisterInternalBoolFunction(TGlobalQueuePopFunc, 'GlobalQueuePop', ['n', SYS_STRING, '@v', SYS_VARIANT]);
+   RegisterInternalBoolFunction(TGlobalQueuePeekFunc, 'GlobalQueuePeek', ['n', SYS_STRING, '@v', SYS_VARIANT]);
+   RegisterInternalBoolFunction(TGlobalQueueFirstFunc, 'GlobalQueueFirst', ['n', SYS_STRING, '@v', SYS_VARIANT]);
    RegisterInternalIntFunction(TGlobalQueueLengthFunc, 'GlobalQueueLength', ['n', SYS_STRING]);
+   RegisterInternalFunction(TGlobalQueueSnapshotFunc, 'GlobalQueueSnapshot', ['n', SYS_STRING], SYS_ARRAY_OF_VARIANT);
+   RegisterInternalFunction(TGlobalQueueSnapshotFunc, 'GlobalQueueSnapshotStrings', ['n', SYS_STRING], SYS_ARRAY_OF_STRING);
+   RegisterInternalFunction(TGlobalQueueSnapshotFunc, 'GlobalQueueSnapshotFloats', ['n', SYS_STRING], SYS_ARRAY_OF_FLOAT);
+   RegisterInternalFunction(TGlobalQueueSnapshotFunc, 'GlobalQueueSnapshotIntegers', ['n', SYS_STRING], SYS_ARRAY_OF_INTEGER);
    RegisterInternalProcedure(TCleanupGlobalQueuesFunc, 'CleanupGlobalQueues', ['filter=*', SYS_STRING]);
 
 finalization

@@ -50,9 +50,12 @@ type
 
          class function DynamicArrayAdd(context : TdwsCompilerContext; baseExpr : TTypedExpr;
                                         const namePos : TScriptPos;
-                                        argList : TTypedExprList; const argPosArray : TScriptPosArray) : TArrayAddExpr; overload; static;
+                                        argList : TTypedExprList; const argPosArray : TScriptPosArray) : TArrayPseudoMethodExpr; overload; static;
          class function DynamicArrayAdd(context : TdwsCompilerContext; baseExpr : TTypedExpr;
-                                        const scriptPos : TScriptPos; argExpr : TTypedExpr) : TArrayAddExpr; overload; static;
+                                        const scriptPos : TScriptPos; argExpr : TTypedExpr) : TArrayPseudoMethodExpr; overload; static;
+
+         class function ArrayContains(context : TdwsCompilerContext; const scriptPos : TScriptPos;
+                                      arrayExpr, elementExpr : TTypedExpr) : TTypedExpr; static;
 
          class function ArrayConcat(context : TdwsCompilerContext; const hotPos : TScriptPos;
                                     left, right : TTypedExpr) : TArrayConcatExpr; static;
@@ -103,7 +106,7 @@ function CreateMethodExpr(context : TdwsCompilerContext; meth: TMethodSymbol; va
 procedure TypeCheckArguments(context : TdwsCompilerContext; funcExpr : TFuncExprBase;
                              const argPosArray : TScriptPosArray);
 
-function CreateConstParamSymbol(const name : String; typ : TTypeSymbol) : TParamSymbol;
+function CreateConstParamSymbol(const name : String; typ : TTypeSymbol; options : TParamSymbolOptions = []) : TParamSymbol;
 
 function ResolveOperatorFor(currentProg : TdwsProgram; token : TTokenType;
                             aLeftType, aRightType : TTypeSymbol) : TOperatorSymbol;
@@ -123,7 +126,9 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsGenericExprs;
+uses
+   dwsGenericExprs, dwsSymbolDictionary,
+   dwsArrayIndexOfExprs, dwsRelExprs;
 
 // NameToArrayMethod
 //
@@ -198,7 +203,7 @@ begin
                if leftTyp.ClassType=TClassOfSymbol then begin
                   Result:=TAssignClassOfExpr.Create(context, scriptPos, left, right);
                end else if leftTyp.ClassType=TInterfaceSymbol then begin
-                  if right.Typ is TClassSymbol then begin
+                  if right.Typ.IsClassSymbol then begin
                      classSymbol:=TClassSymbol(right.Typ);
                      intfSymbol:=TInterfaceSymbol(left.Typ);
                      if not classSymbol.ImplementsInterface(intfSymbol) then
@@ -262,7 +267,7 @@ begin
             end;
          end;
          ttPLUS_ASSIGN, ttMINUS_ASSIGN, ttTIMES_ASSIGN, ttDIVIDE_ASSIGN, ttCARET_ASSIGN : begin
-            if left.Typ is TClassSymbol then begin
+            if left.Typ.IsClassSymbol then begin
 
                classOpSymbol:=(left.Typ as TClassSymbol).FindClassOperator(token, right.Typ);
                if classOpSymbol=nil then
@@ -367,18 +372,18 @@ var
 begin
    if funcSym is TMethodSymbol then begin
       if Assigned(scriptObj) then begin
-         instanceExpr := TConstExpr.Create(aScriptPos, structSym, scriptObj);
+         instanceExpr := TConstExpr.CreateValue(aScriptPos, structSym, scriptObj);
          Result:=CreateMethodExpr(context, TMethodSymbol(funcSym),
                                   instanceExpr, rkObjRef, aScriptPos, options)
       end else if structSym<>nil then begin
-         instanceExpr:=TConstExpr.Create(aScriptPos, structSym.MetaSymbol, Int64(structSym));
+         instanceExpr:=TConstExpr.CreateValue(aScriptPos, structSym.MetaSymbol, Int64(structSym));
          Result:=CreateMethodExpr(context, TMethodSymbol(funcSym),
                                   instanceExpr, rkClassOfRef, aScriptPos, options)
       end else begin
          // static method
          structSym:=TMethodSymbol(funcSym).StructSymbol;
          if structSym is TStructuredTypeSymbol then begin
-            instanceExpr:=TConstExpr.Create(aScriptPos, structSym.MetaSymbol, Int64(structSym));
+            instanceExpr:=TConstExpr.CreateValue(aScriptPos, structSym.MetaSymbol, Int64(structSym));
             Result:=CreateMethodExpr(context, TMethodSymbol(funcSym),
                                      instanceExpr, rkClassOfRef, aScriptPos, options)
          end else begin
@@ -400,7 +405,7 @@ var
    scriptIntf : TScriptInterface;
 begin
    scriptIntf:=(scriptObjIntf.GetSelf as TScriptInterface);
-   instanceExpr := TConstExpr.Create(cNullPos, scriptIntf.Typ, scriptObjIntf);
+   instanceExpr := TConstExpr.CreateValue(cNullPos, scriptIntf.Typ, scriptObjIntf);
    Result := CreateMethodExpr(context, TMethodSymbol(funcSym),
                               instanceExpr, rkIntfRef, cNullPos, [])
 end;
@@ -444,6 +449,8 @@ begin
             Result := TMagicMethodFloatExpr.Create(context, scriptPos, magicMethodSym, expr)
          else if Assigned(magicMethodSym.OnFastEvalNoResult) then
             Result := TMagicMethodNoResultExpr.Create(context, scriptPos, magicMethodSym, expr)
+         else if Assigned(magicMethodSym.OnFastEvalScriptObj) then
+            Result := TMagicMethodScriptObjExpr.Create(context, scriptPos, magicMethodSym, expr)
          else Result := TMagicMethodExpr.Create(context, scriptPos, magicMethodSym, expr);
       end;
 
@@ -455,7 +462,7 @@ begin
          Result:=TMethodInterfaceAnonymousExpr.Create(context, scriptPos, meth, expr);
       end;
 
-   end else if meth.StructSymbol is TClassSymbol then begin
+   end else if meth.StructSymbol.IsClassSymbol then begin
 
       if meth.IsStatic then begin
 
@@ -496,7 +503,7 @@ begin
                if RefKind=rkClassOfRef then
                   context.Msgs.AddCompilerError(scriptPos, CPE_StaticMethodExpected)
                else if expr.Typ is TClassOfSymbol then
-                  context.Msgs.AddCompilerError(scriptPos, CPE_ClassMethodExpected);
+                  context.Msgs.AddCompilerError(scriptPos, CPE_ClassMethodOrConstructorExpected);
                if not (cfoForceStatic in options) and meth.IsVirtual then
                   Result := TMethodVirtualExpr.Create(context, scriptPos, meth, expr)
                else Result := TMethodStaticExpr.Create(context, scriptPos, meth, expr);
@@ -690,6 +697,8 @@ begin
                          or (not (TMethodSymbol(funcSym).StructSymbol is TRecordSymbol))) then
                context.Msgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [i, paramSymbol.Name]);
          end else context.Msgs.AddCompilerErrorFmt(argPos, CPE_ConstVarParam, [i, paramSymbol.Name]);
+         if coSymbolDictionary in context.Options then
+            context.SymbolDictionary.ChangeUsageAt(argPos, [ suWrite ], []);
       end;
 
    end;
@@ -708,19 +717,19 @@ end;
 
 // CreateConstParamSymbol
 //
-function CreateConstParamSymbol(const name : String; typ : TTypeSymbol) : TParamSymbol;
+function CreateConstParamSymbol(const name : String; typ : TTypeSymbol; options : TParamSymbolOptions = []) : TParamSymbol;
 var
    utyp : TTypeSymbol;
 begin
    utyp := typ.UnAliasedType;
    if       (utyp.Size = 1)
       and (    (utyp is TBaseSymbol)
-            or (utyp is TClassSymbol)
+            or utyp.IsClassSymbol
             or (utyp is TDynamicArraySymbol)
             or (utyp is TInterfaceSymbol)
             ) then
-      Result := TConstByValueParamSymbol.Create(name, typ)
-   else Result := TConstByRefParamSymbol.Create(name, typ);
+      Result := TConstByValueParamSymbol.Create(name, typ, options)
+   else Result := TConstByRefParamSymbol.Create(name, typ, options);
 end;
 
 type
@@ -809,7 +818,7 @@ begin
    if valueExpr.Typ <> nil then begin
       typSize := valueExpr.Typ.Size;
       if typSize > 0 then
-         Assert(arrayExpr.Typ.Typ.Size = typSize, 'Mismtached element size at ' + scriptPos.AsInfo);
+         Assert(arrayExpr.Typ.Typ.Size = typSize, 'Mismatched element size at ' + scriptPos.AsInfo);
    end else typSize :=  1;
    if typSize = 1 then
       if arrayExpr is TObjectVarExpr then
@@ -879,28 +888,62 @@ end;
 class function CompilerUtils.DynamicArrayAdd(
       context : TdwsCompilerContext; baseExpr : TTypedExpr;
       const namePos : TScriptPos;
-      argList : TTypedExprList; const argPosArray : TScriptPosArray) : TArrayAddExpr;
+      argList : TTypedExprList; const argPosArray : TScriptPosArray) : TArrayPseudoMethodExpr;
 var
    i : Integer;
+   arrayRawSym : TSymbol;
    arraySym : TDynamicArraySymbol;
 begin
-   arraySym:=(baseExpr.Typ.UnAliasedType as TDynamicArraySymbol);
-   for i:=0 to argList.Count-1 do begin
-      if    (argList[i].Typ=nil)
-         or not (   arraySym.Typ.IsCompatible(argList[i].Typ)
-                 or arraySym.IsCompatible(argList[i].Typ)
-                 or (    (argList[i].Typ is TStaticArraySymbol)
-                     and (   arraySym.Typ.IsCompatible(argList[i].Typ.Typ)
-                          or (argList[i].Typ.Size=0)))) then begin
-         argList[i]:=WrapWithImplicitConversion(context, argList[i], arraySym.Typ, argPosArray[i],
-                                                CPE_IncompatibleParameterTypes);
-         Break;
-      end else if argList[i].ClassType=TArrayConstantExpr then begin
-         TArrayConstantExpr(argList[i]).Prepare(context, arraySym.Typ);
+   arrayRawSym := baseExpr.Typ.UnAliasedType;
+   if not (arrayRawSym is TDynamicArraySymbol) then begin
+      // keep compiling
+      Result := TArrayAddExpr.Create(namePos, baseExpr, argList);
+   end else begin
+      arraySym :=  TDynamicArraySymbol(arrayRawSym);
+      if     (argList.Count = 1) and (arraySym.Typ.Size = 1) and (baseExpr is TObjectVarExpr)
+         and (arraySym.Typ.IsCompatible(argList[0].Typ)) then begin
+
+         Result := TArrayAddValueExpr.Create(namePos, TObjectVarExpr(baseExpr), argList[0]);
+
+      end else begin
+         for i:=0 to argList.Count-1 do begin
+            if    (argList[i].Typ=nil)
+               or not (   arraySym.Typ.IsCompatible(argList[i].Typ)
+                       or arraySym.IsCompatible(argList[i].Typ)
+                       or (    (argList[i].Typ is TStaticArraySymbol)
+                           and (   arraySym.Typ.IsCompatible(argList[i].Typ.Typ)
+                                or (argList[i].Typ.Size=0)))) then begin
+               argList[i]:=WrapWithImplicitConversion(context, argList[i], arraySym.Typ, argPosArray[i],
+                                                      CPE_IncompatibleParameterTypes);
+               Break;
+            end else if argList[i].ClassType=TArrayConstantExpr then begin
+               TArrayConstantExpr(argList[i]).Prepare(context, arraySym.Typ);
+            end;
+         end;
+         Result:=TArrayAddExpr.Create(namePos, baseExpr, argList);
       end;
    end;
-   Result:=TArrayAddExpr.Create(namePos, baseExpr, argList);
    argList.Clear;
+end;
+
+// ArrayContains
+//
+class function CompilerUtils.ArrayContains(
+      context : TdwsCompilerContext; const scriptPos : TScriptPos;
+      arrayExpr, elementExpr : TTypedExpr
+   ) : TTypedExpr;
+var
+   indexOfExprClass : TArrayIndexOfExprClass;
+begin
+   indexOfExprClass := TArrayIndexOfExpr.ArrayIndexOfExprClass(arrayExpr.Typ as TArraySymbol);
+   Result := indexOfExprClass.Create(context, scriptPos, arrayExpr, elementExpr, nil);
+   if indexOfExprClass.InheritsFrom(TStaticArrayIndexOfExpr) then begin
+      TStaticArrayIndexOfExpr(Result).ForceZeroBased := True;
+      if arrayExpr.Typ.ClassType <> TStaticArraySymbol then
+         context.Msgs.AddCompilerError(scriptPos, CPE_IncompatibleOperands);
+   end;
+   Result := TRelGreaterEqualIntExpr.Create(context, scriptPos, ttIN, Result,
+                                            TTypedExpr(context.CreateInteger(0)));
 end;
 
 // ArrayConcat
@@ -908,19 +951,37 @@ end;
 class function CompilerUtils.ArrayConcat(context : TdwsCompilerContext; const hotPos : TScriptPos;
                                          left, right : TTypedExpr) : TArrayConcatExpr;
 var
-   typ : TDynamicArraySymbol;
-   leftTyp, rightTyp : TArraySymbol;
+   resultArraySym : TDynamicArraySymbol;
+   leftArraySym, rightArraySym : TArraySymbol;
+   leftElementType, rightElementType : TTypeSymbol;
+   resultElementType : TTypeSymbol;
 begin
-   leftTyp:=left.Typ.UnAliasedType as TArraySymbol;
-   rightTyp:=left.Typ.UnAliasedType as TArraySymbol;
+   leftArraySym := left.Typ.UnAliasedType as TArraySymbol;
+   rightArraySym := right.Typ.UnAliasedType as TArraySymbol;
+   leftElementType := leftArraySym.Typ;
+   rightElementType := rightArraySym.Typ;
 
-   if leftTyp.Typ<>rightTyp.Typ then
-      IncompatibleTypes(context, hotPos, CPE_IncompatibleTypes, left.Typ, right.Typ);
+   resultElementType := leftElementType;
 
-   typ:=TDynamicArraySymbol.Create('', leftTyp.Typ, context.TypInteger);
-   context.Table.AddSymbol(typ);
+   if leftElementType <> rightElementType then begin
+      // not an exact match, check harder for compatible types
+      if not leftElementType.IsCompatible(rightElementType) then begin
+         if rightElementType.IsCompatible(leftElementType) then
+            resultElementType := rightElementType
+         else if leftElementType.UnAliasedTypeIs(TBaseIntegerSymbol) and rightElementType.UnAliasedTypeIs(TBaseFloatSymbol) then
+            resultElementType := rightElementType
+         else if leftElementType.UnAliasedTypeIs(TBaseFloatSymbol) and rightElementType.UnAliasedTypeIs(TBaseIntegerSymbol) then
+            resultElementType := leftElementType
+         else begin
+            IncompatibleTypes(context, hotPos, CPE_IncompatibleTypes, left.Typ, right.Typ);
+         end
+      end;
+   end;
 
-   Result:=TArrayConcatExpr.Create(hotPos, typ);
+   resultArraySym := TDynamicArraySymbol.Create('', resultElementType, context.TypInteger);
+   context.Table.AddSymbol(resultArraySym);
+
+   Result := TArrayConcatExpr.Create(hotPos, resultArraySym);
    Result.AddArg(left);
    Result.AddArg(right);
 end;
@@ -928,7 +989,7 @@ end;
 // DynamicArrayAdd
 //
 class function CompilerUtils.DynamicArrayAdd(context : TdwsCompilerContext; baseExpr : TTypedExpr;
-      const scriptPos : TScriptPos; argExpr : TTypedExpr) : TArrayAddExpr;
+      const scriptPos : TScriptPos; argExpr : TTypedExpr) : TArrayPseudoMethodExpr;
 var
    argList : TTypedExprList;
    argPosArray : TScriptPosArray;

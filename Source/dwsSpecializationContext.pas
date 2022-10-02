@@ -34,6 +34,7 @@ type
          FName : String;
          FParameters, FValues : TUnSortedSymbolTable; // referred
          FValuesPosList : TScriptPosArray;
+         FBaseGenericSymbol : TSymbol;
          FUnitSymbol : TSymbol;
          FScriptPos : TScriptPos;
          FCompositeSymbol : TCompositeTypeSymbol;
@@ -51,6 +52,8 @@ type
          function Parameters : TUnSortedSymbolTable;
          function Values : TUnSortedSymbolTable;
          function UnitSymbol : TSymbol;
+         function GenericSymbol : TSymbol;
+         function GenericSymbolType : TSymbol;
          function Msgs : TdwsCompileMessageList;
          function Optimize : Boolean;
 
@@ -87,6 +90,7 @@ type
          property SpecializedObjects : TSpecializationMap read FSpecializedObjects write FSpecializedObjects;
 
          property CompilerContext : TdwsCompilerContext read FCompilerContext;
+         property BaseGenericSymbol : TSymbol read FBaseGenericSymbol write FBaseGenericSymbol;
          function BaseSymbols : TdwsBaseSymbolsContext; inline;
          property Operators : TOperators read FOperators;
          property ScriptPos : TScriptPos read FScriptPos;
@@ -116,6 +120,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses dwsGenericSymbols;
 
 // CompilerContextFromSpecialization
 //
@@ -420,6 +426,20 @@ end;
 function TSpecializationContext.UnitSymbol : TSymbol;
 begin
    Result := FUnitSymbol;
+end;
+
+// GenericSymbol
+//
+function TSpecializationContext.GenericSymbol : TSymbol;
+begin
+   Result := FBaseGenericSymbol;
+end;
+
+// GenericSymbolType
+//
+function TSpecializationContext.GenericSymbolType : TSymbol;
+begin
+   Result := (FBaseGenericSymbol as TGenericSymbol).GenericType;
 end;
 
 // Msgs

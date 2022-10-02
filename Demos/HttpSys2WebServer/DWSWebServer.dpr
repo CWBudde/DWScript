@@ -32,10 +32,10 @@
 program DWSWebServer;
 
 {$IFNDEF VER200} // delphi 2009
-
    {$WEAKLINKRTTI ON}
    {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
 {$ENDIF}
+{$WARN SYMBOL_PLATFORM OFF}
 
 {$APPTYPE CONSOLE}
 
@@ -180,6 +180,9 @@ begin
    end else if (param='/authorize') or (param='/unauthorize') then begin
 
       abortExecution := True;
+
+      if Process_ReRunIfNotElevated then Exit;
+
       authorize := (ParamStr(1)='/authorize');
 
       serverOptions:=TdwsJSONValue.ParseString(cDefaultServerOptions);
@@ -247,6 +250,11 @@ var
    abortExecution : Boolean;
 begin
    options:=nil;
+
+   // mask FPU & SSE2 exception
+   Set8087CW($133F);
+   SetMXCSR($1F80);
+
    {$if Defined(WIN32)}
    if Win32MajorVersion<6 then begin
       LogServiceError(options, 'This program requires at least Windows 2008 or Vista');

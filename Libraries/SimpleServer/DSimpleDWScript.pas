@@ -461,7 +461,7 @@ begin
    exec := prog.CreateNewExecution;
    executing.Exec := @exec;
    executing.Options := options;
-   executing.ID := InterlockedIncrement(FExecutingID);
+   executing.ID := AtomicIncrement(FExecutingID);
 
    webenv := TWebEnvironment.Create;
    webenv.WebRequest := request;
@@ -561,9 +561,9 @@ begin
          if prog = nil then begin
             code := FJSCompiler.Config.CompileFileSystem.AllocateFileSystem.LoadTextFile(fileName);
             FHotPath := ExtractFilePath(fileName);
-            js := FJSFilter.CompileToJS(prog, code, '', True);
+            js := FJSFilter.CompileToJS(prog, code, '', True, True);
          end else begin
-            js := FJSFilter.CompileToJS(prog, '');
+            js := FJSFilter.CompileToJS(prog, '', '', False, True);
          end;
       finally
          FCodeGenLock.Leave;
@@ -589,8 +589,13 @@ begin
    if (prog<>nil) and prog.Msgs.HasErrors then
       Handle500(response, prog.Msgs)
    else begin
-      response.ContentData := '(function(){'#10 + UTF8Encode(js) + '})();'#13;
-      response.ContentType := 'text/javascript; charset=UTF-8';
+      if js <> '' then begin
+         response.ContentData := '(function(){'#10 + UTF8Encode(js) + '})();'#10;
+         response.ContentType := 'text/javascript; charset=UTF-8';
+      end else begin
+         response.ContentData := '';
+         response.ContentType := 'text/javascript';
+      end;
       if prog <> nil then begin
          prog.DropMapAndDictionary;
          prog.ProgramObject.TagInterface := TWebStaticCacheEntry.Create(response);
@@ -726,6 +731,37 @@ end;
 // LoadDWScriptOptions
 //
 procedure TSimpleDWScript.LoadDWScriptOptions(options : TdwsJSONValue);
+
+   procedure PrepareLibraryPaths(configPaths : TdwsJSONValue);
+   var
+      i, j : Integer;
+      pathsFile, libPath, subPath : String;
+      libraryPaths, subPaths : TStringList;
+   begin
+      libraryPaths := TStringList.Create;
+      subPaths := TStringList.Create;
+      try
+         ApplyPathsVariables(configPaths, libraryPaths);
+         dwsCompileSystem.Paths.AddStrings(libraryPaths);
+         for i := 0 to libraryPaths.Count-1 do begin
+            libPath := IncludeTrailingPathDelimiter(libraryPaths[i]);
+            pathsFile := libPath + '.paths';
+            if FileExists(pathsFile) then begin
+               subPaths.LoadFromFile(pathsFile);
+               for j := 0 to subPaths.Count-1 do begin
+                  subPath := Trim(subPaths[j]);
+                  if subPath = '' then continue;
+                  if StrBeginsWith(subPath, ';') then continue; // commented out
+                  dwsCompileSystem.SearchPaths.Add(libPath + subPath);
+               end;
+            end;
+         end;
+      finally
+         subPaths.Free;
+         libraryPaths.Free;
+      end;
+   end;
+
 var
    dws : TdwsJSONValue;
    conditionals : TdwsJSONValue;
@@ -747,7 +783,9 @@ begin
 
       dwsCompileSystem.Paths.Clear;
       dwsCompileSystem.Paths.Add(IncludeTrailingPathDelimiter(PathVariables.Values['www']));
-      ApplyPathsVariables(dws['LibraryPaths'], dwsCompileSystem.Paths);
+
+      PrepareLibraryPaths(dws['LibraryPaths']);
+
       dwsCompileSystem.Variables := FPathVariables;
 
       dwsRuntimeFileSystem.Paths.Clear;
@@ -774,7 +812,6 @@ begin
       FBkgndWorkers.MaxWorkersPerQueue := dws['MaxWorkersPerQueue'].AsInteger;
 
       FEnableJIT:=dws['JIT'].AsBoolean;
-
 
       dwsCGOptions := dws['OP4JS'];
       cgOptions := [];
@@ -957,13 +994,19 @@ end;
 procedure TSimpleDWScript.DoInclude(const scriptName: String; var scriptSource: String);
 var
    pathName : String;
+   fs : IdwsFileSystem;
 begin
    if Pos('%', scriptName) > 0 then
       pathName := ApplyPathVariables(scriptName)
    else if FHotPath <> '' then
       pathName := FHotPath + scriptName;
-   if pathName <> '' then
-      scriptSource := FActiveCompileSystem.AllocateFileSystem.LoadTextFile(pathName);
+   if pathName <> '' then begin
+      fs := FActiveCompileSystem.AllocateFileSystem;
+      if not fs.FileExists(pathName) then
+         pathName := fs.FindFileName(scriptName);
+      if pathName <> '' then
+         scriptSource := FActiveCompileSystem.AllocateFileSystem.LoadTextFile(pathName);
+   end;
 end;
 
 // DoNeedUnit

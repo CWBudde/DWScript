@@ -20,7 +20,8 @@ interface
 
 uses
    SysUtils,
-   dwsSymbols, dwsUtils, dwsExprs, dwsStack, dwsXPlatform, dwsDataContext, dwsFileSystem;
+   dwsSymbols, dwsUtils, dwsExprs, dwsStack, dwsXPlatform, dwsDataContext,
+   dwsFileSystem, dwsScriptSource;
 
 // Simple database abstraction interfaces and optional base classes for DWS
 // exposes transaction & forward-only cursor, which are all one really needs :p
@@ -138,9 +139,9 @@ type
       private
          FDataBase : IdwsDataBase;
          FFieldCount : Integer;
-         FID : NativeUInt;
+         FID : Int64;
 
-         class var vNextID : NativeUInt;
+         class var vNextID : Int64;
          class var vOnDataSetCreate : TdwsDataSetCreateEvent;
          class var vOnDataSetDestroy : TdwsDataSetDestroyEvent;
 
@@ -155,6 +156,7 @@ type
          property DataBase : IdwsDataBase read FDataBase;
 
          class procedure RaiseInvalidFieldIndex(index : Integer); static;
+         class procedure RaiseNoActiveRecord; static;
 
          procedure SetID(const id : Int64); inline;
          function GetID : Int64; inline;
@@ -169,14 +171,14 @@ type
          function GetField(index : Integer) : IdwsDataField;
          function FieldCount : Integer; virtual;
 
-         function GetIsNullField(index : Integer) : Boolean;
-         procedure GetStringField(index : Integer; var result : String);
-         function GetIntegerField(index : Integer) : Int64;
-         function GetFloatField(index : Integer) : Double;
-         function GetBooleanField(index : Integer) : Boolean;
-         function GetBlobField(index : Integer) : RawByteString;
+         function GetIsNullField(index : Integer) : Boolean; virtual;
+         procedure GetStringField(index : Integer; var result : String); virtual;
+         function GetIntegerField(index : Integer) : Int64; virtual;
+         function GetFloatField(index : Integer) : Double; virtual;
+         function GetBooleanField(index : Integer) : Boolean; virtual;
+         function GetBlobField(index : Integer) : RawByteString; virtual;
 
-         class function  NotifyCreate(const location : String) : NativeUInt; static;
+         class function  NotifyCreate(const locationExpr : TExprBase) : NativeUInt; static;
          class procedure NotifyDestroy(id : NativeUInt); inline; static;
 
          class procedure RegisterCallbacks(const onCreate : TdwsDataSetCreateEvent;
@@ -198,7 +200,7 @@ type
          function GetDataType : TdwsDataFieldType; virtual; abstract;
          function GetDeclaredType : String; virtual; abstract;
 
-         procedure RaiseNoActiveRecord;
+         class procedure RaiseNoActiveRecord; static;
 
       public
          constructor Create(const dataSet : IdwsDataSet; fieldIndex : Integer);
@@ -312,7 +314,7 @@ end;
 destructor TdwsDataSet.Destroy;
 begin
    NotifyDestroy(FID);
-   SetLength(FFields, 0);
+   FFields := nil;
    FFieldCount := -1;
    inherited;
 end;
@@ -322,6 +324,13 @@ end;
 class procedure TdwsDataSet.RaiseInvalidFieldIndex(index : Integer);
 begin
    raise Exception.CreateFmt('Invalid field index %d', [index]);
+end;
+
+// RaiseNoActiveRecord
+//
+class procedure TdwsDataSet.RaiseNoActiveRecord;
+begin
+   raise EDWSDataBase.Create('No active record');
 end;
 
 // SetID
@@ -434,11 +443,11 @@ end;
 
 // NotifyCreate
 //
-class function TdwsDataSet.NotifyCreate(const location : String) : NativeUInt;
+class function TdwsDataSet.NotifyCreate(const locationExpr : TExprBase) : NativeUInt;
 begin
    Result := AtomicIncrement(vNextID);
    if Assigned(vOnDataSetCreate) then
-      vOnDataSetCreate(location, Result);
+      vOnDataSetCreate(locationExpr.ScriptPos.AsInfo, Result);
 end;
 
 // NotifyDestroy
@@ -560,9 +569,9 @@ end;
 
 // RaiseNoActiveRecord
 //
-procedure TdwsDataField.RaiseNoActiveRecord;
+class procedure TdwsDataField.RaiseNoActiveRecord;
 begin
-   raise EDWSDataBase.Create('No active record');
+   TdwsDataSet.RaiseNoActiveRecord;
 end;
 
 // ------------------

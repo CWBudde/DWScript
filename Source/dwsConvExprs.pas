@@ -101,6 +101,7 @@ type
          constructor Create(context : TdwsCompilerContext; const aScriptPos : TScriptPos;
                             expr : TArrayConstantExpr; toTyp : TDynamicArraySymbol); reintroduce;
          procedure EvalAsVariant(exec : TdwsExecution; var result : Variant); override;
+         procedure EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray); override;
          function GetIsConstant : Boolean; override;
    end;
 
@@ -135,7 +136,6 @@ type
          constructor Create(const scriptPos : TScriptPos;
                             expr : TArrayConstantExpr; toTyp : TSetOfSymbol);
 
-         procedure EvalAsTData(exec : TdwsExecution; var data : TData);
          function ToConstExpr(exec : TdwsExecution) : TConstExpr;
 
          procedure GetDataPtr(exec : TdwsExecution; var result : IDataContext); override;
@@ -426,11 +426,8 @@ end;
 // EvalAsString
 //
 procedure TConvVarToStringExpr.EvalAsString(exec : TdwsExecution; var result : String);
-var
-   v : Variant;
 begin
-   FExpr.EvalAsVariant(exec, v);
-   VariantToString(v, Result);
+   FExpr.EvalAsString(exec, Result);
 end;
 
 // SpecializeTypedExpr
@@ -514,17 +511,48 @@ end;
 //
 procedure TConvStaticArrayToDynamicExpr.EvalAsVariant(exec : TdwsExecution; var result : Variant);
 var
-   arr : TArrayConstantExpr;
    dynArray : IScriptDynArray;
-   data : TData;
 begin
-   arr:=TArrayConstantExpr(Expr);
-
-   dynArray := CreateNewDynamicArray(TDynamicArraySymbol(Typ).Typ);
-   arr.EvalAsTData(exec, data);
-   dynArray.ReplaceData(data);
-
+   EvalAsScriptDynArray(exec, dynArray);
    VarCopySafe(Result, dynArray);
+end;
+
+// EvalAsScriptDynArray
+//
+procedure TConvStaticArrayToDynamicExpr.EvalAsScriptDynArray(exec : TdwsExecution; var result : IScriptDynArray);
+var
+   arr : TArrayConstantExpr;
+
+   procedure ConvThroughDataContext;
+   var
+      data : IDataContext;
+   begin
+      exec.DataContext_CreateEmpty(result.ElementSize * arr.ElementCount, data);
+      arr.EvalToDataContext(exec, data, 0);
+      result.WriteData(0, data, 0, data.DataLength);
+   end;
+
+   procedure ConvDirectly;
+   var
+      i : Integer;
+   begin
+      for i := 0 to arr.ElementCount-1 do
+         result.SetFromExpr(i, exec, arr.Elements[i]);
+   end;
+
+var
+   elementTyp : TTypeSymbol;
+begin
+   arr := TArrayConstantExpr(Expr);
+
+   elementTyp := TDynamicArraySymbol(Typ).Typ;
+   CreateNewDynamicArray(elementTyp, result);
+   if arr.ElementCount > 0 then begin
+      result.ArrayLength := arr.ElementCount;
+      if elementTyp.Size = 1 then
+         ConvDirectly
+      else ConvThroughDataContext;
+   end;
 end;
 
 // GetIsConstant
@@ -802,48 +830,40 @@ begin
    inherited Create(scriptPos, expr, toTyp);
 end;
 
-// EvalAsTData
-//
-procedure TConvStaticArrayToSetOfExpr.EvalAsTData(exec : TdwsExecution; var data : TData);
-var
-   i, v : Integer;
-   i64 : Int64;
-   setOfSym : TSetOfSymbol;
-   arrayExpr : TArrayConstantExpr;
-begin
-   setOfSym:=TSetOfSymbol(Typ);
-
-   SetLength(data, setOfSym.Size);
-   Typ.InitData(data, 0);
-
-   arrayExpr:=TArrayConstantExpr(Expr);
-   for i:=0 to arrayExpr.ElementCount-1 do begin
-      v:=arrayExpr.Elements[i].EvalAsInteger(exec)-setOfSym.MinValue;
-      if Cardinal(v)<Cardinal(setOfSym.CountValue) then begin
-         i64 := data[v shr 6];
-         data[v shr 6] := i64 or (Int64(1) shl (v and 63));
-      end;
-   end;
-end;
-
 // ToConstExpr
 //
 function TConvStaticArrayToSetOfExpr.ToConstExpr(exec : TdwsExecution) : TConstExpr;
 var
-   data : TData;
+   data : IDataContext;
 begin
-   EvalAsTData(exec, data);
-   Result := TConstExpr.Create(ScriptPos, Typ, data, 0);
+   GetDataPtr(exec, data);
+   Result := TConstExpr.CreateData(ScriptPos, Typ, data);
 end;
 
 // GetDataPtr
 //
 procedure TConvStaticArrayToSetOfExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
 var
-   data : TData;
+   i, v : Integer;
+   i64 : Int64;
+   setOfSym : TSetOfSymbol;
+   arrayExpr : TArrayConstantExpr;
 begin
-   EvalAsTData(exec, data);
-   result:=exec.Stack.CreateDataContext(data, 0);
+   setOfSym := TSetOfSymbol(Typ);
+
+   if exec <> nil then
+      result := exec.Stack.CreateEmpty(setOfSym.Size)
+   else result := TDataContext.CreateStandalone(setOfSym.Size);
+   setOfSym.InitDataContext(result, 0);
+
+   arrayExpr:=TArrayConstantExpr(Expr);
+   for i := 0 to arrayExpr.ElementCount-1 do begin
+      v := arrayExpr.Elements[i].EvalAsInteger(exec) - setOfSym.MinValue;
+      if Cardinal(v) < Cardinal(setOfSym.CountValue) then begin
+         i64 := result.AsInteger[v shr 6];
+         result.AsInteger[v shr 6] := i64 or (Int64(1) shl (v and 63));
+      end;
+   end;
 end;
 
 // ------------------
@@ -862,12 +882,9 @@ end;
 // GetDataPtr
 //
 procedure TConvIntegerToSetOfExpr.GetDataPtr(exec : TdwsExecution; var result : IDataContext);
-var
-   data : TData;
 begin
-   SetLength(data, 1);
-   data[0]:=Expr.EvalAsInteger(exec);
-   result:=exec.Stack.CreateDataContext(data, 0);
+   exec.DataContext_CreateEmpty(1, result);
+   result.AsInteger[0] := Expr.EvalAsInteger(exec);
 end;
 
 end.

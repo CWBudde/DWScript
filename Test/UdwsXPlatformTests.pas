@@ -33,6 +33,10 @@ type
          procedure UnicodeLowerAndUpperCaseTest;
          procedure UnicodeCompareTest;
          procedure RawBytesStringTest;
+         procedure BytesToWordsTest;
+         procedure SwapBytesTest;
+         procedure MRSWTest;
+         procedure VersionsTest;
    end;
 
 // ------------------------------------------------------------------
@@ -46,7 +50,6 @@ implementation
 // ------------------
 // ------------------ TdwsXPlatformTests ------------------
 // ------------------
-
 
 // SetUp
 //
@@ -119,6 +122,82 @@ const
 begin
   Bytes := RawByteStringToBytes(RawByteString(cTestString));
   CheckEquals(cTestString, BytesToRawByteString(@Bytes[0], Length(Bytes)));
+end;
+
+// BytesToWordsTest
+//
+procedure TdwsXPlatformTests.BytesToWordsTest;
+var
+   buf : array [0..63] of Byte;
+   k, i, base : Integer;
+begin
+   for k := 0 to Length(buf) div 2 - 1 do begin
+      base := $0f + k*3;
+      for i := 0 to High(buf) do
+         buf[i] := i + base;
+      BytesToWordsInPlace(@buf[0], k);
+      for i := 0 to k-1 do
+         CheckEquals(base+i, buf[i*2+1]*256 + buf[i*2], 'n=' + IntToStr(k) + ' offset=' + IntToStr(i));
+      CheckEquals((base + k*2 + 1)*256 + (base + k*2), buf[k*2+1]*256 + buf[k*2], 'n=' + IntToStr(k) + ' tail');
+   end;
+end;
+
+// SwapBytesTest
+//
+procedure TdwsXPlatformTests.SwapBytesTest;
+begin
+   CheckEquals($12345671, SwapBytes($71563412));
+end;
+
+// MRSWTest
+//
+{$INLINE OFF}
+procedure TdwsXPlatformTests.MRSWTest;
+var
+   m1 : TMultiReadSingleWrite;
+begin
+   m1 := TMultiReadSingleWrite.Create;
+   try
+      Check(m1.State = mrswUnlocked, 'unlocked start');
+      m1.BeginRead;
+      try
+         Check(m1.State = mrswReadLock, 'read lock');
+         CheckTrue(m1.TryBeginRead, 'try 1');
+         m1.EndRead;
+         CheckFalse(m1.TryBeginWrite, 'try 2');
+      finally
+         m1.EndRead;
+      end;
+      CheckTrue(m1.TryBeginWrite, 'try 3');
+      try
+         Check(m1.State = mrswWriteLock, 'write lock');
+         CheckFalse(m1.TryBeginRead, 'try 4');
+      finally
+         m1.EndWrite;
+      end;
+      Check(m1.State = mrswUnlocked, 'unlocked mid');
+      m1.BeginWrite;
+      try
+         CheckFalse(m1.TryBeginRead, 'try 5');
+      finally
+         m1.EndWrite;
+      end;
+      Check(m1.State = mrswUnlocked, 'unlocked end');
+   finally
+      m1.Free;
+   end;
+end;
+{$INLINE AUTO}
+
+// VersionsTest
+//
+procedure TdwsXPlatformTests.VersionsTest;
+var
+   v : String;
+begin
+   v := ApplicationVersion;
+   CheckTrue(StrMatches(v, '*.*.*.*'), v);
+   CheckEquals(v, ApplicationVersion, 'recheck');
 end;
 
 // UnicodeLowerAndUpperCaseTest

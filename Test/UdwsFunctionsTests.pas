@@ -6,7 +6,7 @@ uses Classes, SysUtils, dwsXPlatformTests, dwsComp, dwsCompiler, dwsExprs,
    dwsTokenizer, dwsSymbols, dwsXPlatform, dwsUtils, dwsErrors,
    dwsMathFunctions, dwsTimeFunctions, dwsGlobalVarsFunctions, dwsVariantFunctions,
    dwsMathComplexFunctions, dwsMath3DFunctions, dwsCompilerContext,
-   dwsByteBufferFunctions, dwsUnitSymbols;
+   dwsByteBufferFunctions, dwsUnitSymbols, dwsJSONConnector;
 
 type
 
@@ -15,6 +15,7 @@ type
          FFolder, FFolderPath : String;
          FTests : TStringList;
          FCompiler : TDelphiWebScript;
+         FJSON : TdwsJSONLibModule;
 
       public
          procedure SetUp; override;
@@ -94,6 +95,11 @@ type
          procedure SetUp; override;
    end;
 
+   TdwsFuncFunctionsTestsFile = class (TdwsFunctionsTestsBase)
+      public
+         procedure SetUp; override;
+   end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -127,14 +133,21 @@ procedure TdwsFunctionsTestsBase.TearDown;
 begin
    FTests.Free;
 
+   FreeAndNil(FJSON);
    FCompiler.Free;
 end;
 
 // DoNeedUnit
 //
 function TdwsFunctionsTestsBase.DoNeedUnit(const unitName : String; var unitSource : String) : IdwsUnit;
+var
+   tempPath : String;
 begin
-   unitSource := LoadTextFromFile(FFolderPath + unitName + '.pas');
+   if unitName = 'TestTempPath' then begin
+      tempPath := FFolderPath + 'Temp' + PathDelim;
+      FastStringReplace(tempPath, '"', '""');
+      unitSource := 'unit TestTempPath; const TempPath = "' + tempPath + '";';
+   end else unitSource := LoadTextFromFile(FFolderPath + unitName + '.pas');
 end;
 
 // Compilation
@@ -335,6 +348,8 @@ procedure TdwsFuncFunctionsTestsVariant.SetUp;
 begin
    FFolder:='FunctionsVariant';
    inherited;
+   FJSON := TdwsJSONLibModule.Create(nil);
+   FJSON.Script := FCompiler;
 end;
 
 // ------------------
@@ -347,6 +362,8 @@ procedure TdwsFuncFunctionsTestsGlobalVars.SetUp;
 begin
    FFolder:='FunctionsGlobalVars';
    inherited;
+   FJSON := TdwsJSONLibModule.Create(nil);
+   FJSON.Script := FCompiler;
 end;
 
 // ------------------
@@ -385,6 +402,18 @@ begin
    inherited;
 end;
 
+// ------------------
+// ------------------ TdwsFuncFunctionsTestsFile ------------------
+// ------------------
+
+// SetUp
+//
+procedure TdwsFuncFunctionsTestsFile.SetUp;
+begin
+   FFolder:='FunctionsFile';
+   inherited;
+end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -403,5 +432,6 @@ initialization
    RegisterTest('Functions', TdwsFuncFunctionsTestsRTTI);
    RegisterTest('Functions', TdwsFuncFunctionsTestsDebug);
    RegisterTest('Functions', TdwsFuncFunctionsTestsByteBuffer);
+   RegisterTest('Functions', TdwsFuncFunctionsTestsFile);
 
 end.

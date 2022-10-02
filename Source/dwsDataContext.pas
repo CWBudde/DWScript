@@ -43,7 +43,6 @@ type
       procedure SetAsFloat(addr : NativeInt; const value : Double);
       function GetAsBoolean(addr : NativeInt) : Boolean;
       procedure SetAsBoolean(addr : NativeInt; const value : Boolean);
-      function GetAsString(addr : NativeInt) : String;
       procedure SetAsString(addr : NativeInt; const value : String);
       function GetAsInterface(addr : NativeInt) : IUnknown;
       procedure SetAsInterface(addr : NativeInt; const value : IUnknown);
@@ -60,8 +59,16 @@ type
       property  AsInteger[addr : NativeInt] : Int64 read GetAsInteger write SetAsInteger;
       property  AsBoolean[addr : NativeInt] : Boolean read GetAsBoolean write SetAsBoolean;
       property  AsFloat[addr : NativeInt] : Double read GetAsFloat write SetAsFloat;
-      property  AsString[addr : NativeInt] : String read GetAsString write SetAsString;
+      property  AsString[addr : NativeInt] : String write SetAsString;
       property  AsInterface[addr : NativeInt] : IUnknown read GetAsInterface write SetAsInterface;
+
+      procedure SetZeroInt64(addr : NativeInt);
+      procedure SetZeroFloat(addr : NativeInt);
+      procedure SetEmptyString(addr : NativeInt);
+      procedure SetEmptyVariant(addr : NativeInt);
+      procedure SetNullVariant(addr : NativeInt);
+      procedure SetNilInterface(addr : NativeInt);
+      procedure SetFalseBoolean(addr : NativeInt);
 
       procedure EvalAsVariant(addr : NativeInt; var result : Variant);
       procedure EvalAsString(addr : NativeInt; var result : String);
@@ -71,10 +78,12 @@ type
       function VarType(addr : NativeInt) : TVarType;
 
       procedure CopyData(const destData : TData; destAddr, size : NativeInt);
+
       procedure WriteData(const src : IDataContext; size : NativeInt); overload;
-      procedure WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt); overload;
-      procedure WriteData(const srcData : TData; srcAddr, size : NativeInt); overload;
-      function  SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean;
+      procedure WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt); overload;
+
+      function  SameData(addr : NativeInt; const other : IDataContext; otherAddr, size : NativeInt) : Boolean; overload;
+      function  SameData(const other : IDataContext) : Boolean; overload;
 
       function  IncInteger(addr : NativeInt; delta : Int64) : Int64;
 
@@ -106,11 +115,12 @@ type
    end;
    PDataPtrPool= ^TDataContextPool;
 
-   TDataContext = class(TInterfacedObject, IDataContext, IGetSelf)
+   TDataContext = class(TObject, IInterface, IDataContext, IGetSelf)
       private
+         FRefCount : Integer;
          FAddr : NativeInt;
-         FData : TData;
          FNext : TDataContext;
+         FData : TData;
          FPool : TDataContextPool;
          FAllNext : TDataContext;
 {$IFDEF DELPHI_2010_MINUS}
@@ -124,18 +134,26 @@ type
          procedure SetAsFloat(addr : NativeInt; const value : Double); inline;
          function GetAsBoolean(addr : NativeInt) : Boolean; inline;
          procedure SetAsBoolean(addr : NativeInt; const value : Boolean); inline;
-         function GetAsString(addr : NativeInt) : String; inline;
          procedure SetAsString(addr : NativeInt; const value : String); inline;
          function GetAsInterface(addr : NativeInt) : IUnknown; inline;
          procedure SetAsInterface(addr : NativeInt; const value : IUnknown); inline;
 
+      protected
+         function QueryInterface(const IID: TGUID; out Obj): HResult; stdcall;
+         function _AddRef: Integer; stdcall;
          function _Release: Integer; stdcall;
 
-      protected
-         property DirectData : TData read FData;
+         property RefCount : Integer read FRefCount;
+         property DirectData : TData read FData write FData;
 
       public
          constructor CreateStandalone(size : NativeInt);
+         constructor CreateCopy(const ref : IDataContext);
+         constructor CreateAcquireData(const data : TData);
+
+         procedure AfterConstruction; override;
+         procedure BeforeDestruction; override;
+         class function NewInstance: TObject; override;
 
          function GetSelf : TObject;
          function ScriptTypeName : String; virtual;
@@ -155,8 +173,16 @@ type
          property  AsInteger[addr : NativeInt] : Int64 read GetAsInteger write SetAsInteger;
          property  AsBoolean[addr : NativeInt] : Boolean read GetAsBoolean write SetAsBoolean;
          property  AsFloat[addr : NativeInt] : Double read GetAsFloat write SetAsFloat;
-         property  AsString[addr : NativeInt] : String read GetAsString write SetAsString;
+         property  AsString[addr : NativeInt] : String write SetAsString;
          property  AsInterface[addr : NativeInt] : IUnknown read GetAsInterface write SetAsInterface;
+
+         procedure SetZeroInt64(addr : NativeInt);
+         procedure SetZeroFloat(addr : NativeInt);
+         procedure SetEmptyString(addr : NativeInt);
+         procedure SetEmptyVariant(addr : NativeInt);
+         procedure SetNullVariant(addr : NativeInt);
+         procedure SetNilInterface(addr : NativeInt);
+         procedure SetFalseBoolean(addr : NativeInt);
 
          function IsEmpty(addr : NativeInt) : Boolean;
          function VarType(addr : NativeInt) : TVarType; virtual;
@@ -168,14 +194,12 @@ type
          procedure CopyData(addr : NativeInt; const destPVariant : PVariant; size : NativeInt); overload; inline;
 
          procedure WriteData(const src : IDataContext; size : NativeInt); overload; inline;
-         procedure WriteData(const src : IDataContext; srcAddr, size : NativeInt); overload; inline;
-         procedure WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt); overload; inline;
-         procedure WriteData(const srcData : TData; srcAddr, size : NativeInt); overload; inline;
+         procedure WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt); overload; inline;
 
          procedure MoveData(srcAddr, destAddr, size : NativeInt); inline;
 
-         function  SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean; overload; inline;
-         function  SameData(addr : NativeInt; const otherData : IDataContext; size : NativeInt) : Boolean; overload; inline;
+         function  SameData(addr : NativeInt; const otherData : IDataContext; otherAddr, size : NativeInt) : Boolean; overload; inline;
+         function  SameData(const other : IDataContext) : Boolean; overload;
 
          function IndexOfData(const item : IDataContext; fromIndex, toIndex, itemSize : NativeInt) : NativeInt;
          function IndexOfValue(const item : Variant; fromIndex, toIndex : NativeInt) : NativeInt;
@@ -183,7 +207,6 @@ type
          function IndexOfInteger(const item : Int64; fromIndex : NativeInt) : NativeInt;
          function IndexOfFloat(const item : Double; fromIndex : NativeInt) : NativeInt;
 
-         procedure ReplaceData(const newData : TData); virtual;
          procedure ClearData; virtual;
          procedure SetDataLength(n : NativeInt);
 
@@ -213,7 +236,6 @@ type
          procedure SetAsFloat(addr : NativeInt; const value : Double);
          function GetAsBoolean(addr : NativeInt) : Boolean;
          procedure SetAsBoolean(addr : NativeInt; const value : Boolean);
-         function GetAsString(addr : NativeInt) : String;
          procedure SetAsString(addr : NativeInt; const value : String);
          function GetAsInterface(addr : NativeInt) : IUnknown;
          procedure SetAsInterface(addr : NativeInt; const value : IUnknown);
@@ -229,14 +251,24 @@ type
          procedure EvalAsString(addr : NativeInt; var result : String);
          procedure EvalAsInterface(addr : NativeInt; var result : IUnknown);
 
+         procedure SetZeroInt64(addr : NativeInt);
+         procedure SetZeroFloat(addr : NativeInt);
+         procedure SetEmptyString(addr : NativeInt);
+         procedure SetEmptyVariant(addr : NativeInt);
+         procedure SetNullVariant(addr : NativeInt);
+         procedure SetNilInterface(addr : NativeInt);
+         procedure SetFalseBoolean(addr : NativeInt);
+
          function IsEmpty(addr : NativeInt) : Boolean;
          function VarType(addr : NativeInt) : TVarType;
 
          procedure CopyData(const destData : TData; destAddr, size : NativeInt);
+
          procedure WriteData(const src : IDataContext; size : NativeInt); overload;
-         procedure WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt); overload;
-         procedure WriteData(const srcData : TData; srcAddr, size : NativeInt); overload;
-         function SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean; overload;
+         procedure WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt); overload;
+
+         function SameData(addr : NativeInt; const other : IDataContext; otherAddr, size : NativeInt) : Boolean; overload;
+         function SameData(const other : IDataContext) : Boolean; overload;
 
          function  IncInteger(addr : NativeInt; delta : Int64) : Int64;
 
@@ -272,6 +304,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses Variants;
 
 // DWSCopyPVariants
 //
@@ -560,21 +594,28 @@ end;
 // ------------------ TDataContext ------------------
 // ------------------
 
-// _Release
-//
-function TDataContext._Release: Integer;
-begin
-   Result := InterlockedDecrement(FRefCount);
-   if Result = 0 then
-      FPool.Push(Self);
-end;
-
 // CreateStandalone
 //
 constructor TDataContext.CreateStandalone(size : NativeInt);
 begin
    inherited Create;
    SetLength(FData, size);
+end;
+
+// CreateCopy
+//
+constructor TDataContext.CreateCopy(const ref : IDataContext);
+begin
+   CreateStandalone(ref.DataLength);
+   WriteData(ref, ref.DataLength);
+end;
+
+// CreateAcquireData
+//
+constructor TDataContext.CreateAcquireData(const data : TData);
+begin
+   inherited;
+   FData := data;
 end;
 
 // GetSelf
@@ -677,13 +718,6 @@ begin
    else VarCopySafe(PVariant(p)^, value);
 end;
 
-// GetAsString
-//
-function TDataContext.GetAsString(addr : NativeInt) : String;
-begin
-   EvalAsString(addr, Result);
-end;
-
 // SetAsString
 //
 procedure TDataContext.SetAsString(addr : NativeInt; const value : String);
@@ -720,9 +754,64 @@ var
    p : PVarData;
 begin
    p:=@FData[FAddr+addr];
-   if p^.VType=varUnknown then
-      IUnknown(p^.VUnknown):=value
-   else VarCopySafe(PVariant(p)^, value);
+   case p^.VType of
+      varEmpty : begin
+         p^.VType := varUnknown;
+         IUnknown(p^.VUnknown) := value
+      end;
+      varUnknown :
+         IUnknown(p^.VUnknown) := value
+   else
+      VarCopySafe(PVariant(p)^, value);
+   end;
+end;
+
+// QueryInterface
+//
+function TDataContext.QueryInterface(const IID: TGUID; out Obj): HResult;
+begin
+   if GetInterface(IID, Obj) then
+      Result := 0
+   else Result := E_NOINTERFACE;
+end;
+
+// _AddRef
+//
+function TDataContext._AddRef: Integer;
+begin
+   Result := AtomicIncrement(FRefCount);
+end;
+
+// _Release
+//
+function TDataContext._Release: Integer;
+begin
+   Result := AtomicDecrement(FRefCount);
+   if Result = 0 then
+      FPool.Push(Self);
+end;
+
+// AfterConstruction
+//
+procedure TDataContext.AfterConstruction;
+begin
+   AtomicDecrement(FRefCount);
+end;
+
+// BeforeDestruction
+//
+procedure TDataContext.BeforeDestruction;
+begin
+   if FRefCount <> 0 then
+      Error(reInvalidPtr);
+end;
+
+// NewInstance
+//
+class function TDataContext.NewInstance: TObject;
+begin
+   Result := inherited NewInstance;
+   TDataContext(Result).FRefCount := 1;
 end;
 
 // AsPData
@@ -807,6 +896,55 @@ begin
    else result:=PVariant(p)^;
 end;
 
+// SetZeroInt64
+//
+procedure TDataContext.SetZeroInt64(addr : NativeInt);
+begin
+   VarSetDefaultInt64(FData[FAddr + addr]);
+end;
+
+// SetZeroFloat
+//
+procedure TDataContext.SetZeroFloat(addr : NativeInt);
+begin
+   VarSetDefaultDouble(FData[FAddr + addr]);
+end;
+
+// SetEmptyString
+//
+procedure TDataContext.SetEmptyString(addr : NativeInt);
+begin
+   VarSetDefaultString(FData[FAddr + addr]);
+end;
+
+// SetEmptyVariant
+//
+procedure TDataContext.SetEmptyVariant(addr : NativeInt);
+begin
+   VarClearSafe(FData[FAddr + addr]);
+end;
+
+// SetNullVariant
+//
+procedure TDataContext.SetNullVariant(addr : NativeInt);
+begin
+   VarSetNull(FData[FAddr + addr]);
+end;
+
+// SetNilInterface
+//
+procedure TDataContext.SetNilInterface(addr : NativeInt);
+begin
+   AsInterface[addr] := nil;
+end;
+
+// SetFalseBoolean
+//
+procedure TDataContext.SetFalseBoolean(addr : NativeInt);
+begin
+   AsBoolean[addr] := False;
+end;
+
 // IsEmpty
 //
 function TDataContext.IsEmpty(addr : NativeInt) : Boolean;
@@ -853,44 +991,24 @@ end;
 //
 procedure TDataContext.WriteData(const src : IDataContext; size : NativeInt);
 begin
-   WriteData(src, 0, size);
+   WriteData(0, src, 0, size);
 end;
 
 // WriteData
 //
-procedure TDataContext.WriteData(const src : IDataContext; srcAddr, size : NativeInt);
+procedure TDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt);
 var
    i : NativeInt;
    pDest : PVariant;
 begin
-   Assert(FAddr + size <= Length(FData));
-   pDest := @FData[FAddr];
+   if size = 0 then Exit;
+   Assert(destAddr >= 0);
+   Assert(FAddr + destAddr + size <= Length(FData));
+   pDest := @FData[FAddr + destAddr];
    for i := srcAddr to srcAddr + size-1 do begin
       src.EvalAsVariant(i, pDest^);
       Inc(pDest);
    end;
-end;
-
-// WriteData
-//
-procedure TDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt);
-var
-   i : NativeInt;
-   pDest : PVariant;
-begin
-   Assert(FAddr + destAddr + size <= Length(FData));
-   pDest := @FData[FAddr + destAddr];
-   for i := 0 to size-1 do begin
-      src.EvalAsVariant(i, pDest^);
-      Inc(pDest);
-   end;
-end;
-
-// WriteData
-//
-procedure TDataContext.WriteData(const srcData : TData; srcAddr, size : NativeInt);
-begin
-   DWSCopyData(srcData, srcAddr, FData, FAddr, size);
 end;
 
 // MoveData
@@ -902,16 +1020,19 @@ end;
 
 // SameData
 //
-function TDataContext.SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean;
+function TDataContext.SameData(addr : NativeInt; const otherData : IDataContext; otherAddr, size : NativeInt) : Boolean;
 begin
-   Result:=DWSSameData(FData, otherData, FAddr+addr, otherAddr, size);
+   Result:=DWSSameData(FData, otherData.AsPData^, FAddr + addr, otherData.Addr + otherAddr, size);
 end;
 
 // SameData
 //
-function TDataContext.SameData(addr : NativeInt; const otherData : IDataContext; size : NativeInt) : Boolean;
+function TDataContext.SameData(const other : IDataContext) : Boolean;
+var
+   n : NativeInt;
 begin
-   Result:=DWSSameData(FData, otherData.AsPData^, FAddr+addr, otherData.Addr, size);
+   n := DataLength;
+   Result := (n = other.DataLength) and SameData(0, other, 0, n);
 end;
 
 // IndexOfData
@@ -919,11 +1040,9 @@ end;
 function TDataContext.IndexOfData(const item : IDataContext; fromIndex, toIndex, itemSize : NativeInt) : NativeInt;
 var
    i : NativeInt;
-   data : PData;
 begin
-   data := AsPData;
    for i:=fromIndex to toIndex do
-      if item.SameData(0, data^, Addr+i*itemSize, itemSize) then
+      if item.SameData(0, Self, i*itemSize, itemSize) then
          Exit(i);
    Result:=-1;
 end;
@@ -1003,13 +1122,6 @@ begin
       end;
    end;
    Result:=-1;
-end;
-
-// ReplaceData
-//
-procedure TDataContext.ReplaceData(const newData : TData);
-begin
-   FData:=newData;
 end;
 
 // ClearData
@@ -1128,13 +1240,6 @@ begin
    VarCopySafe(FGetPData^[FAddr+addr], value);
 end;
 
-// GetAsString
-//
-function TRelativeDataContext.GetAsString(addr : NativeInt) : String;
-begin
-   Result := FGetPData^[FAddr+addr];
-end;
-
 // SetAsString
 //
 procedure TRelativeDataContext.SetAsString(addr : NativeInt; const value : String);
@@ -1205,6 +1310,57 @@ begin
    result := FGetPData^[FAddr+addr];
 end;
 
+// SetZeroInt64
+//
+procedure TRelativeDataContext.SetZeroInt64(addr : NativeInt);
+begin
+   SetAsInteger(addr, 0);
+end;
+
+// SetZeroFloat
+//
+procedure TRelativeDataContext.SetZeroFloat(addr : NativeInt);
+begin
+   SetAsFloat(addr, 0);
+end;
+
+// SetEmptyString
+//
+procedure TRelativeDataContext.SetEmptyString(addr : NativeInt);
+begin
+   SetAsString(addr, '');
+end;
+
+// SetEmptyVariant
+//
+procedure TRelativeDataContext.SetEmptyVariant(addr : NativeInt);
+var
+   v : Variant;
+begin
+   SetAsVariant(addr, v);
+end;
+
+// SetNullVariant
+//
+procedure TRelativeDataContext.SetNullVariant(addr : NativeInt);
+begin
+   SetAsVariant(addr, Null);
+end;
+
+// SetNilInterface
+//
+procedure TRelativeDataContext.SetNilInterface(addr : NativeInt);
+begin
+   SetAsInterface(addr, nil);
+end;
+
+// SetFalseBoolean
+//
+procedure TRelativeDataContext.SetFalseBoolean(addr : NativeInt);
+begin
+   SetAsBoolean(addr, False);
+end;
+
 // IsEmpty
 //
 function TRelativeDataContext.IsEmpty(addr : NativeInt) : Boolean;
@@ -1235,23 +1391,28 @@ end;
 
 // WriteData
 //
-procedure TRelativeDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; size : NativeInt);
+procedure TRelativeDataContext.WriteData(destAddr : NativeInt; const src : IDataContext; srcAddr, size : NativeInt);
 begin
-   DWSCopyData(src.AsPData^, src.Addr, FGetPData^, FAddr+destAddr, size);
-end;
-
-// WriteData
-//
-procedure TRelativeDataContext.WriteData(const srcData : TData; srcAddr, size : NativeInt);
-begin
-   DWSCopyData(srcData, srcAddr, FGetPData^, FAddr, size);
+   DWSCopyData(src.AsPData^, src.Addr + srcAddr, FGetPData^, FAddr+destAddr, size);
 end;
 
 // SameData
 //
-function TRelativeDataContext.SameData(addr : NativeInt; const otherData : TData; otherAddr, size : NativeInt) : Boolean;
+function TRelativeDataContext.SameData(addr : NativeInt; const other : IDataContext; otherAddr, size : NativeInt) : Boolean;
 begin
-   Result:=DWSSameData(FGetPData^, otherData, FAddr+addr, otherAddr, size);
+   if other.GetSelf is TRelativeDataContext then
+      otherAddr := TRelativeDataContext(other.GetSelf).FAddr + otherAddr;
+   Result := DWSSameData(AsPData^, other.AsPData^, FAddr + addr, otherAddr, size);
+end;
+
+// SameData
+//
+function TRelativeDataContext.SameData(const other : IDataContext) : Boolean;
+var
+   n : NativeInt;
+begin
+   n := DataLength;
+   Result := (n = other.DataLength) and SameData(FAddr, other, 0, n);
 end;
 
 // IncInteger

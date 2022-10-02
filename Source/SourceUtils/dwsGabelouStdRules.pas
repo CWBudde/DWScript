@@ -21,9 +21,8 @@ interface
 
 uses Classes, SysUtils, Character,
    dwsExprs, dwsSymbols, dwsErrors, dwsUtils, dwsCoreExprs, dwsTokenizer,
-   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
-   dwsUnitSymbols, dwsSymbolDictionary,
-   dwsGabelou, dwsGabelouStrings;
+   dwsStrings, dwsUnitSymbols, dwsSymbolDictionary,
+   dwsGabelou, dwsGabelouStrings, dwsScriptSource;
 
 type
 
@@ -81,10 +80,28 @@ type
          procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
    end;
 
+   TGR_TypesNaming = class abstract (TdwsSymbolDictionaryGabelouRule)
+      public
+         constructor Create; override;
+         procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
+   end;
+
    TGR_AttributeClassNaming = class abstract (TdwsSymbolDictionaryGabelouRule)
       public
          constructor Create; override;
          procedure EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList); override;
+   end;
+
+   TGabelouFunctionUseMessage = class (TGabelouMessage)
+      public
+         constructor Create(msgs : TdwsMessageList; currentFunc : TFuncSymbol; const suggestedFunc : String;
+                            const scriptPos : TScriptPos);
+   end;
+
+   TGSR_StronglyTypedVarFunctionAlternatives = class (TdwsFunctionUseGabelouSubRule)
+      public
+         class procedure Evaluate(const aProg : TdwsProgram; msgs : TdwsMessageList;
+                                  funcExpr : TFuncExprBase); override;
    end;
 
 // ------------------------------------------------------------------
@@ -94,6 +111,8 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
+
+uses dwsMagicExprs;
 
 // ------------------
 // ------------------ TGR_CamelCaseParameters ------------------
@@ -110,11 +129,14 @@ end;
 // EvaluateSymbol
 //
 procedure TGR_CamelCaseParameters.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
+var
+   paramSymbol : TParamSymbol;
 begin
    if not (aSymbolList.Symbol is TParamSymbol) then Exit;
-   if aSymbolList.Symbol.Name='Self' then Exit;
+   paramSymbol := TParamSymbol(aSymbolList.Symbol);
+   if paramSymbol.IsInternal then Exit;
 
-   if aSymbolList.Symbol.Name[1].IsUpper() then
+   if paramSymbol.Name[1].IsUpper() then
       TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
 end;
 
@@ -163,6 +185,7 @@ begin
    if funcSym=nil then Exit;
 
    if funcSym.IsExport then Exit;
+   if funcSym.IsExternal then Exit;
 
    if funcSym.Name[1].IsLower() then
       TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
@@ -208,6 +231,7 @@ begin
    if not (aSymbolList.Symbol is TConstSymbol) then Exit;
    if aSymbolList.Symbol is TElementSymbol then Exit;
    if aSymbolList.Symbol.Name='Null' then Exit;
+   if aSymbolList.Symbol is TClassConstSymbol then Exit;
 
    if not (ChecksCPrefix(aSymbolList.Symbol.Name) or ChecksAllCapsUpToUnderscore(aSymbolList.Symbol.Name)) then
       TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
@@ -317,6 +341,7 @@ end;
 procedure TGR_PascalCaseProperties.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
 begin
    if aSymbolList.Symbol.ClassType<>TPropertySymbol then Exit;
+   if TPropertySymbol(aSymbolList.Symbol).OwnerSymbol.IsExternal then Exit;
 
    if aSymbolList.Symbol.Name[1].IsLower() then
       TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
@@ -345,6 +370,52 @@ begin
    if aSymbolList.Symbol.Name[1].IsLower() then
       TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description);
 end;
+
+// ------------------
+// ------------------ TGR_TypesNaming ------------------
+// ------------------
+
+// Create
+//
+constructor TGR_TypesNaming.Create;
+begin
+   Name := GAB_Types_Name;
+   Description := GAB_Types_Description;
+end;
+
+// EvaluateSymbol
+//
+procedure TGR_TypesNaming.EvaluateSymbol(const aSymbolList : TSymbolPositionList; msgs : TdwsMessageList);
+var
+   symName : String;
+   classSymbol : TClassSymbol;
+   typeSymbol : TTypeSymbol;
+   isException : Boolean;
+begin
+   if not aSymbolList.Symbol.IsType then Exit;
+
+   symName := aSymbolList.Symbol.Name;
+   if (symName[1] = 'E') and (Length(symName) > 1) and CharInSet(symName[2], ['A'..'Z']) then begin
+
+      isException := False;
+
+      typeSymbol := TTypeSymbol(aSymbolList.Symbol).UnAliasedType;
+      if typeSymbol is TClassSymbol then begin
+         classSymbol := TClassSymbol(typeSymbol);
+         while classSymbol.Parent <> nil do begin
+            classSymbol := classSymbol.Parent;
+            if classSymbol.Name = 'Exception' then begin
+               isException := True;
+               Break;
+            end;
+         end;
+      end;
+
+      if not isException then
+         TGabelouMessage.CreateOnSymbolPosList(msgs, aSymbolList, Description)
+   end;
+end;
+
 
 // ------------------
 // ------------------ TGR_AttributeClassNaming ------------------
@@ -377,6 +448,39 @@ begin
    end;
 end;
 
+// ------------------
+// ------------------ TGabelouFunctionUseMessage ------------------
+// ------------------
+
+// Create
+//
+constructor TGabelouFunctionUseMessage.Create(msgs : TdwsMessageList; currentFunc : TFuncSymbol; const suggestedFunc : String;
+                                              const scriptPos : TScriptPos);
+begin
+   inherited Create(msgs, 'replace weakly typed %s with strongly typed function %s',
+                    [ currentFunc.Name, suggestedFunc ], scriptPos);;
+
+end;
+
+// ------------------
+// ------------------ TGSR_StronglyTypedVarFunctionAlternatives ------------------
+// ------------------
+
+// Evaluate
+//
+class procedure TGSR_StronglyTypedVarFunctionAlternatives.Evaluate(
+   const aProg : TdwsProgram; msgs : TdwsMessageList; funcExpr : TFuncExprBase);
+var
+   magic : TMagicFuncSymbol;
+begin
+   if funcExpr.Args.Count = 0 then Exit;
+   if funcExpr.FuncSym is TMagicFuncSymbol then begin
+      magic := TMagicFuncSymbol(funcExpr.FuncSym);
+      if (magic.Name = 'VarToIntDef') and funcExpr.ArgIsOfType(0, aProg.Root.CompilerContext.TypString) then
+         TGabelouFunctionUseMessage.Create(msgs, magic, 'StrToIntDef', funcExpr.ScriptPos);
+   end;
+end;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -391,9 +495,16 @@ initialization
       TGR_ConstantNamingRules,
 
       TGR_PascalCaseFunctions, TGR_PascalCaseProperties, TGR_PascalCaseTypes,
+      TGR_TypesNaming,
       TGR_AttributeClassNaming,
 
-      TGR_PrefixedPrivateFields, TGR_PrefixedPublicFields, TGR_PrefixedClassVariables
+      TGR_PrefixedPrivateFields, TGR_PrefixedPublicFields, TGR_PrefixedClassVariables,
+
+      TdwsFunctionUseGabelouRule
       ]);
+
+   TdwsFunctionUseGabelouRule.RegisterSubRule(
+      TGSR_StronglyTypedVarFunctionAlternatives
+   );
 
 end.

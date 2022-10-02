@@ -106,11 +106,15 @@ type
 
          class function CSSTextEncode(const s : UnicodeString) : UnicodeString; static;
 
-         class function XMLTextEncode(const s : UnicodeString) : UnicodeString; static;
+         class function XMLTextEncode(const s : UnicodeString; unsupportedXML10CharactersMode : Integer = 0) : UnicodeString; static;
          class function XMLTextDecode(const s : UnicodeString) : UnicodeString; static;
+
+         class function IsValidCookieName(const s : String) : Boolean; static;
+         class function IsValidCookieValue(const s : String) : Boolean; static;
    end;
 
    EXMLDecodeError = class (Exception);
+   EXMLEncodeError = class (Exception);
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -365,14 +369,15 @@ var
    entity : TNamedEntity;
 begin
    vAllNamedEntities := TNamedEntities.Create;
+   vAllNamedEntities.PreallocateCapacity(4096);
 
    s := cAllNamedEntities;
    i := 1;
    repeat
-      p := StrUtils.PosEx(',', s, i);
+      p := Pos(',', s, i);
       if p <= 0 then
          p := Length(s)+1;
-      e := StrUtils.PosEx('=', s, i);
+      e := Pos('=', s, i);
       entity.Name := Copy(s, i, e-i);
       entity.Code := StrToInt('$' + Copy(s, e+1, p-e-1));
       vAllNamedEntities.Add(entity);
@@ -617,8 +622,8 @@ class function WebUtils.DecodeURLEncoded(const src : RawByteString; start : Inte
 var
    n : Integer;
 begin
-   n:=Length(src)-start+1;
-   if n>=0 then
+   n := Length(src)-start+1;
+   if n > 0 then
       Result:=DecodeURLEncoded(src, start, n)
    else Result:='';
 end;
@@ -869,16 +874,15 @@ begin
    else SplitStr(str, ' ', 1);
    if count<5 then // invalid date
       Exit;
-   if (count>5) and (Pos(':', list[4])>0) and StrBeginsWith(list[5], 'GMT+') then begin
-      // Thu Oct 08 2009 00:00:00 GMT+0200 (Romance Daylight Time)
+   if (count > 5) and (Pos(':', list[4])>0) and StrBeginsWith(list[5], 'GMT+') then begin
+      // Fri Feb 11 2022 10:25:55 GMT+0100 (Central European Standard Time)
       ParseMonth(list[1]);
       if Length(list[2])=2 then
          d:=ParseTwoDigits(Pointer(list[2]), 0)
       else d:=0;
       ParseYear(list[3]);
       ParseHMS(list[4]);
-      deltaHours:=0;
-      deltaDays:=0;
+      deltaHours := StrToIntDef(Copy(list[5], 4), 0);
    end else begin
       // Thu, 08 Oct 2009 00:00:00 GMT
       if Length(list[0])=2 then
@@ -888,11 +892,11 @@ begin
       ParseYear(list[2]);
       ParseHMS(list[3]);
       deltaHours:=StrToIntDef(list[4], 0);
-      deltaDays:=0;
-      while h>=24 do begin
-         Dec(h, 24);
-         Inc(deltaDays);
-      end;
+   end;
+   deltaDays:=0;
+   while h>=24 do begin
+      Dec(h, 24);
+      Inc(deltaDays);
    end;
    if not TryEncodeDate(y, mo, d, Result) then
       Result:=0
@@ -1217,7 +1221,7 @@ end;
 
 // XMLTextEncode
 //
-class function WebUtils.XMLTextEncode(const s : UnicodeString) : UnicodeString;
+class function WebUtils.XMLTextEncode(const s : UnicodeString; unsupportedXML10CharactersMode : Integer = 0) : UnicodeString;
 var
    capacity : Integer;
    pSrc, pDest : PWideChar;
@@ -1246,6 +1250,18 @@ var
       Dec(capacity, n);
    end;
 
+   procedure AppendEncoded(const c : Char);
+   begin
+      if capacity < 5 then Grow;
+      pDest[0] := '&';
+      pDest[1] := '#';
+      pDest[2] := Char(Ord('0') + Ord(c) div 10);
+      pDest[3] := Char(Ord('0') + Ord(c) mod 10);
+      pDest[4] := ';';
+      Inc(pDest, 5);
+      Dec(capacity, 5);
+   end;
+
 begin
    if s='' then exit;
    capacity:=Length(s);
@@ -1255,6 +1271,13 @@ begin
    repeat
       case pSrc^ of
          #0 : break;
+         #1..#8, #11..#12, #14..#31 :
+            case unsupportedXML10CharactersMode of
+               0 : ; // ignore
+               1 : AppendEncoded(pSrc^);
+            else
+               raise EXMLEncodeError.CreateFmt('Unsupported character #%.2d', [ Ord(pSrc^) ]);
+            end;
          '<' : Append('&lt;');
          '>' : Append('&gt;');
          '&' : Append('&amp;');
@@ -1334,6 +1357,45 @@ begin
    until False;
 
    SetLength(Result, (NativeUInt(pDest)-NativeUInt(Pointer(Result))) div SizeOf(WideChar));
+end;
+
+// IsValidCookieName
+//
+class function WebUtils.IsValidCookieName(const s : String) : Boolean;
+var
+   p : PChar;
+   i : Integer;
+begin
+   if s = '' then Exit(False);
+   // check for RFC 6265 set
+   p := PChar(s);
+   for i := 0 to Length(s)-1 do begin
+      case p[i] of
+         #00..' ', #$007F..#$FFFF,
+         '(', ')', '<', '>', '@', ',', ';', ':', '\', '"',
+         '/', '[', ']', '?', '=', '{', '}' : Exit(False);
+      end;
+   end;
+   Result := True;
+end;
+
+// IsValidCookieValue
+//
+class function WebUtils.IsValidCookieValue(const s : String) : Boolean;
+var
+   p : PChar;
+   i : Integer;
+begin
+   // check for RFC 6265 set
+   p := PChar(s);
+   for i := 0 to Length(s)-1 do begin
+      case Ord(p[i]) of
+         $21, $23..$2B, $2D..$3A, $3C..$5B, $5D..$7E : ;
+      else
+         Exit(False);
+      end;
+   end;
+   Result := True;
 end;
 
 // ------------------

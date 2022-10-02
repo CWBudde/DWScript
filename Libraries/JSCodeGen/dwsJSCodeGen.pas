@@ -18,6 +18,8 @@ unit dwsJSCodeGen;
 
 {$I dws.inc}
 
+{$define USE_LET_FOR_LOOP_VARS}
+
 interface
 
 uses
@@ -80,7 +82,6 @@ type
 
          procedure WriteDefaultValue(typ : TTypeSymbol; box : Boolean);
          procedure WriteValue(typ : TTypeSymbol; const dataPtr : IDataContext);
-         procedure WriteValueData(typ : TTypeSymbol; const data : TData);
          procedure WriteStringArray(strings : TStrings);
 
          procedure WriteFuncParams(func : TFuncSymbol);
@@ -293,8 +294,8 @@ type
 
    TJSCompoundExpr = class (TJSExprCodeGen)
       Op, SpacedOp : String;
-      DynCompound : String;
-      constructor Create(const anOp, aDynCompound : String);
+      DynCompound, AssocCompound : String;
+      constructor Create(const anOp, aDynCompound, aAssocCompound : String);
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
       procedure CodeGenRightExpr(codeGen : TdwsCodeGen; rightExpr : TTypedExpr); virtual;
    end;
@@ -410,6 +411,9 @@ type
    TJSArrayAddExpr = class (TJSExprCodeGen)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
       class procedure CodeGenPush(codeGen : TdwsCodeGen; e : TArrayAddExpr; skip : Integer); static;
+   end;
+   TJSArrayAddValueExpr = class (TJSExprCodeGen)
+      procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
    end;
    TJSArrayPeekExpr = class (TJSExprCodeGen)
       procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
@@ -859,6 +863,10 @@ type
          procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
    end;
 
+   TJSObjCmpEqualExpr = class (TJSBinOpExpr)
+      procedure CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr); override;
+   end;
+
    TJSAppendStringVarExpr = class(TJSExprCodeGen)
       public
          procedure CodeGen(codeGen : TdwsCodeGen; expr : TExprBase); override;
@@ -873,7 +881,7 @@ implementation
 // ------------------------------------------------------------------
 
 uses
-   dwsDynamicArrays,
+   dwsDynamicArrays, dwsMathFunctions, dwsStringFunctions,
    dwsJSRTL, dwsJSSymbolWriters, dwsJSMin
    {$ifdef JS_BIGINTEGER}, dwsJSBigInteger, dwsBigIntegerFunctions.GMP{$endif}
    ;
@@ -1057,7 +1065,7 @@ begin
 
    RegisterCodeGen(TdwsJSBlockExpr,       TJSRAWBlockExpr.Create);
 
-   RegisterCodeGen(TNullExpr,             TdwsExprGenericCodeGen.Create(['/* null */'#13#10]));
+   RegisterCodeGen(TNullExpr,             TdwsExprGenericCodeGen.Create(['/* null */'#10]));
    RegisterCodeGen(TNoResultWrapperExpr,  TJSNoResultWrapperExpr.Create);
 
    RegisterCodeGen(TConstExpr,            TJSConstExpr.Create);
@@ -1173,17 +1181,17 @@ begin
    RegisterCodeGen(TAppendStringVarExpr,  TJSAppendStringVarExpr.Create);
    RegisterCodeGen(TAppendConstStringVarExpr,      TJSAppendConstStringVarExpr.Create);
 
-   RegisterCodeGen(TPlusAssignIntExpr,    TJSCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TPlusAssignFloatExpr,  TJSCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TPlusAssignStrExpr,    TJSCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TPlusAssignExpr,       TJSCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TMinusAssignIntExpr,   TJSCompoundExpr.Create('-=', '$DIdxMinus'));
-   RegisterCodeGen(TMinusAssignFloatExpr, TJSCompoundExpr.Create('-=', '$DIdxMinus'));
-   RegisterCodeGen(TMinusAssignExpr,      TJSCompoundExpr.Create('-=', '$DIdxMinus'));
-   RegisterCodeGen(TMultAssignIntExpr,    TJSCompoundExpr.Create('*=', '$DIdxMult'));
-   RegisterCodeGen(TMultAssignFloatExpr,  TJSCompoundExpr.Create('*=', '$DIdxMult'));
-   RegisterCodeGen(TMultAssignExpr,       TJSCompoundExpr.Create('*=', '$DIdxMult'));
-   RegisterCodeGen(TDivideAssignExpr,     TJSCompoundExpr.Create('/=', '$DIdxDiv'));
+   RegisterCodeGen(TPlusAssignIntExpr,    TJSCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TPlusAssignFloatExpr,  TJSCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TPlusAssignStrExpr,    TJSCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TPlusAssignExpr,       TJSCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TMinusAssignIntExpr,   TJSCompoundExpr.Create('-=', '$DIdxMinus', '$AKeyMinus'));
+   RegisterCodeGen(TMinusAssignFloatExpr, TJSCompoundExpr.Create('-=', '$DIdxMinus', '$AKeyMinus'));
+   RegisterCodeGen(TMinusAssignExpr,      TJSCompoundExpr.Create('-=', '$DIdxMinus', '$AKeyMinus'));
+   RegisterCodeGen(TMultAssignIntExpr,    TJSCompoundExpr.Create('*=', '$DIdxMult', '$AKeyMult'));
+   RegisterCodeGen(TMultAssignFloatExpr,  TJSCompoundExpr.Create('*=', '$DIdxMult', '$AKeyMult'));
+   RegisterCodeGen(TMultAssignExpr,       TJSCompoundExpr.Create('*=', '$DIdxMult', '$AKeyMult'));
+   RegisterCodeGen(TDivideAssignExpr,     TJSCompoundExpr.Create('/=', '$DIdxDiv', '$AKeyDiv'));
 
    RegisterCodeGen(TIncIntVarExpr,
       TdwsExprGenericCodeGen.Create([0, '+=', -1], gcgStatement));
@@ -1227,13 +1235,13 @@ begin
    RegisterCodeGen(TNotVariantExpr,    TdwsExprGenericCodeGen.Create(['(', '!', 0, ')']));
 
    RegisterCodeGen(TAssignedInstanceExpr,
-      TdwsExprGenericCodeGen.Create(['(', 0, '!==null', ')']));
+      TdwsExprGenericCodeGen.Create(['!!', 0]));
    RegisterCodeGen(TAssignedInterfaceExpr,
-      TdwsExprGenericCodeGen.Create(['(', 0, '!==null', ')']));
+      TdwsExprGenericCodeGen.Create(['!!', 0]));
    RegisterCodeGen(TAssignedMetaClassExpr,
-      TdwsExprGenericCodeGen.Create(['(', 0, '!==null', ')']));
+      TdwsExprGenericCodeGen.Create(['!!', 0]));
    RegisterCodeGen(TAssignedFuncPtrExpr,
-      TdwsExprGenericCodeGen.Create(['(', 0, '!==null', ')']));
+      TdwsExprGenericCodeGen.Create(['!!', 0]));
 
    RegisterCodeGen(TDebugBreakExpr, TJSDebugBreakExpr.Create);
 
@@ -1250,8 +1258,8 @@ begin
    RegisterCodeGen(TConstStringInVarStringExpr,
       TdwsExprGenericCodeGen.Create(['(', 1, '.indexOf', '(', 0, ')', '>=0)']));
 
-   RegisterCodeGen(TObjCmpEqualExpr,         TJSBinOpExpr.Create('===', 10, [associativeLeft]));
-   RegisterCodeGen(TObjCmpNotEqualExpr,      TJSBinOpExpr.Create('!==', 10, [associativeLeft]));
+   RegisterCodeGen(TObjCmpEqualExpr,         TJSObjCmpEqualExpr.Create('===', 10, [associativeLeft]));
+   RegisterCodeGen(TObjCmpNotEqualExpr,      TJSObjCmpEqualExpr.Create('!==', 10, [associativeLeft]));
 
    RegisterCodeGen(TRelEqualIntExpr,         TJSBinOpExpr.Create('==', 10, [associativeLeft]));
    RegisterCodeGen(TRelNotEqualIntExpr,      TJSBinOpExpr.Create('!=', 10, [associativeLeft]));
@@ -1351,6 +1359,7 @@ begin
    RegisterCodeGen(TNewArrayExpr,                  TJSNewArrayExpr.Create);
    RegisterCodeGen(TArraySetLengthExpr,            TJSArraySetLengthExpr.Create);
    RegisterCodeGen(TArrayAddExpr,                  TJSArrayAddExpr.Create);
+   RegisterCodeGen(TArrayAddValueExpr,             TJSArrayAddValueExpr.Create);
    RegisterCodeGen(TArrayPeekExpr,                 TJSArrayPeekExpr.Create);
    RegisterCodeGen(TArrayPopExpr,                  TJSArrayPopExpr.Create);
    RegisterCodeGen(TArrayDeleteExpr,               TJSArrayDeleteExpr.Create);
@@ -1397,7 +1406,7 @@ begin
    RegisterCodeGen(TAssociativeArrayValueSetExpr,     TJSAssociativeArraySetExpr.Create);
    RegisterCodeGen(TAssociativeArrayLengthExpr,       TdwsExprGenericCodeGen.Create(['Object.keys', '(', 0, ')', '.length']));
    RegisterCodeGen(TAssociativeArrayClearExpr,        TdwsExprGenericCodeGen.Create(['$Delete', '(', 0, ')'], gcgStatement, '$Delete'));
-   RegisterCodeGen(TAssociativeArrayDeleteExpr,       TdwsExprGenericCodeGen.Create(['(delete ', 0, '[', 1, ']', ')']));
+   RegisterCodeGen(TAssociativeArrayDeleteExpr,       TdwsExprGenericCodeGen.Create(['$DeleteV', '(', 0, ',', 1, ')'], gcgExpression, '$DeleteV'));
    RegisterCodeGen(TAssociativeArrayKeysExpr,         TJSAssociativeArrayKeysExpr.Create);
    RegisterCodeGen(TAssociativeArrayContainsKeyExpr, TJSAssociativeArrayContainsKeyExpr.Create);
 
@@ -1494,11 +1503,11 @@ begin
    RegisterCodeGen(TBigIntegerOrOpExpr,          TJSBigIntegerBinOpExpr.Create('|', 7, [associativeLeft]));
    RegisterCodeGen(TBigIntegerXorOpExpr,         TJSBigIntegerBinOpExpr.Create('^', 8, [associativeLeft]));
 
-   RegisterCodeGen(TBigIntegerPlusAssignExpr,      TJSBigIntegerCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TBigIntegerPlusAssignIntExpr,   TJSBigIntegerCompoundExpr.Create('+=', '$DIdxAdd'));
-   RegisterCodeGen(TBigIntegerMinusAssignExpr,     TJSBigIntegerCompoundExpr.Create('-=', '$DIdxSub'));
-   RegisterCodeGen(TBigIntegerMinusAssignIntExpr,  TJSBigIntegerCompoundExpr.Create('-=', '$DIdxSub'));
-   RegisterCodeGen(TBigIntegerMultAssignExpr,      TJSBigIntegerCompoundExpr.Create('*=', '$DIdxMult'));
+   RegisterCodeGen(TBigIntegerPlusAssignExpr,      TJSBigIntegerCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TBigIntegerPlusAssignIntExpr,   TJSBigIntegerCompoundExpr.Create('+=', '$DIdxAdd', '$AKeyAdd'));
+   RegisterCodeGen(TBigIntegerMinusAssignExpr,     TJSBigIntegerCompoundExpr.Create('-=', '$DIdxSub', '$AKeySub'));
+   RegisterCodeGen(TBigIntegerMinusAssignIntExpr,  TJSBigIntegerCompoundExpr.Create('-=', '$DIdxSub', '$AKeySub'));
+   RegisterCodeGen(TBigIntegerMultAssignExpr,      TJSBigIntegerCompoundExpr.Create('*=', '$DIdxMult', '$AKeyMult'));
 
    RegisterCodeGen(TBigIntegerEqualOpExpr,         TJSBigIntegerBinOpExpr.Create('==', 10, [associativeLeft]));
    RegisterCodeGen(TBigIntegerNotEqualOpExpr,      TJSBigIntegerBinOpExpr.Create('!=', 10, [associativeLeft]));
@@ -1702,7 +1711,7 @@ begin
       UnIndent;
       WriteString('}');
       if func.Name<>'' then
-         WriteStatementEnd;
+         WriteLineEnd;
       if func.IsExport then begin
          if func.HasExternalName then
             WriteString(func.ExternalName)
@@ -1732,9 +1741,10 @@ var
    proc : TdwsProcedure;
    oldSelfSymbolName : String;
    constructorSymbol : TMethodSymbol;
-   locData : IDataContext;
 begin
    if cls.Name='' then Exit;
+
+   WriteSymbolVerbosity(cls);
 
    constructorSymbol:=cls.FindDefaultConstructor(cvPrivate);
 
@@ -1757,8 +1767,7 @@ begin
             if fieldSym.DefaultValue=nil then
                WriteDefaultValue(fieldSym.Typ, False)
             else begin
-               CreateDataContext(fieldSym.DefaultValue, 0, locData);
-               WriteValue(fieldSym.Typ, locData);
+               WriteValue(fieldSym.Typ, fieldSym.DefaultValue);
             end;
             WriteStatementEnd;
          end;
@@ -1813,8 +1822,7 @@ begin
             if fieldSym.DefaultValue=nil then
                WriteDefaultValue(fieldSym.Typ, False)
             else begin
-               CreateDataContext(fieldSym.DefaultValue, 0, locData);
-               WriteValue(fieldSym.Typ, locData);
+               WriteValue(fieldSym.Typ, fieldSym.DefaultValue);
             end;
 
          end else if (sym is TMethodSymbol) and (TMethodSymbol(sym).Kind<>fkConstructor) then begin
@@ -1900,7 +1908,7 @@ begin
          for i:=0 to attributes.Count-1 do begin
             attrib:=attributes[i];
             if firstAttrib then begin
-               WriteString(#13#10#9'{ T: {ID:');
+               WriteString(#10#9'{ T: {ID:');
                firstAttrib:=False;
             end else WriteString(#9',{ T: {ID:');
             CompileRTTISymbolName(attrib.Symbol);
@@ -1917,7 +1925,7 @@ begin
          for i:=0 to publishedSymbols.Count-1 do begin
             symbol:=publishedSymbols[i];
             if firstAttrib then begin
-               WriteString(#13#10#9'{ T: {ID:');
+               WriteString(#10#9'{ T: {ID:');
                firstAttrib:=False;
             end else WriteString(#9',{ T: {ID:');
 
@@ -2111,7 +2119,7 @@ begin
          WriteString('var ');
          WriteSymbolName(sym);
          WriteString(' = ');
-         WriteValueData(sym.Typ, TConstSymbol(sym).Data);
+         WriteValue(sym.Typ, TConstSymbol(sym).DataContext);
          WriteStatementEnd;
       end;
    end;
@@ -2162,7 +2170,6 @@ var
    prop : TPropertySymbol;
    firstField, skipValue : Boolean;
    publishedName : String;
-   locData : IDataContext;
    activeFields : array of TFieldSymbol;
 begin
    if not SmartLink(rec) then Exit;
@@ -2190,7 +2197,7 @@ begin
       field:=activeFields[i];
       fieldTyp:=field.Typ.UnAliasedType;
       if    (fieldTyp is TBaseSymbol)
-         or (fieldTyp is TClassSymbol)
+         or fieldTyp.IsClassSymbol
          or (fieldTyp is TInterfaceSymbol)
          or (fieldTyp.AsFuncSymbol<>nil)
          or (fieldTyp is TDynamicArraySymbol)
@@ -2252,7 +2259,7 @@ begin
 
       WriteString(':');
       if    (fieldTyp is TBaseSymbol)
-         or (fieldTyp is TClassSymbol)
+         or fieldTyp.IsClassSymbol
          or (fieldTyp is TInterfaceSymbol)
          or (fieldTyp.AsFuncSymbol<>nil)
          or (fieldTyp is TDynamicArraySymbol)
@@ -2359,8 +2366,7 @@ begin
 
             end else if sym is TClassConstSymbol then begin
 
-               CreateDataContext(TClassConstSymbol(sym).Data, 0, locData);
-               WriteValue(sym.Typ, locData);
+               WriteValue(sym.Typ, TClassConstSymbol(sym).DataContext);
 
             end else Assert(False);
 
@@ -2390,25 +2396,30 @@ var
    i : Integer;
    sym : TSymbol;
    meth : TMethodSymbol;
-   staticAndSealed : Boolean;
    compilerContext : TdwsCompilerContext;
 begin
    inherited;
 
    if not SmartLink(cls) then Exit;
 
-   WriteSymbolVerbosity(cls);
+   if cls.Members.HasClassSymbols then begin
+      for i:=0 to cls.Members.Count-1 do begin
+         sym := cls.Members[i];
+         if sym.ClassType = TClassSymbol then
+            DoCompileClassSymbol(TClassSymbol(sym));
+      end;
+   end;
 
    if cls.IsExternalRooted then begin
       DoCompileExternalRootedClassSymbol(cls);
       Exit;
    end;
 
+   WriteSymbolVerbosity(cls);
+
    WriteString('var ');
    WriteSymbolName(cls);
    WriteBlockBegin(' = ');
-
-   staticAndSealed:=cls.IsStatic and cls.IsSealed;
 
    WriteString('$ClassName:');
    WriteLiteralString(cls.Name);
@@ -2426,10 +2437,9 @@ begin
         Dependencies.Add('Exception');
       end;
 
-      if not cls.IsStatic then
+      if not cls.IsStatic then begin
          Dependencies.Add('$New');
 
-      if not staticAndSealed then begin
          WriteBlockBegin(',$Init:function ($) ');
          WriteSymbolName(cls.Parent);
          WriteString('.$Init($)');
@@ -2455,7 +2465,7 @@ begin
       meth:=cls.VMTMethod(i);
       if not SmartLinkMethod(meth) then continue;
       if not meth.IsVirtual then continue; // devirtualized
-      if staticAndSealed and (meth.Kind in [fkConstructor, fkDestructor]) then
+      if cls.IsStatic and (meth.Kind in [fkConstructor, fkDestructor]) then
          continue;
       if meth.StructSymbol<>cls then begin
          WriteString(',');
@@ -2499,7 +2509,6 @@ var
    sym : TSymbol;
    fld1, fld2 : TFieldSymbol;
    flds : array of TFieldSymbol;
-   locData : IDataContext;
 begin
    SetLength(flds, cls.Members.Count);
    n:=0;
@@ -2526,14 +2535,13 @@ begin
             WriteString(' = ');
             flds[j]:=nil;
             // records, static arrays and other value types can't be assigned together
-            if not ((fld1.Typ is TBaseSymbol) or (fld1.Typ is TClassSymbol) or (fld1.Typ is TInterfaceSymbol)) then Break;
+            if not ((fld1.Typ is TBaseSymbol) or fld1.Typ.IsClassSymbol or (fld1.Typ is TInterfaceSymbol)) then Break;
          end;
       end;
       if fld1.DefaultValue=nil then
          WriteDefaultValue(fld1.Typ, False)
       else begin
-         CreateDataContext(fld1.DefaultValue, 0, locData);
-         WriteValue(fld1.Typ, locData);
+         WriteValue(fld1.Typ, fld1.DefaultValue);
       end;
       WriteStatementEnd;
    end;
@@ -2683,7 +2691,7 @@ begin
          IssueSeparator;
          WriteSymbolName(constSym);
          WriteString(' = ');
-         WriteValueData(constSym.Typ, constSym.Data);
+         WriteValue(constSym.Typ, constSym.DataContext);
 
       end;
    end;
@@ -2750,9 +2758,9 @@ var
       if dep.Code<>'' then begin
          WriteString(dep.Code);
          case dep.Code[Length(dep.Code)] of
-            ';', '}' : WriteString(#13#10);
+            ';', '}' : WriteString(#10);
          else
-            WriteString(';'#13#10);
+            WriteString(';'#10);
          end;
       end;
       FlushedDependencies.Add(dep.Name);
@@ -2808,7 +2816,7 @@ begin
            if not ForceRepeatableRandom then begin
               if not Dependencies.Contains('SetRandSeed') then begin
                  if Dependencies.Remove('Random') then
-                    destStream.WriteString('var Random = Math.random;'#13#10);
+                    WriteString('var Random = Math.random;'#10);
               end;
            end;
            // stream dependencies
@@ -2821,9 +2829,9 @@ begin
               if jsRTL<>nil then
                  InsertDependency(jsRTL)
               else if dependency='$ConditionalDefines' then begin
-                 destStream.WriteString('var $ConditionalDefines=');
+                 WriteString('var $ConditionalDefines=');
                  WriteStringArray((prog as TdwsProgram).Root.ConditionalDefines.Value);
-                 destStream.WriteString(';'#13#10);
+                 WriteString(';'#10);
               end;
               Dependencies.List.Delete(i);
            end;
@@ -2851,11 +2859,11 @@ begin
    destStream.WriteString('var $R = [');
    for i:=0 to resList.Count-1 do begin
       if i>0 then
-         destStream.WriteString(','#13#10#9)
-      else destStream.WriteString(#13#10#9);
+         destStream.WriteString(','#10#9)
+      else destStream.WriteString(#10#9);
       dwsJSON.WriteJavaScriptString(destStream, resList[i].Value);
    end;
-   destStream.WriteString('];'#13#10);
+   destStream.WriteString('];'#10);
 end;
 
 // GetNewTempSymbol
@@ -2900,7 +2908,7 @@ procedure TdwsJSCodeGen.WriteSymbolVerbosity(sym : TSymbol);
       if sym.Name='' then begin
          WriteString('/// anonymous ');
          WriteStringLn(sym.ClassName);
-      end else if sym is TClassSymbol then begin
+      end else if sym.IsClassSymbol then begin
          WriteString('/// ');
          WriteString(sym.QualifiedName);
          WriteString(' = class (');
@@ -2916,7 +2924,7 @@ procedure TdwsJSCodeGen.WriteSymbolVerbosity(sym : TSymbol);
          WriteString(' ');
          WriteString(funcSym.QualifiedName);
          paramsDescr:=funcSym.ParamsDescription;
-         WriteString(StringReplace(paramsDescr, #13#10, '', [rfReplaceAll, rfIgnoreCase]));
+         WriteString(StringReplace(paramsDescr, #10, '', [rfReplaceAll, rfIgnoreCase]));
          if funcSym.Typ<>nil then begin
             WriteString(' : ');
             WriteString(funcSym.Typ.QualifiedName);
@@ -3164,8 +3172,8 @@ end;
 function TdwsJSCodeGen.SameDefaultValue(typ1, typ2 : TTypeSymbol) : Boolean;
 begin
    Result:=   (typ1=typ2)
-           or (    ((typ1 is TClassSymbol) or (typ1.AsFuncSymbol<>nil) or (typ1 is TInterfaceSymbol))
-               and ((typ2 is TClassSymbol) or (typ2.AsFuncSymbol<>nil) or (typ2 is TInterfaceSymbol)) );
+           or (    (typ1.IsClassSymbol or (typ1.AsFuncSymbol<>nil) or (typ1 is TInterfaceSymbol))
+               and (typ2.IsClassSymbol or (typ2.AsFuncSymbol<>nil) or (typ2 is TInterfaceSymbol)) );
 end;
 
 // SameDefaultValue
@@ -3178,7 +3186,7 @@ begin
    if (fld1.DefaultValue=nil) and (fld2.DefaultValue=nil) then Exit;
    if (fld1.DefaultValue=nil) or (fld2.DefaultValue=nil) then Exit(False);
 
-   Result:=DWSSameData(fld1.DefaultValue, fld2.DefaultValue, 0, 0, fld1.Typ.Size);
+   Result := fld1.DefaultValue.SameData(fld2.DefaultValue);
 end;
 
 // WriteDefaultValue
@@ -3197,19 +3205,6 @@ end;
 procedure TdwsJSCodeGen.WriteValue(typ : TTypeSymbol; const dataPtr : IDataContext);
 begin
    FCodeGenWriters.WriteValue(typ, dataPtr);
-end;
-
-// WriteValueData
-//
-procedure TdwsJSCodeGen.WriteValueData(typ : TTypeSymbol; const data : TData);
-var
-   dc : TDataContext;
-   idc : IDataContext;
-begin
-   dc:=TDataContext.Create;
-   dc.ReplaceData(data);
-   idc:=dc;
-   WriteValue(typ, idc);
 end;
 
 // WriteVariant
@@ -3796,7 +3791,7 @@ begin
             end;
             dest.WriteSubString(lineBuf, p, Length(lineBuf)-p+1);
          end;
-         dest.WriteString(#13#10);
+         dest.WriteString(#10);
       end;
    finally
       for i:=0 to High(sourceLines) do begin
@@ -3982,6 +3977,11 @@ begin
             end else begin
 
                jsCodeGen.FDeclaredLocalVars.Add(sym);
+
+               {$ifdef USE_LET_FOR_LOOP_VARS}
+               if sym.GetPurpose = sdspLoopIterator then continue;
+               {$endif}
+
                WriteVar;
 
                vpm := IsLocalVarParam(codeGen, sym);
@@ -4388,34 +4388,33 @@ end;
 
 // Create
 //
-constructor TJSCompoundExpr.Create(const anOp, aDynCompound : String);
+constructor TJSCompoundExpr.Create(const anOp, aDynCompound, aAssocCompound : String);
 begin
    inherited Create;
    Op := anOp;
    SpacedOp := ' ' + anOp + ' ';
    DynCompound := aDynCompound;
+   AssocCompound := aAssocCompound;
 end;
 
 // CodeGen
 //
 procedure TJSCompoundExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
-var
-   e : TOpAssignExpr;
-   eDyn : TDynamicArrayExpr;
-begin
-   e:=TOpAssignExpr(expr);
 
-   if (cgoNoRangeChecks in codeGen.Options) or not (e.Left is TDynamicArrayExpr) then begin
-
+   procedure CodeGenDirect(e : TOpAssignExpr);
+   begin
       codeGen.CompileNoWrap(e.Left);
       if cgoOptimizeForSize in codeGen.Options then
          codeGen.WriteString(Op)
       else codeGen.WriteString(SpacedOp);
       CodeGenRightExpr(codeGen, e.Right);
+   end;
 
-   end else begin
-
-      eDyn:=TDynamicArrayExpr(e.Left);
+   procedure CodeGenDynCompound(e : TOpAssignExpr);
+   var
+      eDyn : TDynamicArrayExpr;
+   begin
+      eDyn := TDynamicArrayExpr(e.Left);
 
       codeGen.Dependencies.Add(DynCompound);
 
@@ -4429,8 +4428,40 @@ begin
       codeGen.WriteString(',');
       WriteLocationString(codeGen, expr);
       codeGen.WriteString(')');
-
    end;
+
+   procedure CodeGenAssocCompound(e : TOpAssignExpr);
+   var
+      eGet : TAssociativeArrayGetExpr;
+   begin
+      eGet := TAssociativeArrayGetExpr(e.Left);
+
+      codeGen.Dependencies.Add(AssocCompound);
+
+      codeGen.WriteString(AssocCompound);
+      codeGen.WriteString('(');
+      codeGen.Compile(eGet.BaseExpr);
+      codeGen.WriteString(',');
+      codeGen.CompileNoWrap(eGet.KeyExpr);
+      codeGen.WriteString(',');
+      TdwsJSCodeGen(codeGen).WriteDefaultValue(eGet.Typ, False);
+      codeGen.WriteString(',');
+      CodeGenRightExpr(codeGen, e.Right);
+      codeGen.WriteString(')');
+   end;
+
+var
+   e : TOpAssignExpr;
+begin
+   e := TOpAssignExpr(expr);
+
+   if e.Left is TDynamicArrayExpr then begin
+      if cgoNoRangeChecks in codeGen.Options then
+         CodeGenDirect(e)
+      else CodeGenDynCompound(e);
+   end else if e.Left is TAssociativeArrayGetExpr then begin
+      CodeGenAssocCompound(e);
+   end else CodeGenDirect(e);
 
    codeGen.WriteStatementEnd;
 end;
@@ -4451,11 +4482,9 @@ end;
 procedure TJSConstExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    e : TConstExpr;
-   locData : IDataContext;
 begin
-   e:=TConstExpr(expr);
-   codeGen.CreateDataContext(e.Data, 0, locData);
-   TdwsJSCodeGen(codeGen).WriteValue(e.Typ, locData);
+   e := TConstExpr(expr);
+   TdwsJSCodeGen(codeGen).WriteValue(e.Typ, e.DataContext);
 end;
 
 // ------------------
@@ -4678,7 +4707,7 @@ begin
    // TODO: deep copy of records & static arrays
    e:=TAssignClassOfExpr(expr);
    codeGen.CompileNoWrap(e.Right);
-   if e.Right.Typ is TClassSymbol then
+   if e.Right.Typ.IsClassSymbol then
       codeGen.WriteStringLn('.ClassType');
 end;
 
@@ -4742,36 +4771,39 @@ begin
 
    end;
 
-   if not funcSym.IsProperty then begin
+   if funcSym.IsProperty then begin
+      if e.Args.Count = 0 then Exit;
+      codeGen.WriteString('[');
+   end else codeGen.WriteString('(');
 
-      codeGen.WriteString('(');
-      CodeGenBeginParams(codeGen, e);
-      for i:=0 to e.Args.Count-1 do begin
-         if i>0 then
-            codeGen.WriteString(',');
-         paramExpr:=e.Args.ExprBase[i] as TTypedExpr;
-         paramSymbol:=funcSym.Params[i] as TParamSymbol;
-         if ShouldBoxParam(paramSymbol) then begin
-            if paramExpr is TVarExpr then
-               TJSVarExpr.CodeGenName(codeGen, TVarExpr(paramExpr))
-            else begin
-               codeGen.WriteString('{'+TdwsJSCodeGen.cBoxFieldName+':');
-               codeGen.Compile(paramExpr);
-               codeGen.WriteString('}');
-            end;
-         end else if paramSymbol is TLazyParamSymbol then begin
-            codeGen.WriteString('function () { return ');
+   CodeGenBeginParams(codeGen, e);
+   for i:=0 to e.Args.Count-1 do begin
+      if i>0 then
+         codeGen.WriteString(',');
+      paramExpr:=e.Args.ExprBase[i] as TTypedExpr;
+      paramSymbol:=funcSym.Params[i] as TParamSymbol;
+      if ShouldBoxParam(paramSymbol) then begin
+         if paramExpr is TVarExpr then
+            TJSVarExpr.CodeGenName(codeGen, TVarExpr(paramExpr))
+         else begin
+            codeGen.WriteString('{'+TdwsJSCodeGen.cBoxFieldName+':');
             codeGen.Compile(paramExpr);
             codeGen.WriteString('}');
-         end else if paramSymbol is TByRefParamSymbol then begin
-            codeGen.Compile(paramExpr);
-         end else begin
-            codeGen.CompileValue(paramExpr);
          end;
+      end else if paramSymbol is TLazyParamSymbol then begin
+         codeGen.WriteString('function () { return ');
+         codeGen.Compile(paramExpr);
+         codeGen.WriteString('}');
+      end else if paramSymbol is TByRefParamSymbol then begin
+         codeGen.Compile(paramExpr);
+      end else begin
+         codeGen.CompileValue(paramExpr);
       end;
-      codeGen.WriteString(')');
-
    end;
+
+   if funcSym.IsProperty then
+      codeGen.WriteString(']')
+   else codeGen.WriteString(')');
 end;
 
 // CodeGenNoWrap
@@ -4791,7 +4823,7 @@ var
 begin
    if funcSym is TMethodSymbol then begin
       meth:=TMethodSymbol(funcSym);
-      if meth.IsStatic and (meth.StructSymbol is TClassSymbol) then begin
+      if meth.IsStatic and meth.StructSymbol.IsClassSymbol then begin
          codeGen.WriteSymbolName(meth.StructSymbol);
          codeGen.WriteString('.');
       end;
@@ -5100,7 +5132,7 @@ begin
       WriteLocationString(codeGen, expr);
       codeGen.WriteString(')');
    end;
-   if e.BaseExpr.Typ is TClassSymbol then
+   if e.BaseExpr.Typ.IsClassSymbol then
       codeGen.WriteString('.ClassType');
 
    if e.FuncSym.Params.Count>0 then
@@ -5144,7 +5176,7 @@ begin
       WriteLocationString(codeGen, expr);
       codeGen.WriteString(')');
    end;
-   if e.BaseExpr.Typ is TClassSymbol then
+   if e.BaseExpr.Typ.IsClassSymbol then
       codeGen.WriteString('.ClassType');
 
    if e.FuncSym.Params.Count>0 then
@@ -5277,7 +5309,7 @@ begin
       codeGen.WriteString('$NewDyn(');
    end;
    codeGen.Compile(e.BaseExpr);
-   if e.BaseExpr.Typ is TClassSymbol then
+   if e.BaseExpr.Typ.IsClassSymbol then
       codeGen.WriteString('.ClassType');
    if not (e.BaseExpr is TConstExpr) then begin
       codeGen.WriteString(',');
@@ -5541,7 +5573,7 @@ begin
          codeGen.WriteInteger(methSym.VMTIndex);
          codeGen.WriteString(']');
       end else if methExpr is TMethodStaticExpr then begin
-         if methSym.IsClassMethod and (methExpr.BaseExpr.Typ.UnAliasedType is TClassSymbol) then
+         if methSym.IsClassMethod and methExpr.BaseExpr.Typ.UnAliasedType.IsClassSymbol then
             codeGen.WriteString('.ClassType');
          codeGen.WriteString(',');
          codeGen.WriteSymbolName(methSym.StructSymbol);
@@ -5624,13 +5656,29 @@ begin
    Assert(not ((valueTyp is TRecordSymbol) or (valueTyp is TStaticArraySymbol)),
           'Associative array record or static array values are not supported yet');
 
-   codeGen.WriteString('(');
-   codeGen.Compile(e.BaseExpr);
-   codeGen.WriteString('[');
-   codeGen.CompileNoWrap(e.KeyExpr);
-   codeGen.WriteString(']||');
-   TdwsJSCodeGen(codeGen).WriteDefaultValue(e.Typ, False);
-   codeGen.WriteString(')');
+   if valueTyp is TDynamicArraySymbol then begin
+      codeGen.Dependencies.Add('$MapDyn');
+      codeGen.WriteString('$MapDyn(');
+      codeGen.CompileNoWrap(e.BaseExpr);
+      codeGen.WriteString(',');
+      codeGen.CompileNoWrap(e.KeyExpr);
+      codeGen.WriteString(')');
+   end else if valueTyp is TAssociativeArraySymbol then begin
+      codeGen.Dependencies.Add('$MapMap');
+      codeGen.WriteString('$MapMap(');
+      codeGen.CompileNoWrap(e.BaseExpr);
+      codeGen.WriteString(',');
+      codeGen.CompileNoWrap(e.KeyExpr);
+      codeGen.WriteString(')');
+   end else begin
+      codeGen.WriteString('(');
+      codeGen.Compile(e.BaseExpr);
+      codeGen.WriteString('[');
+      codeGen.CompileNoWrap(e.KeyExpr);
+      codeGen.WriteString(']||');
+      TdwsJSCodeGen(codeGen).WriteDefaultValue(e.Typ, False);
+      codeGen.WriteString(')');
+   end;
 end;
 
 // ------------------
@@ -6243,6 +6291,32 @@ begin
 end;
 
 // ------------------
+// ------------------ TJSObjCmpEqualExpr ------------------
+// ------------------
+
+// CodeGen
+//
+procedure TJSObjCmpEqualExpr.CodeGenNoWrap(codeGen : TdwsCodeGen; expr : TTypedExpr);
+var
+   e : TBooleanBinOpExpr;
+   opVal : TTypedExpr;
+begin
+   e := TBooleanBinOpExpr(expr);
+   if e.Right.ClassType = TConstNilExpr then
+      opVal := e.Left
+   else if e.Left.ClassType = TConstNilExpr then
+      opVal := e.Right
+   else begin
+      inherited;
+      Exit;
+   end;
+   if FOp = '===' then
+      codeGen.WriteString('!')
+   else codeGen.WriteString('!!');
+   codeGen.CompileNoWrap(opVal);
+end;
+
+// ------------------
 // ------------------ TJSConvIntegerExpr ------------------
 // ------------------
 
@@ -6717,7 +6791,6 @@ var
    firstField : Boolean;
    sym : TSymbol;
    fieldSym : TFieldSymbol;
-   locData : IDataContext;
    externalName : String;
 begin
    codeGen.WriteBlockBegin('');
@@ -6760,8 +6833,7 @@ begin
       if fieldSym.DefaultExpr<>nil then
          codeGen.CompileNoWrap(fieldSym.DefaultExpr as TTypedExpr)
       else if fieldSym.DefaultValue<>nil then begin
-         codeGen.CreateDataContext(fieldSym.DefaultValue, 0, locData);
-         TdwsJSCodeGen(codeGen).WriteValue(fieldSym.Typ, locData);
+         TdwsJSCodeGen(codeGen).WriteValue(fieldSym.Typ, fieldSym.DefaultValue);
       end else TdwsJSCodeGen(codeGen).WriteDefaultValue(fieldSym.Typ, False);
       codeGen.WriteStringLn('');
    end;
@@ -7146,7 +7218,6 @@ begin
 
          end else begin
 
-
             if inPushElems then begin
                codeGen.WriteString('])');
                inPushElems:=False;
@@ -7162,6 +7233,26 @@ begin
          codeGen.WriteString('])');
 
    end;
+end;
+
+// ------------------
+// ------------------ TJSArrayAddValueExpr ------------------
+// ------------------
+
+// CodeGen
+//
+procedure TJSArrayAddValueExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
+var
+   e : TArrayAddValueExpr;
+begin
+   e := TArrayAddValueExpr(expr);
+
+   codeGen.Compile(e.BaseExpr);
+   codeGen.WriteString('.push(');
+   codeGen.CompileValue(e.ArgExpr);
+   codeGen.WriteString(')');
+
+   codeGen.WriteStatementEnd;
 end;
 
 // ------------------
@@ -7339,12 +7430,31 @@ end;
 procedure TJSArrayMapExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    e : TArrayMapExpr;
+   codeExpr : TTypedExpr;
+   funcSym : TFuncSymbol;
+   magicFunc : TClass;
 begin
-   e:=TArrayMapExpr(expr);
+   e := TArrayMapExpr(expr);
 
    codeGen.Compile(e.BaseExpr);
    codeGen.WriteString('.map(');
-   codeGen.CompileNoWrap((e.MapFuncExpr as TFuncPtrExpr).CodeExpr);
+
+   codeExpr := (e.MapFuncExpr as TFuncPtrExpr).CodeExpr;
+
+   if (codeExpr is TFuncRefExpr) and not (cgoNoInlineMagics in codeGen.Options) then begin
+      funcSym := TFuncRefExpr(codeExpr).FuncExpr.FuncSym;
+      if funcSym is TMagicFuncSymbol then begin
+         magicFunc := TMagicFuncSymbol(funcSym).InternalFunction.ClassType;
+         if (magicFunc = TFloatToStrFunc) or (magicFunc = TIntToStrFunc) then begin
+            codeGen.WriteString('String');
+            codeExpr := nil;
+         end;
+      end;
+   end;
+
+   if codeExpr <> nil then
+      codeGen.CompileNoWrap(codeExpr);
+
    codeGen.WriteString(')');
 end;
 
@@ -7991,23 +8101,34 @@ procedure TJSForExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    tmpTo, tmpStep : String;
    e : TForExpr;
+   ownLoopIterator : Boolean;
    nonIncludedEnd : Boolean;
 begin
    e:=TForExpr(expr);
+
+   {$ifdef USE_LET_FOR_LOOP_VARS}
+   ownLoopIterator := (e.VarExpr.DataSymbol.GetPurpose = sdspLoopIterator);
+   {$else}
+   ownLoopIterator := False;
+   {$endif}
 
    // allocate temporary variables to hold bounds
    // in Pascal bounds and step are evaluated before the loop is entered
    if not e.ToExpr.IsConstant then begin
       tmpTo:=codeGen.GetNewTempSymbol;
-      codeGen.WriteString('var ');
-      codeGen.WriteString(tmpTo);
-      codeGen.WriteStatementEnd;
+      if not ownLoopIterator then begin
+         codeGen.WriteString('var ');
+         codeGen.WriteString(tmpTo);
+         codeGen.WriteStatementEnd;
+      end;
    end else tmpTo:='';
    if (e is TForStepExpr) and not (TForStepExpr(e).StepExpr.IsConstant) then begin
       tmpStep:=codeGen.GetNewTempSymbol;
-      codeGen.WriteString('var ');
-      codeGen.WriteString(tmpStep);
-      codeGen.WriteStatementEnd;
+      if not ownLoopIterator then begin
+         codeGen.WriteString('var ');
+         codeGen.WriteString(tmpStep);
+         codeGen.WriteStatementEnd;
+      end;
    end else tmpStep:='';
 
    // trigger special codegen in case of
@@ -8019,6 +8140,9 @@ begin
                        );
 
    codeGen.WriteString('for(');
+
+   if ownLoopIterator then
+      codeGen.WriteString('let ');
 
    // initialize loop variable
    codeGen.Compile(e.VarExpr);
@@ -8740,13 +8864,11 @@ end;
 procedure TJSConvStaticArrayToSetOfExpr.CodeGen(codeGen : TdwsCodeGen; expr : TExprBase);
 var
    e : TConvStaticArrayToSetOfExpr;
-   data : TData;
    dc : IDataContext;
 begin
-   e:=TConvStaticArrayToSetOfExpr(expr);
+   e := TConvStaticArrayToSetOfExpr(expr);
 
-   e.EvalAsTData(nil, data);
-   (codeGen as TdwsJSCodeGen).CreateDataContext(data, 0, dc);
+   e.GetDataPtr(nil, dc);
    (codeGen as TdwsJSCodeGen).WriteValue(e.Typ, dc);
 end;
 
@@ -8925,7 +9047,7 @@ begin
    info.Parameter['exprClass'].Value := expr.ClassName;
    info.Parameter['qualifiedName'].Value := expr.FuncSymQualifiedName;
 
-   dynArray := CreateNewDynamicArray(Environment.CodeGen.Context.Root.CompilerContext.TypVariant);
+   CreateNewDynamicArray(Environment.CodeGen.Context.Root.CompilerContext.TypVariant, dynArray);
    dynArray.ArrayLength := expr.SubExprCount;
 
    exec := Environment.Exec.ExecutionObject;

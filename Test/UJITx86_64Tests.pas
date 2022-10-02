@@ -50,7 +50,8 @@ type
 //         procedure xor_and_or_cmp_32;
 //         procedure xor_and_or_cmp_reg;
 //         procedure mul_imul_reg;
-         procedure mul_imul_dword_ptr_reg;
+         procedure imul_qword_ptr_reg;
+         procedure idiv_qword_ptr_reg;
          procedure push_pop;
          procedure nops;
          procedure calls;
@@ -59,7 +60,7 @@ type
          procedure cmp_reg_imm;
          procedure ops;
          procedure test_reg_reg;
-//         procedure test_reg_int32;
+         procedure test_reg_int32;
 //         procedure test_dword_ptr_reg_int32;
 //         procedure test_dword_ptr_reg_byte;
 //         procedure test_dword_ptr_reg_reg;
@@ -67,15 +68,22 @@ type
          procedure boolflags;
          procedure movsd_indexed;
          procedure mov_indexed;
+         procedure movsx;
          procedure lea;
-         procedure vpcmpeqq;
+         procedure vcmp;
+         procedure vpcmpeq;
          procedure vblend;
          procedure vbroadcast;
          procedure v_op_pd;
+         procedure v_op_ps;
          procedure _vmovdqu;
+         procedure _vmovapd;
          procedure _vmovupd_ptr_indexed;
+         procedure _vmovups_ptr_indexed;
          procedure _vmovupd_ptr_reg;
+         procedure _vmovups_ptr_reg;
          procedure _vfma;
+         procedure _vpround;
    end;
 
 // ------------------------------------------------------------------
@@ -219,12 +227,12 @@ begin
       for xmm := xmm0 to xmm15 do begin
          FStream._cvtsi2sd(xmm, reg);
          FStream._xmm_reg_dword_ptr_reg(xmm_cvtsi2sd, xmm, reg, $12);
-         FStream._xmm_reg_qword_ptr_reg(xmm_cvtsi2sd, xmm, reg, $12);
          FStream._cvtsd2si(reg, xmm);
+         FStream._cvttsd2si(reg, xmm);
          CheckEquals( 'cvtsi2sd xmm' + IntToStr(Ord(xmm)) + ', ' + cgpRegister64Name[reg] + #13#10
                      +'cvtsi2sd xmm' + IntToStr(Ord(xmm)) + ', dword ptr [' + cgpRegister64Name[reg] + '+12h]'#13#10
-                     +'cvtsi2sd xmm' + IntToStr(Ord(xmm)) + ', qword ptr [' + cgpRegister64Name[reg] + '+12h]'#13#10
                      +'cvtsd2si ' + cgpRegister64Name[reg] + ', xmm' + IntToStr(Ord(xmm)) + #13#10
+                     +'cvttsd2si ' + cgpRegister64Name[reg] + ', xmm' + IntToStr(Ord(xmm)) + #13#10
                      , DisasmStream);
       end;
    end;
@@ -452,6 +460,7 @@ begin
                , DisasmStream);
 
    FStream._mov_reg_imm(gprRAX, 0);
+   FStream._mov_reg_imm(gprRAX, 0, True);
    FStream._mov_reg_imm(gprRDX, 0);
    FStream._mov_reg_imm(gprR9, 0);
    FStream._mov_reg_imm(gprRAX, 1);
@@ -465,11 +474,12 @@ begin
    FStream._mov_reg_imm(gprR11, $11223344556677);
 
    CheckEquals( 'xor rax, rax'#13#10
+               +'mov eax, 00000000h'#13#10
                +'xor rdx, rdx'#13#10
                +'xor r9, r9'#13#10
                +'mov eax, 00000001h'#13#10
                +'mov rax, FFFFFFFFFFFFFFFFh'#13#10
-               +'mov r8, 0000000000000002h'#13#10
+               +'mov r8d, 00000002h'#13#10
                +'mov r8, FFFFFFFFFFFFFFFEh'#13#10
                +'mov eax, 00000003h'#13#10
                +'mov rax, FFFFFFFFFFFFFFFDh'#13#10
@@ -528,17 +538,10 @@ begin
       FStream._mov_reg_imm(dest, -1);
       FStream._mov_reg_imm(dest, -2);
       regName := cgpRegister64Name[dest];
-      reg32Name := 'e' + Copy(regName, 2);
-      expect := 'xor ' + regName  + ', ' + regName + #13#10;
-      if dest < gprR8 then
-         expect := expect
-                 + 'mov '+reg32Name+', 00000001h'#13#10
-                 + 'mov '+reg32Name+', 00000080h'#13#10
-      else
-         expect := expect
-                 + 'mov '+regName+', 0000000000000001h'#13#10
-                 + 'mov '+regName+', 0000000000000080h'#13#10;
-      expect := expect
+      reg32Name := cgpRegister64dName[dest];
+      expect := 'xor ' + regName  + ', ' + regName + #13#10
+              + 'mov '+reg32Name+', 00000001h'#13#10
+              + 'mov '+reg32Name+', 00000080h'#13#10
               + 'mov '+regName+', FFFFFFFFFFFFFFFFh'#13#10
               + 'mov '+regName+', FFFFFFFFFFFFFFFEh'#13#10;
       CheckEquals(expect, DisasmStream);
@@ -968,9 +971,9 @@ begin
    end;
 end;
 }
-// mul_imul_dword_ptr_reg
+// imul_qword_ptr_reg
 //
-procedure TJITx86_64Tests.mul_imul_dword_ptr_reg;
+procedure TJITx86_64Tests.imul_qword_ptr_reg;
 var
    reg, src : TgpRegister64;
    offset : Integer;
@@ -994,6 +997,37 @@ begin
             expect:= expect+'imul '+cgpRegister64Name[reg]+', qword ptr ['+cgpRegister64Name[src]+offsetText+']'#13#10
                  ;
          end;
+         CheckEquals(expect, DisasmStream);
+      end;
+   end;
+end;
+
+// idiv_qword_ptr_reg
+//
+procedure TJITx86_64Tests.idiv_qword_ptr_reg;
+var
+   reg : TgpRegister64;
+   offset : Integer;
+   expect, offsetText : String;
+begin
+   for offset:=0 to 2 do begin
+      for reg:=gprRAX to gprR15 do begin
+         case offset of
+            1 : offsetText:='+40h';
+            2 : offsetText:='+00000080h';
+         else
+            if reg in [gprRBP, gprRSP, gprR12, gprR13] then
+               offsetText:='+00h'
+            else offsetText:='';
+         end;
+//         expect:='mul qword ptr ['+cgpRegisterName[src]+offsetText+']'#13#10;
+//         FStream._mul_qword_ptr_reg(src, offset*$40);
+         expect := '';
+         FStream._idiv_qword_ptr_reg(reg, offset*$40);
+         FStream._idiv_reg(reg);
+         expect:= expect+'idiv qword ptr ['+cgpRegister64Name[reg]+offsetText+']'#13#10
+                        +'idiv '+cgpRegister64Name[reg]+#13#10
+              ;
          CheckEquals(expect, DisasmStream);
       end;
    end;
@@ -1177,28 +1211,30 @@ begin
       CheckEquals(expect, DisasmStream);
    end;
 end;
-{
+
 // test_reg_int32
 //
 procedure TJITx86_64Tests.test_reg_int32;
 var
-   reg : TgpRegister;
+   reg : TgpRegister64;
    expect : String;
 begin
-   for reg:=gprEAX to gprEDI do begin
+   for reg:=gprRAX to gprR15 do begin
+      if reg in [ gprRSP, gprRBP ] then continue;
       FStream._test_reg_imm(reg, $40);
       FStream._test_reg_imm(reg, $180);
       case reg of
-         gprEAX : expect:='test '+cgpRegister8bitName[reg]+', 40h'#13#10;
-         gprECX..gprEBX : expect:= 'test '+cgpRegister8bitName[reg]+', 00000040h'#13#10;
+         gprRAX : expect:='test '+cgpRegister64bName[reg]+', 40h'#13#10;
+         gprRCX..gprRDI : expect:= 'test '+cgpRegister64bName[reg]+', 40h'#13#10;
+//         gprRSP..gprRDI : expect:= 'test '+cgpRegister64dName[reg]+', 40h'#13#10;
       else
-         expect:= 'test '+cgpRegisterName[reg]+', 00000040h'#13#10;
+         expect:= 'test '+cgpRegister64bName[reg]+', 40h'#13#10;
       end;
-      expect:=expect+'test '+cgpRegisterName[reg]+', 00000180h'#13#10;
+      expect:=expect+'test '+cgpRegister64dName[reg]+', 00000180h'#13#10;
       CheckEquals(expect, DisasmStream);
    end;
 end;
-
+{
 // test_dword_ptr_reg_int32
 //
 procedure TJITx86_64Tests.test_dword_ptr_reg_int32;
@@ -1444,6 +1480,22 @@ begin
    end;
 end;
 
+// movsx
+//
+procedure TJITx86_64Tests.movsx;
+begin
+   FStream._movsx_reg_al(gprRAX);
+   FStream._movsx_reg_al(gprRDX);
+   FStream._movsx_reg_al(gprR9);
+   FStream._movsx_reg_al(gprR15);
+   CheckEquals(  ''
+               + 'movsx rax, al'#13#10
+               + 'movsx rdx, al'#13#10
+               + 'movsx r9, al'#13#10
+               + 'movsx r15, al'#13#10
+               , DisasmStream);
+end;
+
 // lea
 //
 procedure TJITx86_64Tests.lea;
@@ -1473,10 +1525,60 @@ begin
                , DisasmStream);
 end;
 
-// vpcmpeqq
+// vcmp
 //
-procedure TJITx86_64Tests.vpcmpeqq;
+procedure TJITx86_64Tests.vcmp;
 begin
+   FStream._vcmpps(ymm0, ymm0, ymm0, 0);
+   FStream._vcmpps(ymm1, ymm2, ymm3, 1);
+   FStream._vcmpps(ymm5, ymm0, ymm7, 2);
+   FStream._vcmpps(ymm9, ymm10, ymm15, 3);
+   FStream._vcmpps(ymm10, ymm7, ymm5, 4);
+   FStream._vcmpps(ymm3, ymm4, ymm8, 5);
+   CheckEquals(  ''
+               + 'vcmpeqps ymm0, ymm0, ymm0, 00h'#13#10
+               + 'vcmpltps ymm1, ymm2, ymm3, 01h'#13#10
+               + 'vcmpleps ymm5, ymm0, ymm7, 02h'#13#10
+               + 'vcmpunordps ymm9, ymm10, ymm15, 03h'#13#10
+               + 'vcmpneqps ymm10, ymm7, ymm5, 04h'#13#10
+               + 'vcmpnltps ymm3, ymm4, ymm8, 05h'#13#10
+               , DisasmStream);
+
+   FStream._vcmppd(ymm0, ymm0, ymm0, 0);
+   FStream._vcmppd(ymm1, ymm2, ymm3, 1);
+   FStream._vcmppd(ymm5, ymm0, ymm7, 2);
+   FStream._vcmppd(ymm9, ymm10, ymm15, 3);
+   FStream._vcmppd(ymm10, ymm7, ymm5, 4);
+   FStream._vcmppd(ymm3, ymm4, ymm8, 5);
+   CheckEquals(  ''
+               + 'vcmpeqpd ymm0, ymm0, ymm0, 00h'#13#10
+               + 'vcmpltpd ymm1, ymm2, ymm3, 01h'#13#10
+               + 'vcmplepd ymm5, ymm0, ymm7, 02h'#13#10
+               + 'vcmpunordpd ymm9, ymm10, ymm15, 03h'#13#10
+               + 'vcmpneqpd ymm10, ymm7, ymm5, 04h'#13#10
+               + 'vcmpnltpd ymm3, ymm4, ymm8, 05h'#13#10
+               , DisasmStream);
+end;
+
+// vpcmpeq
+//
+procedure TJITx86_64Tests.vpcmpeq;
+begin
+   FStream._vpcmpeqd(ymm0, ymm0, ymm0);
+   FStream._vpcmpeqd(ymm1, ymm2, ymm3);
+   FStream._vpcmpeqd(ymm5, ymm0, ymm7);
+   FStream._vpcmpeqd(ymm9, ymm10, ymm15);
+   FStream._vpcmpeqd(ymm10, ymm7, ymm5);
+   FStream._vpcmpeqd(ymm3, ymm4, ymm8);
+   CheckEquals(  ''
+               + 'vpcmpeqd ymm0, ymm0, ymm0'#13#10
+               + 'vpcmpeqd ymm1, ymm2, ymm3'#13#10
+               + 'vpcmpeqd ymm5, ymm0, ymm7'#13#10
+               + 'vpcmpeqd ymm9, ymm10, ymm15'#13#10
+               + 'vpcmpeqd ymm10, ymm7, ymm5'#13#10
+               + 'vpcmpeqd ymm3, ymm4, ymm8'#13#10
+               , DisasmStream);
+
    FStream._vpcmpeqq(ymm0, ymm0, ymm0);
    FStream._vpcmpeqq(ymm1, ymm2, ymm3);
    FStream._vpcmpeqq(ymm5, ymm0, ymm7);
@@ -1503,6 +1605,12 @@ begin
    FStream._vpblendvb(ymm9, ymm10, ymm15, ymm12);
    FStream._vpblendvb(ymm1, ymm2, ymm8, ymm9);
 
+   FStream._vblendvps(ymm0, ymm0, ymm0, ymm0);
+   FStream._vblendvps(ymm1, ymm2, ymm3, ymm4);
+   FStream._vblendvps(ymm5, ymm0, ymm7, ymm2);
+   FStream._vblendvps(ymm9, ymm10, ymm15, ymm12);
+   FStream._vblendvps(ymm1, ymm2, ymm8, ymm9);
+
    FStream._vblendvpd(ymm0, ymm0, ymm0, ymm0);
    FStream._vblendvpd(ymm1, ymm2, ymm3, ymm4);
    FStream._vblendvpd(ymm5, ymm0, ymm7, ymm2);
@@ -1514,6 +1622,11 @@ begin
                + 'vpblendvb ymm5, ymm0, ymm7, ymm2'#13#10
                + 'vpblendvb ymm9, ymm10, ymm15, ymm12'#13#10
                + 'vpblendvb ymm1, ymm2, ymm8, ymm9'#13#10
+               + 'vblendvps ymm0, ymm0, ymm0, ymm0'#13#10
+               + 'vblendvps ymm1, ymm2, ymm3, ymm4'#13#10
+               + 'vblendvps ymm5, ymm0, ymm7, ymm2'#13#10
+               + 'vblendvps ymm9, ymm10, ymm15, ymm12'#13#10
+               + 'vblendvps ymm1, ymm2, ymm8, ymm9'#13#10
                + 'vblendvpd ymm0, ymm0, ymm0, ymm0'#13#10
                + 'vblendvpd ymm1, ymm2, ymm3, ymm4'#13#10
                + 'vblendvpd ymm5, ymm0, ymm7, ymm2'#13#10
@@ -1541,6 +1654,34 @@ begin
                + 'vbroadcastsd ymm9, qword ptr [rcx+7Bh]'#13#10
                + 'vbroadcastsd ymm2, qword ptr [r8+0001E240h]'#13#10
                + 'vbroadcastsd ymm8, qword ptr [r9-05h]'#13#10
+               , DisasmStream);
+
+   FStream._vbroadcastss(ymm0, xmm0);
+   FStream._vbroadcastss(ymm1, xmm2);
+   FStream._vbroadcastss(ymm9, xmm12);
+   FStream._vbroadcastss_ptr_reg(ymm0, gprRAX, 0);
+   FStream._vbroadcastss_ptr_reg(ymm9, gprRCX, 123);
+   FStream._vbroadcastss_ptr_reg(ymm2, gprR8, 123456);
+   FStream._vbroadcastss_ptr_reg(ymm8, gprR9, -5);
+   CheckEquals(  ''
+               + 'vbroadcastss ymm0, xmm0'#13#10
+               + 'vbroadcastss ymm1, xmm2'#13#10
+               + 'vbroadcastss ymm9, xmm12'#13#10
+               + 'vbroadcastss ymm0, dword ptr [rax]'#13#10
+               + 'vbroadcastss ymm9, dword ptr [rcx+7Bh]'#13#10
+               + 'vbroadcastss ymm2, dword ptr [r8+0001E240h]'#13#10
+               + 'vbroadcastss ymm8, dword ptr [r9-05h]'#13#10
+               , DisasmStream);
+
+   FStream._vpbroadcastd_ptr_reg(ymm0, gprRAX, 0);
+   FStream._vpbroadcastd_ptr_reg(ymm9, gprRCX, 123);
+   FStream._vpbroadcastd_ptr_reg(ymm2, gprR8, 123456);
+   FStream._vpbroadcastd_ptr_reg(ymm8, gprR9, -5);
+   CheckEquals(  ''
+               + 'vpbroadcastd ymm0, dword ptr [rax]'#13#10
+               + 'vpbroadcastd ymm9, dword ptr [rcx+7Bh]'#13#10
+               + 'vpbroadcastd ymm2, dword ptr [r8+0001E240h]'#13#10
+               + 'vpbroadcastd ymm8, dword ptr [r9-05h]'#13#10
                , DisasmStream);
 
    FStream._vpbroadcastq_ptr_reg(ymm0, gprRAX, 0);
@@ -1583,6 +1724,26 @@ begin
                , DisasmStream);
 end;
 
+// v_op_ps
+//
+procedure TJITx86_64Tests.v_op_ps;
+begin
+   FStream._v_op_ps(xmm_xorpd, ymm0, ymm1, ymm2);
+   FStream._v_op_ps(xmm_addpd, ymm8, ymm9, ymm10);
+   FStream._v_op_ps(xmm_mulpd, ymm15, ymm0, ymm9);
+   FStream._v_op_ps(xmm_minpd, ymm1, ymm12, ymm5);
+   FStream._v_op_ps(xmm_maxpd, ymm8, ymm0, ymm12);
+   FStream._v_op_ps(xmm_subpd, ymm2, ymm11, ymm13);
+   CheckEquals(  ''
+               + 'vxorps ymm0, ymm1, ymm2'#13#10
+               + 'vaddps ymm8, ymm9, ymm10'#13#10
+               + 'vmulps ymm15, ymm0, ymm9'#13#10
+               + 'vminps ymm1, ymm12, ymm5'#13#10
+               + 'vmaxps ymm8, ymm0, ymm12'#13#10
+               + 'vsubps ymm2, ymm11, ymm13'#13#10
+               , DisasmStream);
+end;
+
 // _vmovdqu
 //
 procedure TJITx86_64Tests._vmovdqu;
@@ -1605,6 +1766,24 @@ begin
                , DisasmStream);
 end;
 
+// _vmovapd
+//
+procedure TJITx86_64Tests._vmovapd;
+begin
+   FStream._vmovapd_reg_reg(ymm0, ymm1);
+   FStream._vmovapd_reg_reg(ymm10, ymm3);
+   FStream._vmovapd_reg_reg(ymm4, ymm14);
+   FStream._vmovapd_reg_reg(ymm9, ymm8);
+   FStream._vmovapd_reg_reg(ymm8, ymm7);
+   CheckEquals(  ''
+               + 'vmovapd ymm0, ymm1'#13#10
+               + 'vmovapd ymm10, ymm3'#13#10
+               + 'vmovapd ymm4, ymm14'#13#10
+               + 'vmovapd ymm9, ymm8'#13#10
+               + 'vmovapd ymm8, ymm7'#13#10
+               , DisasmStream);
+end;
+
 // _vmovupd_ptr_indexed
 //
 procedure TJITx86_64Tests._vmovupd_ptr_indexed;
@@ -1620,6 +1799,24 @@ begin
                + 'vmovupd ymm8, ymmword ptr [rax+rcx+01h]'#13#10
                + 'vmovupd ymm9, ymmword ptr [rcx+rdi*2+0Ch]'#13#10
                + 'vmovupd ymm7, ymmword ptr [rcx+rdi*2+0001E240h]'#13#10
+               , DisasmStream);
+end;
+
+// _vmovups_ptr_indexed
+//
+procedure TJITx86_64Tests._vmovups_ptr_indexed;
+begin
+   FStream._vmovups_ptr_indexed(ymm0, gprRAX, gprRAX, 1, 0);
+   FStream._vmovups_ptr_indexed(ymm8, gprRAX, gprRCX, 1, 0);
+   FStream._vmovups_ptr_indexed(ymm8, gprRAX, gprRCX, 1, 1);
+   FStream._vmovups_ptr_indexed(ymm9, gprRCX, gprRDI, 2, 12);
+   FStream._vmovups_ptr_indexed(ymm7, gprRCX, gprRDI, 2, 123456);
+   CheckEquals(  ''
+               + 'vmovups ymm0, ymmword ptr [rax+rax]'#13#10
+               + 'vmovups ymm8, ymmword ptr [rax+rcx]'#13#10
+               + 'vmovups ymm8, ymmword ptr [rax+rcx+01h]'#13#10
+               + 'vmovups ymm9, ymmword ptr [rcx+rdi*2+0Ch]'#13#10
+               + 'vmovups ymm7, ymmword ptr [rcx+rdi*2+0001E240h]'#13#10
                , DisasmStream);
 end;
 
@@ -1645,6 +1842,28 @@ begin
                , DisasmStream);
 end;
 
+// _vmovups_ptr_reg
+//
+procedure TJITx86_64Tests._vmovups_ptr_reg;
+begin
+   FStream._vmovups_ptr_reg(ymm0, gprRAX, 0);
+   FStream._vmovups_ptr_reg(ymm8, gprRBP, 1);
+   FStream._vmovups_ptr_reg(ymm1, gprRDX, 123456);
+   FStream._vmovups_ptr_reg_reg(gprRAX, 0, ymm0);
+   FStream._vmovups_ptr_reg_reg(gprRBP, 1, ymm8);
+   FStream._vmovups_ptr_reg_reg(gprRDX, 123456, ymm1);
+   FStream._vmovups_ptr_reg_reg(gprRBP, -$d0, ymm9);
+   CheckEquals(  ''
+               + 'vmovups ymm0, ymmword ptr [rax]'#13#10
+               + 'vmovups ymm8, ymmword ptr [rbp+01h]'#13#10
+               + 'vmovups ymm1, ymmword ptr [rdx+0001E240h]'#13#10
+               + 'vmovups ymmword ptr [rax], ymm0'#13#10
+               + 'vmovups ymmword ptr [rbp+01h], ymm8'#13#10
+               + 'vmovups ymmword ptr [rdx+0001E240h], ymm1'#13#10
+               + 'vmovups ymmword ptr [rbp-000000D0h], ymm9'#13#10
+               , DisasmStream);
+end;
+
 // _vfma
 //
 procedure TJITx86_64Tests._vfma;
@@ -1654,12 +1873,50 @@ begin
    FStream._vfmadd_pd(132, ymm1, ymm9, ymm1);
    FStream._vfmadd_pd(213, ymm10, ymm8, ymm3);
    FStream._vfmadd_pd(231, ymm11, ymm10, ymm12);
+
+   FStream._vfmadd_ps(231, ymm0, ymm1, ymm2);
+   FStream._vfmadd_ps(213, ymm9, ymm0, ymm0);
+   FStream._vfmadd_ps(132, ymm1, ymm9, ymm1);
+   FStream._vfmadd_ps(213, ymm10, ymm8, ymm3);
+   FStream._vfmadd_ps(231, ymm11, ymm10, ymm12);
+
    CheckEquals(  ''
                + 'vfmadd231pd ymm0, ymm1, ymm2'#13#10
                + 'vfmadd213pd ymm9, ymm0, ymm0'#13#10
                + 'vfmadd132pd ymm1, ymm9, ymm1'#13#10
                + 'vfmadd213pd ymm10, ymm8, ymm3'#13#10
                + 'vfmadd231pd ymm11, ymm10, ymm12'#13#10
+               + 'vfmadd231ps ymm0, ymm1, ymm2'#13#10
+               + 'vfmadd213ps ymm9, ymm0, ymm0'#13#10
+               + 'vfmadd132ps ymm1, ymm9, ymm1'#13#10
+               + 'vfmadd213ps ymm10, ymm8, ymm3'#13#10
+               + 'vfmadd231ps ymm11, ymm10, ymm12'#13#10
+               , DisasmStream);
+end;
+
+// _vpround
+//
+procedure TJITx86_64Tests._vpround;
+begin
+   FStream._vround_pd(ymm0, ymm1, 0);
+   FStream._vround_pd(ymm9, ymm3, 1);
+   FStream._vround_pd(ymm1, ymm10, 127);
+   FStream._vround_pd(ymm12, ymm15, 255);
+
+   FStream._vround_ps(ymm0, ymm1, 0);
+   FStream._vround_ps(ymm9, ymm3, 1);
+   FStream._vround_ps(ymm1, ymm10, 127);
+   FStream._vround_ps(ymm12, ymm15, 255);
+
+   CheckEquals(  ''
+               + 'vroundpd ymm0, ymm1, 00h'#13#10
+               + 'vroundpd ymm9, ymm3, 01h'#13#10
+               + 'vroundpd ymm1, ymm10, 7Fh'#13#10
+               + 'vroundpd ymm12, ymm15, FFh'#13#10
+               + 'vroundps ymm0, ymm1, 00h'#13#10
+               + 'vroundps ymm9, ymm3, 01h'#13#10
+               + 'vroundps ymm1, ymm10, 7Fh'#13#10
+               + 'vroundps ymm12, ymm15, FFh'#13#10
                , DisasmStream);
 end;
 

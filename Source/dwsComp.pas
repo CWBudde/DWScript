@@ -824,6 +824,7 @@ type
          FOnFastEvalInteger : TMethodFastEvalIntegerEvent;
          FOnFastEvalFloat : TMethodFastEvalFloatEvent;
          FOnFastEvalBoolean : TMethodFastEvalBooleanEvent;
+         FOnFastEvalScriptObj : TMethodFastEvalScriptObjEvent;
 
       protected
          function GetDisplayName: String; override;
@@ -842,6 +843,9 @@ type
 
       published
          property Attributes: TMethodAttributes read FAttributes write SetAttributes default [];
+         property Visibility : TdwsVisibility read FVisibility write FVisibility default cvPublic;
+         property Kind: TMethodKind read FKind write FKind;
+
          property OnEval : TMethodEvalEvent read GetOnEval write SetOnEval;
          property OnFastEval : TMethodFastEvalEvent read FOnFastEval write FOnFastEval;
          property OnFastEvalNoResult : TMethodFastEvalNoResultEvent read FOnFastEvalNoResult write FOnFastEvalNoResult;
@@ -849,8 +853,7 @@ type
          property OnFastEvalInteger : TMethodFastEvalIntegerEvent read FOnFastEvalInteger write FOnFastEvalInteger;
          property OnFastEvalFloat : TMethodFastEvalFloatEvent read FOnFastEvalFloat write FOnFastEvalFloat;
          property OnFastEvalBoolean : TMethodFastEvalBooleanEvent read FOnFastEvalBoolean write FOnFastEvalBoolean;
-         property Visibility : TdwsVisibility read FVisibility write FVisibility default cvPublic;
-         property Kind: TMethodKind read FKind write FKind;
+         property OnFastEvalScriptObj : TMethodFastEvalScriptObjEvent read FOnFastEvalScriptObj write FOnFastEvalScriptObj;
    end;
 
    TdwsMethods = class(TdwsCollection)
@@ -1089,10 +1092,10 @@ type
    TdwsElement = class(TdwsSymbol)
       private
          FIsUserDef: Boolean;
-         FUserDefValue: Integer;
+         FUserDefValue: Int64;
          FDeprecated : String;
 
-         procedure SetUserDefValue(const Value: Integer);
+         procedure SetUserDefValue(const Value: Int64);
          procedure SetIsUserDef(const Value: Boolean);
 
      protected
@@ -1105,7 +1108,7 @@ type
                              ParentSym: TSymbol = nil): TSymbol; override;
 
       published
-         property UserDefValue : Integer read FUserDefValue write SetUserDefValue default 0;
+         property UserDefValue : Int64 read FUserDefValue write SetUserDefValue default 0;
          property IsUserDef : Boolean read FIsUserDef write SetIsUserDef default False;
          property Deprecated : String read FDeprecated write FDeprecated;
    end;
@@ -1456,7 +1459,7 @@ type
 
    TReadVarFunc = class(TAnonymousFunction)
       private
-         FData : TData;
+         FData : IDataContext;
          FTyp : TTypeSymbol;
 
       public
@@ -2100,7 +2103,7 @@ begin
    if Assigned(FScript) then begin
       sysTable:=FScript.Config.SystemSymbols.SymbolTable;
       for x:=0 to sysTable.Count - 1 do begin
-         if sysTable[x] is TClassSymbol then
+         if sysTable[x].IsClassSymbol then
             List.Add(sysTable[x].Name);
       end;
    end;
@@ -2490,7 +2493,7 @@ begin
       begin
         { Return property value for property GetXXX function }
         // Class
-        if Info.FuncSym.Typ is TClassSymbol then   // don't free the object instance returned
+        if Info.FuncSym.Typ.IsClassSymbol then   // don't free the object instance returned
           Info.ResultAsVariant := Info.RegisterExternalObject(GetObjectProp(ExtObject, propName), False, False)  // wrap as best we can (find a match)
         // Boolean
         else if ASCIISameText(Info.FuncSym.Typ.Name, SYS_BOOLEAN) then
@@ -2508,7 +2511,7 @@ begin
           // fetch param value by name
           VarCopy(setValue, Info.Data[ param.Name ][0]);
           // Class
-          if param.Typ is TClassSymbol then
+          if param.Typ.IsClassSymbol then
             SetObjectProp(ExtObject, propName, Info.GetExternalObjForVar(param.Name))
           // Boolean
           else if VarType(setValue) = varBoolean then
@@ -2727,7 +2730,7 @@ begin
   if not (typSym is TTypeSymbol) then
     raise Exception.CreateFmt(UNT_DatatypeUnknown, [AClassType]);
 
-  if typSym is TClassSymbol then
+  if typSym.IsClassSymbol then
   begin
     funcSym := TFuncSymbol.Create('', fkFunction, 1);
     funcSym.Typ := typSym;
@@ -3530,7 +3533,7 @@ begin
 
       paramRec.HasDefaultValue := param.HasDefaultValue;
       if paramRec.HasDefaultValue then begin
-         SetLength(paramRec.DefaultValue, 1);
+         paramRec.DefaultValue := TDataContext.CreateStandalone(1);
          paramSym:=Symbol.GetDataType(systemTable, Table, paramRec.ParamType);
          if paramSym is TEnumerationSymbol then begin
             enumValue:=param.DefaultValue;
@@ -3540,9 +3543,9 @@ begin
             if elemSym=nil then
                elemValue:=param.DefaultValue
             else elemValue:=TElementSymbol(elemSym).Value;
-            paramRec.DefaultValue[0] := elemValue;
+            paramRec.DefaultValue.AsInteger[0] := elemValue;
          end else if paramSym.IsPointerType and VarIsNull(param.DefaultValue) then
-            paramRec.DefaultValue[0] := IUnknown(nil)
+            paramRec.DefaultValue.AsInterface[0] := IUnknown(nil)
          else paramRec.DefaultValue[0] := param.DefaultValue;
       end else paramRec.DefaultValue := nil;
 
@@ -3788,18 +3791,18 @@ begin
 
    if ResultType='' then begin
       func:=TCustomInternalMagicProcedure.Create(table, Name, GetParameters(systemTable, table),
-                                                 ResultType, flags, nil, '');
+                                                 ResultType, flags, nil, '', '');
       TCustomInternalMagicProcedure(func).FOnFastEval:=FOnFastEval;
    end else begin
       resType:=GetDataType(systemTable, table, ResultType);
       if resType.Size<>1 then begin
          func:=TCustomInternalMagicDataFunction.Create(table, Name, GetParameters(systemTable, table),
-                                                       ResultType, flags, nil, '');
+                                                       ResultType, flags, nil, '', '');
          TCustomInternalMagicDataFunction(func).FOnFastEval:=FOnFastEval;
          TCustomInternalMagicDataFunction(func).FSize:=resType.Size;
       end else begin
          func:=TCustomInternalMagicFunction.Create(table, Name, GetParameters(systemTable, table),
-                                                   ResultType, flags, nil, '');
+                                                   ResultType, flags, nil, '', '');
          TCustomInternalMagicFunction(func).FOnFastEval:=FOnFastEval;
       end;
    end;
@@ -3844,7 +3847,7 @@ begin
    if FHasDefaultValue then begin
       SetLength(data, 1);
       data[0]:=FDefaultValue;
-      TFieldSymbol(Result).DefaultValue:=data;
+      TFieldSymbol(Result).DefaultValue := TDataContext.CreateAcquireData(data);
    end;
 end;
 
@@ -4016,7 +4019,8 @@ begin
 
    if    Assigned(FOnFastEval) or Assigned(FOnFastEvalNoResult)
       or Assigned(FOnFastEvalString) or Assigned(FOnFastEvalInteger)
-      or Assigned(FOnFastEvalFloat) or Assigned(FOnFastEvalBoolean) then begin
+      or Assigned(FOnFastEvalFloat) or Assigned(FOnFastEvalBoolean)
+      or Assigned(FOnFastEvalScriptObj) then begin
       if maVirtual in Attributes then
          raise Exception.Create(UNT_FastEvalNotSupportedForVirtualMethods);
 
@@ -4029,6 +4033,7 @@ begin
       TMagicMethodSymbol(methSymbol).OnFastEvalInteger := FOnFastEvalInteger;
       TMagicMethodSymbol(methSymbol).OnFastEvalBoolean := FOnFastEvalBoolean;
       TMagicMethodSymbol(methSymbol).OnFastEvalFloat := FOnFastEvalFloat;
+      TMagicMethodSymbol(methSymbol).OnFastEvalScriptObj := FOnFastEvalScriptObj;
    end else begin
       methSymbol:=TMethodSymbol.Generate(table, Kind, Attributes, Name,
                                          GetParameters(systemTable, table), ResultType,
@@ -4039,7 +4044,6 @@ begin
       methSymbol.Params.AddParent(table);
       methSymbol.DeprecatedMessage := Deprecated;
       methSymbol.IsOverloaded := Overloaded;
-
    except
       methSymbol.Free;
       raise;
@@ -4384,7 +4388,7 @@ begin
    sym := GetUnit.Table.FindSymbol(Name, cvMagic);
 
    if Assigned(sym) then begin
-      if sym is TClassSymbol then begin
+      if sym.IsClassSymbol then begin
          classSym:=TClassSymbol(sym);
          if not classSym.IsForwarded then
             raise Exception.Create(UNT_ClassAlreadyDefined);
@@ -4623,8 +4627,8 @@ end;
 function TdwsInterface.DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbolTable; ParentSym: TSymbol = nil): TSymbol;
 var
    x : Integer;
-   sym : TSymbol;
-   intfSym, ancestorSym : TInterfaceSymbol;
+   sym, ancestorSym : TSymbol;
+   intfSym : TInterfaceSymbol;
 begin
    FIsGenerating := True;
 
@@ -4646,9 +4650,11 @@ begin
       intfSym := TInterfaceSymbol.Create(Name, nil);
 
    try
-      ancestorSym := (GetUnit.GetSymbol(systemTable, Table, FAncestor) as TInterfaceSymbol);
-      if ancestorSym <> nil then
-         intfSym.InheritFrom(ancestorSym);
+      if FAncestor <> '' then begin
+         ancestorSym := GetUnit.GetSymbol(systemTable, Table, FAncestor);
+         if ancestorSym <> nil then
+            intfSym.InheritFrom(ancestorSym as TInterfaceSymbol);
+      end;
 
       GetUnit.Table.AddSymbol(intfSym);
 
@@ -4805,7 +4811,7 @@ function TdwsProperty.DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbo
 var
    sym : TSymbol;
    propSym : TPropertySymbol;
-   indexData : TData;
+   indexData : IDataContext;
    parent : TCompositeTypeSymbol;
 begin
    FIsGenerating := True;
@@ -4837,8 +4843,8 @@ begin
    end;
 
    if FIndexType <> '' then begin
-      SetLength(indexData,1);
-      indexData[0] := FIndexValue;
+      indexData := TDataContext.CreateStandalone(1);
+      indexData.AsVariant[0] := FIndexValue;
       propSym.SetIndex(indexData, GetDataType(systemTable, Table, IndexType));
    end;
 
@@ -5347,18 +5353,21 @@ constructor TReadVarFunc.Create(FuncSym: TFuncSymbol);
 begin
   inherited;
   FTyp := FuncSym.Typ;
-  SetLength(FData, FTyp.Size);
-  FTyp.InitData(FData, 0);
+  FData := TDataContext.CreateStandalone(FTyp.Size);
+  FTyp.InitDataContext(FData, 0);
 end;
 
 procedure TReadVarFunc.Execute(info : TProgramInfo);
 begin
-  Info.Data[SYS_RESULT] := FData;
+   Info.Data[SYS_RESULT] := FData.AsPData^;
 end;
 
 procedure TReadVarFunc.SetValue(const data : TData; offset : Integer);
+var
+   i : Integer;
 begin
-   DWSCopyData(data, offset, FData, 0, FTyp.Size);
+   for i := 0 to FTyp.Size-1 do
+      FData.AsVariant[i] := data[offset + i];
 end;
 
 { TWriteVarFunc }
@@ -5721,7 +5730,7 @@ end;
 function TdwsElement.DoGenerate(systemTable : TSystemSymbolTable; Table: TSymbolTable;
   ParentSym: TSymbol): TSymbol;
 var
-   enumInt: Integer;
+   enumInt: Int64;
    enumSym: TEnumerationSymbol;
 begin
    FIsGenerating := True;
@@ -5768,7 +5777,7 @@ begin
    UpdateDisplayName;
 end;
 
-procedure TdwsElement.SetUserDefValue(const Value: Integer);
+procedure TdwsElement.SetUserDefValue(const Value: Int64);
 begin
    FIsUserDef := True;
    FUserDefValue := Value;
@@ -5895,8 +5904,8 @@ end;
 function TdwsFunctions.Add(const name : String; const resultType : String = '') : TdwsFunction;
 begin
    Result:=Add;
-   Result.Name:=name;
    Result.ResultType:=resultType;
+   Result.Name:=name;
 end;
 
 { TdwsForwards }

@@ -84,10 +84,6 @@ object FrmBasic: TFrmBasic
     TabOrder = 2
     object TabSheetCompiler: TTabSheet
       Caption = '&Compiler'
-      ExplicitLeft = 0
-      ExplicitTop = 0
-      ExplicitWidth = 0
-      ExplicitHeight = 0
       object ListBoxCompiler: TListBox
         Left = 0
         Top = 0

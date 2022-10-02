@@ -42,7 +42,7 @@ type
       protected
          function GetSubExpr(i : Integer) : TExprBase; override;
          function GetSubExprCount : Integer; override;
-         function GetBaseExpr : TTypedExpr; inline;
+         function GetBaseExpr : TTypedExpr;
          procedure SetBaseExpr(expr : TTypedExpr);
 
       public
@@ -57,7 +57,7 @@ type
 
    // TODO : split between Complex & Fast classes
    // (has structual implication because of the late binding)
-   TConnectorCallExpr = class(TBaseConnectorCallExpr)
+   TConnectorCallExpr = class sealed (TBaseConnectorCallExpr)
       private
          FConnectorArgsCall : IConnectorArgsCall;
          FConnectorFastCall : IConnectorFastCall;

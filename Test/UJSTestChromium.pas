@@ -16,8 +16,8 @@ type
 
       procedure ExecuteJavaScript(const js, url : String);
 
-      procedure ExecuteAndWait(const js, url : String);
-      procedure LoadAndWait(const html, url : String);
+      procedure ExecuteAndWait(const js, url, doneConsoleMarker : String);
+      procedure LoadAndWait(const html, url, doneConsoleMarker : String);
 
       procedure ClearLastResult;
       function LastResult : String;
@@ -55,8 +55,8 @@ type
       procedure LoadURL(const url : String);
       procedure StopLoad;
       procedure ExecuteJavaScript(const js, url : String);
-      procedure ExecuteAndWait(const js, url : String);
-      procedure LoadAndWait(const html, url : String);
+      procedure ExecuteAndWait(const js, url, doneConsoleMarker : String);
+      procedure LoadAndWait(const html, url, doneConsoleMarker : String);
       procedure ClearLastResult;
       function LastResult : String;
    end;
@@ -167,32 +167,41 @@ end;
 
 // ExecuteAndWait
 //
-procedure TTestChromium.ExecuteAndWait(const js, url : String);
+procedure TTestChromium.ExecuteAndWait(const js, url, doneConsoleMarker : String);
 var
    prevResult : String;
-   k : Integer;
+   k, retry : Integer;
 begin
    prevResult := LastResult;
-   ExecuteJavaScript(js, url);
-   for k := 1 to 300 do begin
-      if prevResult <> LastResult then Exit;
-      Application.ProcessMessages;
-      case k of
-         0..99 : Sleep(0);
-         100..199 : Sleep(1);
-      else
-         Sleep(10);
+
+   retry := 0;
+   while retry < 2 do begin
+      ExecuteJavaScript(js, url );
+      for k := 1 to 300 do begin
+         if prevResult <> LastResult then begin
+            if (doneConsoleMarker = '') or (Pos(doneConsoleMarker, LastResult) > 0) then Exit;
+            prevResult := LastResult;
+         end;
+         Application.ProcessMessages;
+         GlobalCEFApp.RunMessageLoop;
+         case k of
+            0..99 : Sleep(0);
+            100..199 : Sleep(1);
+         else
+            Sleep(10);
+         end;
       end;
+      FForm.FChromium.ChromiumBrowser.StopLoad;
+      Inc(retry);
    end;
-   FForm.FChromium.ChromiumBrowser.StopLoad;
    if FForm.FConsole = cNoResult then
       FForm.FConsole := '';
-   FForm.FConsole := FForm.FConsole + 'Timeout';
+   FForm.FConsole := FForm.FConsole + '**** Timeout after ' + IntToStr(retry);
 end;
 
 // LoadAndWait
 //
-procedure TTestChromium.LoadAndWait(const html, url : String);
+procedure TTestChromium.LoadAndWait(const html, url, doneConsoleMarker : String);
 var
    wobs : TWriteOnlyBlockStream;
 begin
@@ -201,7 +210,7 @@ begin
       wobs.WriteString('document.open();document.write(');
       WriteJavaScriptString(wobs, html);
       wobs.WriteString(');document.close();');
-      ExecuteAndWait(wobs.ToString, url);
+      ExecuteAndWait(wobs.ToString, url, doneConsoleMarker);
    finally
       wobs.ReturnToPool;
    end;

@@ -21,8 +21,7 @@ unit dwsJSONScript;
 interface
 
 uses
-   dwsJSON, dwsUtils, dwsStack,
-   dwsExprList, dwsDataContext, dwsSymbols, dwsExprs, dwsStrings, dwsScriptSource,
+   dwsJSON, dwsExprList, dwsDataContext, dwsSymbols, dwsExprs, dwsScriptSource,
    dwsDynamicArrays;
 
 type
@@ -62,7 +61,9 @@ implementation
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
-uses dwsCompilerUtils, dwsConstExprs, dwsArrayElementContext;
+uses
+   dwsUtils, dwsCompilerUtils, dwsConstExprs, dwsArrayElementContext, dwsStrings,
+   dwsInfo, dwsInfoClasses, dwsStack;
 
 // ------------------
 // ------------------ JSONScript ------------------
@@ -101,7 +102,7 @@ begin
    try
       expr:=(args.ExprBase[0] as TTypedExpr);
       StringifyExpr(expr, args.Exec, writer);
-      Result:=writer.ToString;
+      writer.StoreToUnicodeString(Result);
    finally
       writer.Free;
    end;
@@ -118,7 +119,7 @@ begin
    try
       expr:=(args.ExprBase[0] as TTypedExpr);
       StringifyExpr(expr, args.Exec, writer);
-      Result:=writer.ToString;
+      writer.StoreToUnicodeString(Result);
    finally
       writer.Free;
    end;
@@ -141,6 +142,8 @@ var
 begin
    p:=PVarData(@v);
    case p^.VType of
+      varUString :
+         writer.WriteStringP(Pointer(p^.VUString), Length(UnicodeString(p.VUString)));
       varInt64 :
          writer.WriteInteger(p^.VInt64);
       varDouble :
@@ -204,57 +207,106 @@ end;
 // StringifySymbol
 //
 class procedure JSONScript.StringifySymbol(exec : TdwsExecution; writer : TdwsJSONWriter; sym : TSymbol; const dataPtr : IDataContext);
+
+   procedure DoBaseSymbol;
+   begin
+      StringifyVariant(exec, writer, dataPtr[0])
+   end;
+
+   procedure DoDynamicArray;
+   begin
+      StringifyDynamicArray(exec, writer, IScriptDynArray(dataPtr.AsInterface[0]))
+   end;
+
+   procedure DoAssociativeArray;
+   begin
+      StringifyAssociativeArray(exec, writer, IScriptAssociativeArray(dataPtr.AsInterface[0]).GetSelf as TScriptAssociativeArray)
+   end;
+
+   procedure DoClassSymbol;
+   begin
+      StringifyClass(exec, writer, IScriptObj(dataPtr.AsInterface[0]))
+   end;
+
+   procedure DoSetOfSymbol;
+   begin
+      StringifySetOf(exec, writer, TSetOfSymbol(sym), dataPtr);
+   end;
+
+   procedure DoFallback;
+   begin
+      writer.WriteString(sym.ClassName);
+   end;
+
 var
    ct : TClass;
 begin
    sym := sym.BaseType;
-   ct := sym.ClassType;
-   if ct.InheritsFrom(TBaseSymbol) then
-      StringifyVariant(exec, writer, dataPtr[0])
-   else if ct=TDynamicArraySymbol then
-      StringifyDynamicArray(exec, writer, IScriptDynArray(dataPtr.AsInterface[0]))
-   else if ct.InheritsFrom(TStaticArraySymbol) then
-      StringifyDataContextArray(exec, writer, TStaticArraySymbol(sym).Typ, dataPtr, TStaticArraySymbol(sym).ElementCount)
-   else if ct = TRecordSymbol then
-      StringifyComposite(exec, writer, TRecordSymbol(sym), dataPtr)
-   else if ct = TClassSymbol then
-      StringifyClass(exec, writer, IScriptObj(dataPtr.AsInterface[0]))
-   else if ct = TAssociativeArraySymbol then
-      StringifyAssociativeArray(exec, writer, IScriptAssociativeArray(dataPtr.AsInterface[0]).GetSelf as TScriptAssociativeArray)
-   else if ct = TNilSymbol then
-      writer.WriteNull
-   else if ct = TSetOfSymbol then
-      StringifySetOf(exec, writer, TSetOfSymbol(sym), dataPtr)
-   else writer.WriteString(sym.ClassName);
+   if sym.IsBaseType then
+      DoBaseSymbol
+   else begin
+      ct := sym.ClassType;
+      if ct = TDynamicArraySymbol then
+         DoDynamicArray
+      else if ct = TRecordSymbol then
+         StringifyComposite(exec, writer, TRecordSymbol(sym), dataPtr)
+      else if ct = TClassSymbol then
+         DoClassSymbol
+      else if ct = TAssociativeArraySymbol then
+         DoAssociativeArray
+      else if ct = TNilSymbol then
+         writer.WriteNull
+      else if ct = TSetOfSymbol then
+         DoSetOfSymbol
+      else if ct.InheritsFrom(TStaticArraySymbol) then
+         StringifyDataContextArray(exec, writer, TStaticArraySymbol(sym).Typ, dataPtr, TStaticArraySymbol(sym).ElementCount)
+      else DoFallback;
+   end;
 end;
 
 // StringifyDataContextArray
 //
 class procedure JSONScript.StringifyDataContextArray(exec : TdwsExecution;
    writer : TdwsJSONWriter; elemSym : TTypeSymbol; const dataPtr : IDataContext; nb : Integer);
-var
-   i, s : Integer;
-   locData : IDataContext;
-   unaliasedClassType : TClass;
-begin
-   s:=elemSym.Size;
-   writer.BeginArray;
-   unaliasedClassType:=elemSym.UnAliasedType.ClassType;
-   if unaliasedClassType=TBaseIntegerSymbol then begin
-      for i:=0 to nb-1 do
-         writer.WriteInteger(dataPtr.AsInteger[i]);
-   end else if unaliasedClassType=TBaseFloatSymbol then begin
-      for i:=0 to nb-1 do
-         writer.WriteNumber(dataPtr.AsFloat[i]);
-   end else if unaliasedClassType=TBaseStringSymbol then begin
-      for i:=0 to nb-1 do
-         writer.WriteString(dataPtr.AsString[i]);
-   end else begin
+
+   procedure HandleBaseString;
+   var
+      i : Integer;
+      s : String;
+   begin
       for i:=0 to nb-1 do begin
+         dataPtr.EvalAsString(i, s);
+         writer.WriteString(s);
+      end;
+   end;
+
+   procedure HandleDefault;
+   var
+      i, s : Integer;
+      locData : IDataContext;
+   begin
+      s := elemSym.Size;
+      for i := 0 to nb-1 do begin
          dataPtr.CreateOffset(i*s, locData);
          StringifySymbol(exec, writer, elemSym, locData);
       end;
    end;
+
+var
+   i : Integer;
+   unaliasedClassType : TClass;
+begin
+   writer.BeginArray;
+   unaliasedClassType := elemSym.UnAliasedType.ClassType;
+   if unaliasedClassType = TBaseIntegerSymbol then begin
+      for i := 0 to nb-1 do
+         writer.WriteInteger(dataPtr.AsInteger[i]);
+   end else if unaliasedClassType = TBaseFloatSymbol then begin
+      for i := 0 to nb-1 do
+         writer.WriteNumber(dataPtr.AsFloat[i]);
+   end else if unaliasedClassType=TBaseStringSymbol then
+      HandleBaseString
+   else HandleDefault;
    writer.EndArray;
 end;
 
@@ -264,23 +316,27 @@ class procedure JSONScript.StringifyDynamicArray(exec : TdwsExecution;
    writer : TdwsJSONWriter; const dynArray : IScriptDynArray);
 var
    locData : IDataContext;
+   writeable : IJSONWriteAble;
    dynData : TScriptDynamicDataArray;
    elementType : TTypeSymbol;
    i : Integer;
 begin
-   elementType := dynArray.elementType;
-   if dynArray.GetSelf is TScriptDynamicDataArray then begin
-      dynData := dynArray.GetSelf as TScriptDynamicDataArray;
-      exec.DataContext_CreateOffset(dynData, 0, locData);
-      StringifyDataContextArray(exec, writer, elementType, locData, dynData.ArrayLength);
-   end else begin
-      Assert(elementType.Size = 1);
-      writer.BeginArray;
-      for i := 0 to dynArray.ArrayLength-1 do begin
-         locData := TArrayElementDataContext.Create(dynArray, i);
-         StringifySymbol(exec, writer, elementType, locData);
+   if dynArray.QueryInterface(IJSONWriteAble, writeable) = S_OK then
+      writeable.WriteToJSON(writer)
+   else begin
+      elementType := dynArray.elementType;
+      if dynArray.GetSelf is TScriptDynamicDataArray then begin
+         dynData := dynArray.GetSelf as TScriptDynamicDataArray;
+         exec.DataContext_CreateOffset(dynData, 0, locData);
+         StringifyDataContextArray(exec, writer, elementType, locData, dynData.ArrayLength);
+      end else begin
+         writer.BeginArray;
+         for i := 0 to dynArray.ArrayLength-1 do begin
+            locData := TArrayElementDataContext.Create(dynArray, i);
+            StringifySymbol(exec, writer, elementType, locData);
+         end;
+         writer.EndArray;
       end;
-      writer.EndArray;
    end;
 end;
 
@@ -313,37 +369,70 @@ end;
 class procedure JSONScript.StringifyComposite(exec : TdwsExecution;
    writer : TdwsJSONWriter; compSym : TCompositeTypeSymbol; const dataPtr : IDataContext);
 var
+   progInfo : TProgramInfo;
+   memberSymbol : TSymbol;
+
+   procedure DoGetter;
+   var
+      info : IInfo;
+      scriptObj : IScriptObj;
+   begin
+      Assert(progInfo <> nil);
+      if compSym.ClassType = TRecordSymbol then begin
+         Assert(False, 'JSON utility does not yet support published method getters for records');
+      end else begin
+         scriptObj := (dataPtr.GetSelf as  TScriptObjInstance) as IScriptObj;
+         info := TInfoFunc.Create(progInfo, memberSymbol, progInfo.Execution.DataContext_Nil,
+                                  nil, scriptObj, TClassSymbol(compSym));
+      end;
+      StringifySymbol(exec, writer, memberSymbol.Typ, info.Call.GetDataPtr);
+      info := nil;
+      scriptObj := nil;
+   end;
+
+var
    i : Integer;
-//   bufData : TData;
-   sym : TSymbol;
+   memberSymbolClass : TClass;
    fieldSym : TFieldSymbol;
    propSym : TPropertySymbol;
    locData : IDataContext;
 begin
+   if exec is TdwsProgramExecution then
+      progInfo := TdwsProgramExecution(exec).ProgramInfo
+   else progInfo := nil;
+
    writer.BeginObject;
    while compSym <> nil do begin
-      for i:=0 to compSym.Members.Count-1 do begin
-         sym:=compSym.Members[i];
-         if sym.ClassType=TPropertySymbol then begin
-            propSym:=TPropertySymbol(sym);
-            if (propSym.Visibility>=cvPublished) and (propSym.ReadSym<>nil) then
-               sym:=propSym.ReadSym
-            else continue;
-            writer.WriteName(propSym.ExternalName);
-         end else if sym.ClassType=TFieldSymbol then begin
-            if TFieldSymbol(sym).Visibility<cvPublished then
+      for i := 0 to compSym.Members.Count-1 do begin
+         memberSymbol := compSym.Members[i];
+         memberSymbolClass := memberSymbol.ClassType;
+         if memberSymbolClass = TPropertySymbol then begin
+            propSym := TPropertySymbol(memberSymbol);
+            if propSym.HasArrayIndices then
                continue;
-            writer.WriteName(sym.Name);
+            if (propSym.Visibility >= cvPublished) and (propSym.ReadSym <> nil) then begin
+               memberSymbol := propSym.ReadSym;
+               memberSymbolClass := memberSymbol.ClassType;
+            end else continue;
+            if propSym.HasExternalName then
+               writer.WriteName(propSym.ExternalName)
+            else writer.WriteName(propSym.Name);
+         end else if memberSymbolClass = TFieldSymbol then begin
+            if TFieldSymbol(memberSymbol).Visibility < cvPublished then
+               continue;
+            writer.WriteName(memberSymbol.Name);
          end else continue;
 
-         if sym.ClassType=TFieldSymbol then begin
-            fieldSym:=TFieldSymbol(sym);
-            dataPtr.CreateOffset(fieldSym.Offset, locData);
-            StringifySymbol(exec, writer, fieldSym.Typ, locData);
-         end else begin
-   //         SetLength(bufData, sym.Typ.Size);
-            Assert(False, 'published method getters not supported yet');
-         end;
+         if memberSymbolClass = TFieldSymbol then begin
+            fieldSym := TFieldSymbol(memberSymbol);
+            if fieldSym.Typ.IsBaseType then
+               StringifyVariant(exec, writer, dataPtr[fieldSym.Offset])
+            else begin
+               dataPtr.CreateOffset(fieldSym.Offset, locData);
+               StringifySymbol(exec, writer, fieldSym.Typ, locData);
+            end;
+         end else if memberSymbolClass.InheritsFrom(TFuncSymbol) then
+            DoGetter;
       end;
       compSym := compSym.Parent;
    end;
@@ -379,7 +468,7 @@ begin
 
       progExec := (exec as TdwsProgramExecution);
       methExpr := nil;
-      selfExpr := TConstExpr.Create(cNullPos, classSym, IUnknown(obj));
+      selfExpr := TConstExpr.CreateValue(cNullPos, classSym, IUnknown(obj));
       try
          methExpr := CreateMethodExpr(
             progExec.CompilerContext, stringifyMeth,

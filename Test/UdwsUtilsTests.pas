@@ -66,6 +66,7 @@ type
          procedure FastCompareTextSortedValues;
 
          procedure FastIntToStrTest;
+         procedure Int32ToStrTest;
 
          procedure VarRecArrayTest;
 
@@ -75,6 +76,7 @@ type
          procedure SortReverseTest;
 
          procedure IntToHexTest;
+         procedure Int32ToStr;
 
          procedure QueueTest;
 
@@ -85,6 +87,7 @@ type
          procedure LoadTextFromBufferTest;
 
          procedure VariantClearAssignString;
+         procedure VarCompareSafeEqualityTests;
 
          procedure TokenStoreData;
          procedure MultiThreadedTokenStore;
@@ -812,6 +815,16 @@ begin
    CheckEquals(IntToStr(Low(Int64)), s);
 end;
 
+// Int32ToStrTest
+//
+procedure TdwsUtilsTests.Int32ToStrTest;
+begin
+   CheckEquals('0', Int32ToStrU(0));
+   CheckEquals('1234567', Int32ToStrU(1234567));
+   CheckEquals('-1234567890', Int32ToStrU(-1234567890));
+   CheckEquals('1000000000', Int32ToStrU(1000000000));
+end;
+
 // VarRecArrayTest
 //
 procedure TdwsUtilsTests.VarRecArrayTest;
@@ -947,11 +960,24 @@ end;
 //
 procedure TdwsUtilsTests.IntToHexTest;
 begin
+   CheckEquals(SysUtils.IntToHex(Int64(0), -1), Int64ToHex(0, -1));
+   CheckEquals(SysUtils.IntToHex(Int64(0), 16), Int64ToHex(0, 20));
    CheckEquals(SysUtils.IntToHex(Int64(-1), 1), Int64ToHex(-1, 1));
    CheckEquals(SysUtils.IntToHex(Int64(0), 3), Int64ToHex(0, 3));
    CheckEquals(SysUtils.IntToHex(Int64(12345), 3), Int64ToHex(12345, 3));
    CheckEquals(SysUtils.IntToHex(Int64(12345), 6), Int64ToHex(12345, 6));
    CheckEquals(SysUtils.IntToHex($123456789, 6), Int64ToHex($123456789, 6));
+end;
+
+// Int32ToStr
+//
+procedure TdwsUtilsTests.Int32ToStr;
+begin
+   CheckEquals('0', Int32ToStrU(0));
+   CheckEquals('12345', Int32ToStrU(12345));
+   CheckEquals('-123', Int32ToStrU(-123));
+   CheckEquals('2147483647', Int32ToStrU(High(Int32)));
+   CheckEquals('-2147483648', Int32ToStrU(Low(Int32)));
 end;
 
 // QueueTest
@@ -1131,6 +1157,29 @@ begin
    CheckEquals(123, v, '123');
    VarCopySafe(v, 'e');
    CheckEquals('e', v, 'e');
+end;
+
+// VarCompareSafeEqualityTests
+//
+procedure TdwsUtilsTests.VarCompareSafeEqualityTests;
+begin
+   Check(VarCompareSafe(Int64(1), '1') = vrEqual, 'int64 = int str');
+   Check(VarCompareSafe('1', Int64(1)) = vrEqual, 'int str = int64');
+   Check(VarCompareSafe(Int64(1), 1.0) = vrEqual, 'int64 = float');
+   Check(VarCompareSafe(Double(1.0), Int64(1)) = vrEqual, 'float = int64');
+   Check(VarCompareSafe(Int64(1), '1.0') = vrEqual, 'int64 = float str');
+   Check(VarCompareSafe('1.0', Int64(1)) = vrEqual, 'float str = int64');
+   Check(VarCompareSafe(Double(1.0), '1.0') = vrEqual, 'float = float str');
+   Check(VarCompareSafe('1.0', Int64(1)) = vrEqual, 'float str = float');
+
+   Check(VarCompareSafe(Int64(1), 'a') = vrNotEqual, 'int64 <> str');
+   Check(VarCompareSafe('a', Int64(1)) = vrNotEqual, 'str <> int64');
+   Check(VarCompareSafe(Double(1.0), 'a') = vrNotEqual, 'float <> str');
+   Check(VarCompareSafe('a', Double(1.0)) = vrNotEqual, 'str <> float');
+
+   Check(VarCompareSafe('a', 'a') = vrEqual, 'a = a');
+   Check(VarCompareSafe('a', 'A') = vrGreaterThan, 'a > A');
+   Check(VarCompareSafe('A', 'a') = vrLessThan, 'a < A');
 end;
 
 // MultiThreadedTokenStore
@@ -1683,6 +1732,11 @@ procedure TdwsUtilsTests.BytesWords;
 var
    buf : UnicodeString;
 begin
+   StringBytesToWords(buf, False);
+   CheckEquals('', buf, 'empty1');
+   StringWordsToBytes(buf, True);
+   CheckEquals('', buf, 'empty2');
+
    buf := 'Example';
    StringBytesToWords(buf, False);
    CheckEquals('4500780061006d0070006c006500', dwsUtils.BinToHex(ScriptStringToRawByteString(buf)), 'bytes to words no swap');
@@ -1760,6 +1814,7 @@ const
    cDouble : Double = 4.75;
 var
    dc : IDataContext;
+   buf : String;
 begin
    dc := TDataContext.CreateStandalone(1);
 
@@ -1767,53 +1822,62 @@ begin
    CheckEquals(1, dc.AsInteger[0], 'True');
    CheckEquals(1, dc.AsFloat[0], 'True');
    CheckEquals(True, dc.AsBoolean[0], 'True');
-   CheckEquals('True', dc.AsString[0], 'True');
+   dc.EvalAsString(0, buf);
+   CheckEquals('True', buf, 'True');
 
    dc.AsVariant[0] := Int64(2);
    CheckEquals(2, dc.AsInteger[0], '2');
    CheckEquals(2.0, dc.AsFloat[0], '2');
    CheckEquals(True, dc.AsBoolean[0], '2');
-   CheckEquals('2', dc.AsString[0], '2');
+   dc.EvalAsString(0, buf);
+   CheckEquals('2', buf, '2');
 
    dc.AsVariant[0] := cSingle;
    CheckEquals(3, dc.AsInteger[0], '3.25');
    CheckEquals(3.25, dc.AsFloat[0], '3.25');
    CheckEquals(True, dc.AsBoolean[0], '3.25');
-   CheckEquals('3.25', dc.AsString[0], '3.25');
+   dc.EvalAsString(0, buf);
+   CheckEquals('3.25', buf, '3.25');
 
    dc.AsVariant[0] := cDouble;
    CheckEquals(5, dc.AsInteger[0], '4.75');
    CheckEquals(4.75, dc.AsFloat[0], '4.75');
    CheckEquals(True, dc.AsBoolean[0], '4.75');
-   CheckEquals('4.75', dc.AsString[0], '4.75');
+   dc.EvalAsString(0, buf);
+   CheckEquals('4.75', buf, '4.75');
 
    dc.AsVariant[0] := '05';
    CheckEquals(5, dc.AsInteger[0], '05');
    CheckEquals(5.0, dc.AsFloat[0], '05');
    CheckEquals(True, dc.AsBoolean[0], '05');
-   CheckEquals('05', dc.AsString[0], '05');
+   dc.EvalAsString(0, buf);
+   CheckEquals('05', buf, '05');
 
    dc.AsVariant[0] := '1';
    CheckEquals(1, dc.AsInteger[0], '1');
    CheckEquals(1.0, dc.AsFloat[0], '1');
    CheckEquals(True, dc.AsBoolean[0], '1');
-   CheckEquals('1', dc.AsString[0], '1');
+   dc.EvalAsString(0, buf);
+   CheckEquals('1', buf, '1');
 
    dc.AsVariant[0] := '0';
    CheckEquals(0, dc.AsInteger[0], '0');
    CheckEquals(0.0, dc.AsFloat[0], '0');
    CheckEquals(False, dc.AsBoolean[0], '0');
-   CheckEquals('0', dc.AsString[0], '0');
+   dc.EvalAsString(0, buf);
+   CheckEquals('0', buf, '0');
 
    dc.AsVariant[0] := '';
    CheckEquals(False, dc.AsBoolean[0], 'empty string');
-   CheckEquals('', dc.AsString[0], 'empty string');
+   dc.EvalAsString(0, buf);
+   CheckEquals('', buf, 'empty string');
 
    dc.AsVariant[0] := Null;
    CheckEquals(0, dc.AsInteger[0], 'Null');
    CheckEquals(0.0, dc.AsFloat[0], 'Null');
    CheckEquals(False, dc.AsBoolean[0], 'Null');
-   CheckEquals('Null', dc.AsString[0], 'Null');
+   dc.EvalAsString(0, buf);
+   CheckEquals('Null', buf, 'Null');
 end;
 
 // VariantPersist
@@ -1887,6 +1951,7 @@ var
    i : Integer;
    abc : RawByteString;
 begin
+   CheckFull('', $2CC5D05);
    CheckFull('A', $10659A4D);
    CheckFull('ZOOLOGICALLY', $A5D0E117);
    CheckFull('ab', $4999fc53);

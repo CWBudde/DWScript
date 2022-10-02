@@ -1,0 +1,17 @@
+False
+True
+ = False
+true = True
+false = False
+True = True
+False = False
+y = True
+yes = True
+n = False
+no = False
+1 = True
+0 = False
+123 = True
+000 = False
+0001 = True
+0000 = False

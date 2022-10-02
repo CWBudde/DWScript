@@ -24,8 +24,7 @@ uses
    Classes, SysUtils, Variants,
    dwsLanguageExtension, dwsComp, dwsCompiler, dwsDataContext, dwsExprList,
    dwsExprs, dwsTokenizer, dwsSymbols, dwsErrors, dwsCoreExprs, dwsStack,
-   {$IFDEF German} dwsStringsGerman, {$ELSE} dwsStrings, {$ENDIF}
-   dwsXPlatform, dwsUtils, dwsOperators, dwsUnitSymbols,
+   dwsStrings, dwsXPlatform, dwsUtils, dwsOperators, dwsUnitSymbols,
    dwsFunctions, dwsJSON, dwsMagicExprs, dwsConnectorSymbols, dwsScriptSource,
    dwsXXHash, dwsCompilerContext, dwsCompilerUtils, dwsUnicode,
    dwsConvExprs;
@@ -369,11 +368,14 @@ type
       function ToInteger : Int64;
       procedure ToVariant(var result : Variant);
 
-      function Value : TdwsJSONValue;
+      function Value : TdwsJSONValue; inline;
 
       function IsFalsey : Boolean;
       function IsNull : Boolean;
       function IsDefined : Boolean;
+      function IsArray : Boolean;
+      function IsNumeric : Boolean;
+      function IsString : Boolean;
 
       procedure WriteToJSON(writer : TdwsJSONWriter);
 
@@ -382,26 +384,6 @@ type
 
       class function UnBox(const v : Variant) : TdwsJSONValue; static;
    end;
-
-   TBoxedNilJSONValue = class (TInterfacedObject,
-                               IBoxedJSONValue,
-                               ICoalesceable, IToNumeric, INullable, IToVariant,
-                               IGetSelf, IUnknown)
-      function GetSelf : TObject;
-      function ScriptTypeName : String;
-      function ToString : String; override; final;
-      function ToUnicodeString : String;
-      function ToFloat : Double;
-      function ToInteger : Int64;
-      procedure ToVariant(var result : Variant);
-      function Value : TdwsJSONValue;
-      function IsFalsey : Boolean;
-      function IsNull : Boolean;
-      function IsDefined : Boolean;
-   end;
-
-var
-   vNilJSONValue : IBoxedJSONValue;
 
 // Create
 //
@@ -513,6 +495,27 @@ begin
    Result := FValue.IsDefined;
 end;
 
+// IsArray
+//
+function TBoxedJSONValue.IsArray : Boolean;
+begin
+   Result := FValue.IsArray;
+end;
+
+// IsNumeric
+//
+function TBoxedJSONValue.IsNumeric : Boolean;
+begin
+   Result := FValue.IsNumber;
+end;
+
+// IsString
+//
+function TBoxedJSONValue.IsString : Boolean;
+begin
+   Result := FValue.IsString;
+end;
+
 // WriteToJSON
 //
 procedure TBoxedJSONValue.WriteToJSON(writer : TdwsJSONWriter);
@@ -559,8 +562,6 @@ begin
             Result:=boxed.Value
          else Result:=nil;
       end;
-      varNull :
-         Result:=vNilJSONValue.Value;
    else
       Result := nil;
    end;
@@ -569,83 +570,6 @@ end;
 function BoxedJsonValue(Value : TdwsJSONValue): IBoxedJSONValue;
 begin
    result := TBoxedJSONValue.Create(value);
-end;
-
-// Value
-//
-function TBoxedNilJSONValue.Value : TdwsJSONValue;
-begin
-   Result:=nil;
-end;
-
-// ToString
-//
-function TBoxedNilJSONValue.ToString;
-begin
-   Result := '';
-end;
-
-// ToUnicodeString
-//
-function TBoxedNilJSONValue.ToUnicodeString : String;
-begin
-   Result := '';
-end;
-
-// ToFloat
-//
-function TBoxedNilJSONValue.ToFloat : Double;
-begin
-   Result := 0;
-end;
-
-// ToInteger
-//
-function TBoxedNilJSONValue.ToInteger : Int64;
-begin
-   Result := 0;
-end;
-
-// ToVariant
-//
-procedure TBoxedNilJSONValue.ToVariant(var result : Variant);
-begin
-   VarSetNull(result);
-end;
-
-// IsFalsey
-//
-function TBoxedNilJSONValue.IsFalsey : Boolean;
-begin
-   Result:=True;
-end;
-
-// IsNull
-//
-function TBoxedNilJSONValue.IsNull : Boolean;
-begin
-   Result := True;
-end;
-
-// IsDefined
-//
-function TBoxedNilJSONValue.IsDefined : Boolean;
-begin
-   Result := False;
-end;
-
-// GetSelf
-//
-function TBoxedNilJSONValue.GetSelf : TObject;
-begin
-   Result := Self;
-end;
-
-// ScriptTypeName
-//
-function TBoxedNilJSONValue.ScriptTypeName : String;
-begin
-   Result := SYS_JSONVARIANT;
 end;
 
 // ------------------
@@ -712,11 +636,11 @@ begin
    );
 
    TJSONParseIntegerArrayMethod.Create(
-      table, SYS_JSON_PARSE_INTEGER_ARRAY, ['str', SYS_STRING], SYS_ARRAY_OF_INTEGER,
-      [iffStaticMethod], jsonObject, ''
+      table, SYS_JSON_PARSE_INTEGER_ARRAY, ['str', SYS_STRING, 'nullValue=0', SYS_INTEGER], 'array of integer',
+      [ iffStaticMethod ], jsonObject, ''
    );
    TJSONParseFloatArrayMethod.Create(
-      table, SYS_JSON_PARSE_FLOAT_ARRAY, ['str', SYS_STRING], SYS_ARRAY_OF_FLOAT,
+      table, SYS_JSON_PARSE_FLOAT_ARRAY, ['str', SYS_STRING], 'array of float',
       [iffStaticMethod], jsonObject, ''
    );
    TJSONParseStringArrayMethod.Create(
@@ -1712,9 +1636,9 @@ begin
    tokenizer := TdwsJSONParserState.Create(s);
    values := TSimpleInt64List.Create;
    try
-      tokenizer.ParseIntegerArray(values);
+      tokenizer.ParseIntegerArray(values, args.AsInteger[1]);
 
-      newArray := CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypInteger);
+      CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypInteger, newArray);
       VarCopySafe(result, newArray);
       newArray.ArrayLength := values.Count;
 
@@ -1746,7 +1670,7 @@ begin
    try
       tokenizer.ParseNumberArray(values);
 
-      newArray := CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypFloat);
+      CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypFloat, newArray);
       VarCopySafe(result, newArray);
       newArray.ArrayLength := values.Count;
 
@@ -1779,7 +1703,7 @@ begin
    try
       tokenizer.ParseStringArray(values);
 
-      newArray := CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypString);
+      CreateNewDynamicArray((args.Exec as TdwsProgramExecution).CompilerContext.TypString, newArray);
       VarCopySafe(result, newArray);
       newArray.ArrayLength := values.Count;
 
@@ -1938,19 +1862,5 @@ begin
       Result := IBoxedJSONValue(box);
    end;
 end;
-
-// ------------------------------------------------------------------
-// ------------------------------------------------------------------
-// ------------------------------------------------------------------
-initialization
-// ------------------------------------------------------------------
-// ------------------------------------------------------------------
-// ------------------------------------------------------------------
-
-   vNilJSONValue:=TBoxedNilJSONValue.Create;
-
-finalization
-
-   vNilJSONValue:=nil;
 
 end.

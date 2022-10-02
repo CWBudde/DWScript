@@ -1,0 +1,9 @@
+Hello
+True
+1234
+1.25
+False
+True
+null
+TObject
+True

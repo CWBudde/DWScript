@@ -99,6 +99,9 @@ type
          // Used by TSymbolDictionary. Not meaningful to make public (symbol is known).
          function FindSymbolAtPosition(aCol, aLine : Integer; const sourceFile : String) : TSymbol; overload;
 
+         procedure RemoveInRangeSingleUnit(const startPos, endPos : TScriptPos);
+         procedure RemoveInRangeMultipleUnits(const startPos, endPos : TScriptPos);
+
       public
          constructor Create(aDictionary : TdwsSymbolDictionary; aSymbol: TSymbol);
          destructor Destroy; override;
@@ -440,9 +443,9 @@ begin
    Result:=-1;
 end;
 
-// RemoveInRange
+// RemoveInRangeSingleUnit
 //
-procedure TSymbolPositionList.RemoveInRange(const startPos, endPos : TScriptPos);
+procedure TSymbolPositionList.RemoveInRangeSingleUnit(const startPos, endPos : TScriptPos);
 var
    i : Integer;
    symPos : TSymbolPosition;
@@ -454,6 +457,33 @@ begin
          Delete(i);
       end;
    end;
+end;
+
+// RemoveInRangeMultipleUnits
+//
+procedure TSymbolPositionList.RemoveInRangeMultipleUnits(const startPos, endPos : TScriptPos);
+var
+   i : Integer;
+   symPos : TSymbolPosition;
+begin
+   for i := FCount-1 downto 0 do begin
+      symPos := FPosList[i];
+      if     (startPos.SourceFile = symPos.ScriptPos.SourceFile)
+         and startPos.IsBeforeOrEqual(symPos.ScriptPos)
+         and symPos.ScriptPos.IsBeforeOrEqual(endPos) then begin
+         Delete(i);
+      end;
+   end;
+end;
+
+// RemoveInRange
+//
+procedure TSymbolPositionList.RemoveInRange(const startPos, endPos : TScriptPos);
+begin
+   if FSourceFile = nil then
+      RemoveInRangeMultipleUnits(startPos, endPos)
+   else if startPos.SourceFile = FSourceFile then
+      RemoveInRangeSingleUnit(startPos, endPos);
 end;
 
 // GetEnumerator
@@ -539,7 +569,8 @@ function TSymbolPositionListHash.MatchSymbol(sym : TSymbol) : TSymbolPositionLis
 var
    i : Integer;
 begin
-   if FCount = 0 then Exit(nil);
+   Result := nil;
+   if FCount = 0 then Exit;
 
    i := (SimplePointerHash(sym) and (FCapacity-1));
 
@@ -552,8 +583,6 @@ begin
       end;
       i := (i+1) and (FCapacity-1);
    until False;
-
-   Result := nil;
 end;
 
 // ------------------
@@ -566,6 +595,7 @@ constructor TdwsSymbolDictionary.Create;
 begin
    inherited;
    FHash := TSymbolPositionListHash.Create;
+   FHash.PreallocateCapacity(1024);
    FSymPosAllocator.Initialize;
 end;
 
@@ -807,11 +837,10 @@ var
 begin
    if startPos.SourceFile<>endPos.SourceFile then Exit;
 
-   for i:=0 to FHash.Capacity-1 do begin
-      if FHash.HashBucketValue(i, symPosList) then begin
-         if symPosList.FSourceFile=startPos.SourceFile then
-            symPosList.RemoveInRange(startPos, endPos);
-      end;
+//   for i := 0 to FHash.Capacity-1 do begin
+   for i := FHash.Capacity-1 downto 0 do begin
+      if FHash.HashBucketValue(i, symPosList) then
+         symPosList.RemoveInRange(startPos, endPos);
    end;
 end;
 

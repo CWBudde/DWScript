@@ -1186,9 +1186,13 @@ begin
                   +#9#9#9#9#9'{'#13#10
                   +#9#9#9#9#9#9'"Token" : "ttUSES",'#13#10
                   +#9#9#9#9#9#9'"Symbol" : null,'#13#10
-                  +#9#9#9#9#9#9'"SubContexts" : [ ]'#13#10
+                  +#9#9#9#9#9#9'"SubContexts" : [ ],'#13#10
+                  +#9#9#9#9#9#9'"Start" : " [line: 3, column: 1]",'#13#10
+                  +#9#9#9#9#9#9'"End" : " [line: 3, column: 14]"'#13#10
                   +#9#9#9#9#9'}'#13#10
-                  +#9#9#9#9']'#13#10
+                  +#9#9#9#9'],'#13#10
+                  +#9#9#9#9'"Start" : " [line: 2, column: 1]",'#13#10
+                  +#9#9#9#9'"End" : " [line: 4, column: 1]"'#13#10
                   +#9#9#9'},'#13#10
                   +#9#9#9'{'#13#10
                   +#9#9#9#9'"Token" : "ttIMPLEMENTATION",'#13#10
@@ -1196,9 +1200,13 @@ begin
                   +#9#9#9#9#9'"Class" : "TUnitMainSymbol",'#13#10
                   +#9#9#9#9#9'"Name" : "dummy"'#13#10
                   +#9#9#9#9'},'#13#10
-                  +#9#9#9#9'"SubContexts" : [ ]'#13#10
+                  +#9#9#9#9'"SubContexts" : [ ],'#13#10
+                  +#9#9#9#9'"Start" : " [line: 4, column: 1]",'#13#10
+                  +#9#9#9#9'"End" : " [line: 6, column: 1]"'#13#10
                   +#9#9#9'}'#13#10
-                  +#9#9']'#13#10
+                  +#9#9'],'#13#10
+                  +#9#9'"Start" : " [line: 1, column: 1]",'#13#10
+                  +#9#9'"End" : " [line: 6, column: 1]"'#13#10
                   +#9'}'#13#10
                   +']',
                   wobs.ToString, 'JSON map');
@@ -1812,6 +1820,7 @@ var
    prog : IdwsProgram;
    cls : TClassSymbol;
    prop : TPropertySymbol;
+   buf : String;
 begin
    prog:=FCompiler.Compile( 'type tobj = class(Tobject)'#13#10
                            +'Field : String;'#13#10
@@ -1825,7 +1834,9 @@ begin
    prop:=cls.Members.FindSymbol('Prop', cvMagic) as TPropertySymbol;
 
    CheckEquals('String', prop.DefaultSym.Typ.Name);
-   CheckEquals('hello', prop.DefaultSym.Data[0]);
+
+   prop.DefaultSym.DataContext.EvalAsString(0, buf);
+   CheckEquals('hello', buf);
 end;
 
 // SimpleStringListIndexOf

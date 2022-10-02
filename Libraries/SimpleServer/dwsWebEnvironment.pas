@@ -80,7 +80,7 @@ type
          function GetQueryFields : TStrings;
          function GetContentFields : TStrings;
 
-         function GetUserAgent : String;
+         function GetUserAgent : String; virtual;
 
          function GetAuthentication : TWebRequestAuthentication; virtual;
          function GetAuthenticatedUser : String; virtual;
@@ -302,9 +302,6 @@ const
       'None', 'Failed', 'Basic', 'Digest', 'NTLM', 'Negotiate', 'Kerberos', 'Header'
    );
 
-
-const
-
    cWebRequestMethodVerbs : array [TWebRequestMethodVerb] of String = (
       '?', 'OPTIONS', 'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'TRACE',
       'CONNECT', 'TRACK', 'MOVE', 'COPY', 'PROPFIND', 'PROPPATCH',
@@ -313,7 +310,13 @@ const
 
    cHTMTL_UTF8_CONTENT_TYPE = 'text/html; charset=utf-8';
 
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
 implementation
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
 
 // ------------------
 // ------------------ TWebEnvironmentHelper ------------------

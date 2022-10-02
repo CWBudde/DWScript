@@ -81,8 +81,11 @@ begin
 
    CollectFiles(ExtractFilePath(ParamStr(0))+'Algorithms'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'SimpleScripts'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'ArrayPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'AssociativePass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'BuildScripts'+PathDelim, dwsFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'InterfacesPass'+PathDelim, pasFilter, FTests);
+   CollectFiles(ExtractFilePath(ParamStr(0))+'InnerClassesPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'OverloadsPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'HelpersPass'+PathDelim, pasFilter, FTests);
    CollectFiles(ExtractFilePath(ParamStr(0))+'LambdaPass'+PathDelim, pasFilter, FTests);
@@ -335,6 +338,8 @@ begin
                     +'var $testResult = [];'#13#10
                     +'function Print(s) { if (s===true) $testResult.push("True"); '
                                         +'else if (s===false) $testResult.push("False"); '
+                                        +'else if (Array.isArray(s)) $testResult.push(JSON.stringify(s)); '
+                                        +'else if (s===null) $testResult.push("Null"); '
                                         +'else $testResult.push(s); }'#13#10
                     +'function PrintLn(s) { Print(s); $testResult.push("\r\n"); }'#13#10
                     +'try {'#13#10
@@ -343,10 +348,11 @@ begin
                     +#13#10
                     +'} catch(e) {$testResult.splice(0,0,"Errors >>>>\r\nRuntime Error: "+((e.ClassType)?e.FMessage:e.message)+"\r\nResult >>>>\r\n")};'#13#10
                     +'console.log($testResult.join(""));'#13#10
+                    +'console.log("HF7dGrJxgqfa7VPz");'#13#10 // ensure something is sent to the console
                     +'})();';
             FChromium.ClearLastResult;
 
-            //SaveTextToUTF8File('c:\temp\test.js', UTF8Encode(jscode));
+            //SaveTextToUTF8File('c:\temp\test.js', jscode);
 
             {// execute via node
             fileName:=GetTempFileName('dws');
@@ -359,7 +365,7 @@ begin
             }
 
             // execute via chromium
-            FChromium.ExecuteAndWait(jsCode, 'about:blank');
+            FChromium.ExecuteAndWait(jsCode, 'about:blank', 'HF7dGrJxgqfa7VPz');
             {
             FChromium.ExecuteJavaScript(jsCode, 'about:blank');
             for k := 1 to 300 do begin
@@ -376,6 +382,9 @@ begin
             //}
 
             output := FChromium.LastResult;
+            var p := Pos('HF7dGrJxgqfa7VPz', output);
+            if p > 0 then
+               SetLength(output, p-1);
             if prog.Msgs.Count > 0 then begin
                output := 'Errors >>>>'#13#10
                        + prog.Msgs.AsInfo

@@ -163,7 +163,8 @@ const
   CPE_ExternalArrayForStaticMethodsOnly = 'External array is supported only for static methods';
   CPE_ExternalVariablesMustBeGlobal = 'External variables must be global';
   CPE_ExternalClassVariablesInitializationIsNotSupported = 'External class variables initialization is not supported';
-  CPE_ExternalPropertyNoArguments = 'External properties cannot have arguments';
+  CPE_ExternalPropertyNoArguments = 'External properties can only have zero or one argument';
+  CPE_ExternalPropertyNoType = 'External properties require a type';
 
   CPE_GenericParametersNotSupportedHere = 'Generic parameters not supported here';
   CPE_GenericParametersListExpected = 'Generic parameters list expected';
@@ -197,6 +198,7 @@ const
   CPE_ClassOperatorRedefined = 'Class operator already defined for type "%s"';
   CPE_ClassVarRedefined = 'There is already a class variable with name "%s"';
   CPE_ClassConstRedefined = 'There is already a class const with name "%s"';
+  CPE_SymbolRedefined = 'There is already a symbol with name "%s"';
   CPE_ImplClassNameExpected = 'Class name expected';
   CPE_ImplInvalidClass = '"%s" is not a method of class "%s"';
   CPE_ImplAbstract = '"%s.%s" is declared "abstract", no implementation allowed';
@@ -339,6 +341,7 @@ const
   CPE_TypeExpected = 'Type expected';
   CPE_InvalidType = '%s is not a Type';
   CPE_UnknownMemberForType = 'There is no accessible member with name "%s" for type %s';
+  CPE_UnknownMethodForType = 'There is no accessible method with name "%s" for type %s';
   CPE_NoMemberExpected = 'No member expected';
   CPE_NoArrayExpected = 'Not an array';
   CPE_NoMethodExpected = 'Not a method';
@@ -365,7 +368,7 @@ const
   CPE_MatchingOverload = 'Overload of "%s" will be ambiguous with a previously declared version';
   CPH_AmbiguousMatchingOverloadsForCall = 'Ambiguous matching overloads of "%s"';
   CPE_OverloadNotAllowed = 'Overload not allowed';
-  CPE_ClassMethodExpected = 'Class method expected';
+  CPE_ClassMethodOrConstructorExpected = 'Class method or constructor expected';
   CPE_ClassMemberExpected = 'Class member expected';
   CPE_RecordTypeExpected = 'Record type expected';
   CPE_RecordTypeNotFullyDefined = 'Record type "%s" is not fully defined';
@@ -406,6 +409,7 @@ const
 
   CPH_EmptyThenBlock = 'Empty THEN block';
   CPH_EmptyElseBlock = 'Empty ELSE block';
+  CPH_BeginInCaseOfElseClause = 'Redundant "begin" in clause of a case..of';
 
   // TypeCheck
   CPE_BooleanExpected = 'Boolean expected';
@@ -427,6 +431,7 @@ const
   CPE_TypeCouldNotBeInferenced = 'Type could not be inferenced';
   CPE_RangeTooLarge = 'Range is too large';
   CPE_InvalidIntegerFormat = '"%s" is not a valid integer value';
+  CPE_InvalidIntegerBaseFormat = '"%s" is not a valid 64bit integer value in base %d';
   CPE_InvalidFloatFormat = '"%s" is not a valid floating point value';
 
   CPE_LocalFunctionAsDelegate = 'Local procedure/function cannot be used as delegate';
